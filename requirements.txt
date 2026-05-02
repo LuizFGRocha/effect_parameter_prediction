@@ -1,0 +1,14 @@
+numpy
+scipy
+librosa
+soundfile
+audioread
+pandas
+scikit-image
+scikit-learn
+joblib
+tensorflow
+matplotlib
+pyloudnorm
+pedalboard
+spafe

@@ -1,0 +1,6 @@
+.venv
+datasets
+results
+plugins
+*.md
+*.pyc
