@@ -49,12 +49,11 @@ class ProcessedRecordMetadata:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate unified fixed-order chain parameter dataset.")
-    parser.add_argument("--input-dir", required=True, help="Directory containing clean source wav files.")
+    parser.add_argument("--input-dir", default="datasets/unprocessed_samples")
     parser.add_argument("--output-dir", required=True, help="Output root for rendered chain wav files.")
     parser.add_argument(
         "--overdrive-plugin",
-        required=True,
-        help="Path to The Klone.vst3 (or equivalent overdrive plugin).",
+        default='plugins/The Klone.vst3'
     )
     parser.add_argument("--samples-per-file", type=int, default=8, help="Renders per source file per chain length.")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed for deterministic generation.")
@@ -62,12 +61,12 @@ def parse_args() -> argparse.Namespace:
         "--sampling-strategy",
         choices=["random", "stratified"],
         default="stratified",
-        help="Parameter sampling strategy in normalized [0,1] space.",
+        help="Parameter sampling strategy in normalized [0,1] space."
     )
     parser.add_argument(
-        "--allow-overdrive-fallback",
+        "--skip-overdrive-fallback",
         action="store_true",
-        help="If Klone VST3 fails to load, use built-in Distortion for pilot runs.",
+        help="If Klone VST3 fails to load, raises intead of using built-in Distortion.",
     )
     return parser.parse_args()
 
@@ -236,7 +235,7 @@ def create_dataset(args: argparse.Namespace) -> None:
     try:
         overdrive_plugin = load_plugin(str(Path(args.overdrive_plugin).resolve()))
     except Exception as exc:
-        if not args.allow_overdrive_fallback:
+        if args.skip_overdrive_fallback:
             raise RuntimeError(f"Failed to load overdrive plugin at {args.overdrive_plugin}: {exc}")
         print(f"Warning: failed to load overdrive plugin ({exc}). Using Distortion fallback.")
         overdrive_plugin = "builtin_distortion"

@@ -12,7 +12,7 @@ from typing import Dict
 import joblib
 import numpy as np
 from sklearn.model_selection import train_test_split
-from tensorflow.keras import layers, models, optimizers
+from tensorflow.python.keras import layers, models, optimizers
 from paper_chain_metadata_loader import (
     load_chain_dataset,
     parameter_names_for_chain,
@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--test-size", type=float, default=0.20)
     parser.add_argument("--split-seed", type=int, default=42)
-    parser.add_argument("--results-root", default='results', help="Optional output root for models and metrics.")
+    parser.add_argument("--results-root", default='results/default_results')
     parser.add_argument(
         "--chain-length",
         type=int,
@@ -203,7 +203,7 @@ def train_one_length(
 
 
 def cleanup_after_chain() -> None:
-    from tensorflow.keras import backend as K
+    from tensorflow.python.keras import backend as K
 
     K.clear_session()
     gc.collect()
