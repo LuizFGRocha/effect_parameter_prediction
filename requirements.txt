@@ -7,8 +7,9 @@ pandas
 scikit-image
 scikit-learn
 joblib
-tensorflow
+tensorflow[and-cuda]==2.21.0
 matplotlib
 pyloudnorm
 pedalboard
 spafe
+# For GPU support, install CUDA 12.5
