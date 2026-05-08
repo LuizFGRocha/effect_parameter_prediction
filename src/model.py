@@ -12,7 +12,7 @@ from typing import Dict
 import joblib
 import numpy as np
 from sklearn.model_selection import train_test_split
-from tensorflow.keras import layers, models, optimizers
+from tensorflow.keras import layers, models, optimizers # type: ignore
 from metadata_utils import (
     load_chain_dataset,
     parameter_names_for_chain,
@@ -203,7 +203,7 @@ def train_one_length(
 
 
 def cleanup_after_chain() -> None:
-    from tensorflow.keras import backend as K
+    from tensorflow.keras import backend as K # type: ignore
 
     K.clear_session()
     gc.collect()
