@@ -15,24 +15,81 @@ from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 import pyloudnorm as pyln
-from pedalboard import Chorus, Distortion, Pedalboard, Reverb, load_plugin
+from pedalboard import Chorus, Distortion, Pedalboard, Reverb, Phaser, Delay, load_plugin
 from pedalboard.io import AudioFile
 
 
 DEFAULT_LOUDNESS_LEVEL = -26.0
-CANONICAL_EFFECT_ORDER = ["overdrive", "chorus", "reverb"]
-
-EFFECT_CHAINS = {
-    1: ["overdrive"],
-    2: ["overdrive", "reverb"],
-    3: ["overdrive", "chorus", "reverb"],
-}
 
 EFFECT_PARAMETER_RANGES = {
-    "overdrive": [{"name": "gain", "min": 0.20, "max": 1.00}],
-    "chorus": [{"name": "mix", "min": 0.20, "max": 0.50}],
-    "reverb": [{"name": "room_size", "min": 0.20, "max": 0.70}],
+    "distortion": [
+        {"name": "drive_db", "min": 0.0, "max": 1.0},
+    ],
+    "chorus": [
+        {"name": "rate_hz", "min": 0.1, "max": 2.0},
+        {"name": "depth", "min": 0.0, "max": 0.4},
+        {"name": "mix", "min": 0.5, "max": 0.5},
+    ],
+    "vibrato": [
+        {"name": "rate_hz", "min": 0.1, "max": 3.0},
+        {"name": "depth", "min": 0.0, "max": 0.5},
+        {"name": "mix", "min": 1.0, "max": 1.0},
+        {"name": "feedback", "min": 0.0, "max": 0.0},
+    ],
+    "flanger": [
+        {"name": "rate_hz", "min": 0.1, "max": 3.0},
+        {"name": "depth", "min": 0.0, "max": 0.4},
+        {"name": "feedback", "min": 0.7, "max": 0.9},
+        {"name": "centre_delay_ms", "min": 0.1, "max": 3.0},
+    ],
+    "feedback_delay": [
+        {"name": "delay_seconds", "min": 0.1, "max": 5.0},
+        {"name": "feedback", "min": 0.0, "max": 0.9},
+        {"name": "mix", "min": 0.0, "max": 1.0},
+    ],
+    "slapback_delay": [
+        {"name": "delay_seconds", "min": 0.075, "max": 0.2},
+        {"name": "mix", "min": 0.0, "max": 1.0},
+        {"name": "feedback", "min": 0.0, "max": 0.0},
+    ],
+    "phaser": [
+        {"name": "rate_hz", "min": 0.1, "max": 4.0},
+        {"name": "depth", "min": 0.0, "max": 1.0},
+    ],
+    "reverb": [
+        {"name": "room_size", "min": 0.0, "max": 1.0},
+        {"name": "wet_level", "min": 0.5, "max": 0.5},
+        {"name": "dry_level", "min": 0.5, "max": 0.5},
+    ]
 }
+
+# plugins nativos do pedalboard (map keys to classes; keep consistent with EFFECT_PARAMETER_RANGES)
+BUILT_IN_PLUGINS = {
+    "distortion": Distortion,
+    "chorus": Chorus,
+    "vibrato": Chorus,  # use Chorus for vibrato-like modulation
+    "flanger": Chorus,  # approximate flanger with Chorus. ficou meio ruim.
+    "feedback_delay": Delay,
+    "slapback_delay": Delay,
+    "phaser": Phaser,
+    "reverb": Reverb,
+}
+
+# ordem canônica para efeitos em sequência
+CANONICAL_EFFECT_CHAIN_ORDER = ["distortion", "chorus", "slapback_delay"]
+
+# EFFECT_CHAINS: allow all single-effect chains, but only stack the canonical three
+EFFECT_CHAINS = (
+    [[effect] for effect in EFFECT_PARAMETER_RANGES.keys()]
+    + [
+        CANONICAL_EFFECT_CHAIN_ORDER[0:2],
+        CANONICAL_EFFECT_CHAIN_ORDER[1:3],
+        CANONICAL_EFFECT_CHAIN_ORDER[0:3],
+    ]
+)
+
+
+# (duplicate mapping removed above)
 
 
 @dataclass
@@ -51,23 +108,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate unified fixed-order chain parameter dataset.")
     parser.add_argument("--input-dir", default="datasets/unprocessed_samples")
     parser.add_argument("--output-dir", required=True, help="Output root for rendered chain wav files.")
-    parser.add_argument(
-        "--overdrive-plugin",
-        default='plugins/The Klone.vst3'
-    )
     parser.add_argument("--samples-per-file", type=int, default=8, help="Renders per source file per chain length.")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed for deterministic generation.")
-    parser.add_argument(
-        "--sampling-strategy",
-        choices=["random", "stratified"],
-        default="stratified",
-        help="Parameter sampling strategy in normalized [0,1] space."
-    )
-    parser.add_argument(
-        "--skip-overdrive-fallback",
-        action="store_true",
-        help="If Klone VST3 fails to load, raises intead of using built-in Distortion.",
-    )
+
     return parser.parse_args()
 
 
@@ -93,12 +136,12 @@ def export_audio(audio: np.ndarray, sr: int, path: Path) -> None:
 
 def effect_presence(chain_effects: Iterable[str]) -> Dict[str, int]:
     selected = set(chain_effects)
-    return {name: int(name in selected) for name in CANONICAL_EFFECT_ORDER}
+    return {name: int(name in selected) for name in EFFECT_PARAMETER_RANGES.keys()}
 
 
 def binary_suffix(chain_effects: Iterable[str]) -> str:
     selected = set(chain_effects)
-    bits = ["1" if effect in selected else "0" for effect in CANONICAL_EFFECT_ORDER]
+    bits = ["1" if effect in selected else "0" for effect in EFFECT_PARAMETER_RANGES.keys()]
     return "".join(bits)
 
 
@@ -127,49 +170,27 @@ def generate_parameter_matrix(
     rng: np.random.Generator,
     amount_of_samples: int,
     amount_of_parameters: int,
-    strategy: str,
 ) -> np.ndarray:
     """Sample a matrix of normalized parameter vectors in [0,1] space. Each row corresponds to a parameter vector for one chain instance (sample)."""
     
-    if strategy == "random":
-        return rng.random((amount_of_samples, amount_of_parameters), dtype=np.float64)
+    return rng.random((amount_of_samples, amount_of_parameters), dtype=np.float64)
 
-    # If not random, use stratified sampling: independently permute each dimension of a regular grid
-    # Maybe throw this away? 
-    samples = np.zeros((amount_of_samples, amount_of_parameters), dtype=np.float64)
-    for dim in range(amount_of_parameters):
-        perm = rng.permutation(amount_of_samples)
-        samples[:, dim] = (perm + rng.random(amount_of_samples)) / amount_of_samples
-    return samples
 
 
 def build_chain(
-    overdrive_plugin,
     chain_effects: List[str],
     raw_param_dict: Dict[str, Dict[str, float]],
 ):
     plugins = []
     for effect in chain_effects:
-        if effect == "overdrive":
-            gain = raw_param_dict["overdrive"]["gain"]
-            if hasattr(overdrive_plugin, "gain"):
-                overdrive_plugin.gain = gain
-                plugins.append(overdrive_plugin)
-            else:
-                drive_db = float(5.0 + (gain * 35.0))
-                plugins.append(Distortion(drive_db=drive_db))
-        elif effect == "chorus":
-            plugins.append(Chorus(mix=raw_param_dict["chorus"]["mix"]))
-        elif effect == "reverb":
-            plugins.append(
-                Reverb(
-                    wet_level=0.5,
-                    dry_level=0.5,
-                    room_size=raw_param_dict["reverb"]["room_size"],
-                )
-            )
+        if effect in BUILT_IN_PLUGINS:
+            plugin_class = BUILT_IN_PLUGINS[effect]
+            params = raw_param_dict[effect]
+            plugin = plugin_class(**params)
         else:
-            raise ValueError(f"Unsupported effect in chain: {effect}")
+            raise ValueError(f"Effect '{effect}' not recognized in built-in plugins.")
+        plugins.append(plugin)
+        
     return Pedalboard(plugins)
 
 
@@ -230,15 +251,6 @@ def create_dataset(args: argparse.Namespace) -> None:
     metadata_path = output_dir / "metadata.csv"
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    overdrive_plugin = None
-    try:
-        overdrive_plugin = load_plugin(str(Path(args.overdrive_plugin).resolve()))
-    except Exception as exc:
-        if args.skip_overdrive_fallback:
-            raise RuntimeError(f"Failed to load overdrive plugin at {args.overdrive_plugin}: {exc}")
-        print(f"Warning: failed to load overdrive plugin ({exc}). Using Distortion fallback.")
-        overdrive_plugin = "builtin_distortion"
         
     global_rng = np.random.default_rng(args.seed)
 
@@ -254,13 +266,13 @@ def create_dataset(args: argparse.Namespace) -> None:
         clean_audio_id = str(file.relative_to(input_dir))
         file_prefix = clean_audio_id_to_filename_prefix(clean_audio_id)
 
-        for chain_length, chain_effects in EFFECT_CHAINS.items():
+        for chain_effects in EFFECT_CHAINS:
+            chain_length = len(chain_effects)
             total_amount_of_parameters = sum(len(EFFECT_PARAMETER_RANGES[fx]) for fx in chain_effects)
             paramter_matrix = generate_parameter_matrix(
                 rng=global_rng,
                 amount_of_samples=args.samples_per_file,
                 amount_of_parameters=total_amount_of_parameters,
-                strategy=args.sampling_strategy,
             )
 
             for sample_index in range(args.samples_per_file):
@@ -274,7 +286,7 @@ def create_dataset(args: argparse.Namespace) -> None:
                     effect_parameter_dict[effect] = convert_normalized_to_raw(effect, parameter_list[offset : offset + amount_of_parameters])
                     offset += amount_of_parameters
 
-                board = build_chain(overdrive_plugin, chain_effects, effect_parameter_dict)
+                board = build_chain(chain_effects, effect_parameter_dict)
                 processed = board(normalized_clean_audio, sr)
                 processed = normalize_loudness(processed, sr)
 
