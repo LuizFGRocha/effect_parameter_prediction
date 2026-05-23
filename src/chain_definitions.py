@@ -8,8 +8,8 @@ EFFECT_PARAMETER_RANGES = {
         {"name": "drive_db", "min": 5.0, "max": 40.0},
     ],
     "chorus": [
-        {"name": "rate_hz", "min": 0.1, "max": 2.0},
-        {"name": "depth", "min": 0.0, "max": 0.4},
+        {"name": "rate_hz", "min": 0.1, "max": 4.0},
+        {"name": "depth", "min": 0.1, "max": 0.4},
         {"name": "mix", "min": 0.5, "max": 0.5, "predict": False},
     ],
     "vibrato": [
