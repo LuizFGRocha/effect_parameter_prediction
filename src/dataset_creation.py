@@ -12,7 +12,13 @@ import pyloudnorm as pyln
 from pedalboard import Chorus, Distortion, Pedalboard, Reverb, Phaser, Delay, load_plugin
 from pedalboard.io import AudioFile
 
-from chain_definitions import EFFECT_CHAINS, EFFECT_PARAMETER_RANGES, chain_key
+from chain_definitions import (
+    EFFECT_CHAINS,
+    EFFECT_PARAMETER_RANGES,
+    chain_key,
+    effect_fixed_params,
+    effect_predictable_params,
+)
 
 
 DEFAULT_LOUDNESS_LEVEL = -26.0
@@ -96,9 +102,9 @@ def iter_wav_files(root: Path) -> Iterable[Path]:
             yield path
 
 
-def convert_normalized_to_raw(effect: str, norm_values: List[float]) -> Dict[str, float]:
+def convert_normalized_to_raw(params: List[Dict[str, float]], norm_values: List[float]) -> Dict[str, float]:
     raw_values: Dict[str, float] = {}
-    for value, param in zip(norm_values, EFFECT_PARAMETER_RANGES[effect]):
+    for value, param in zip(norm_values, params):
         raw = param["min"] + (param["max"] - param["min"]) * float(value)
         raw_values[param["name"]] = float(raw)
     return raw_values
@@ -211,7 +217,7 @@ def create_dataset(args: argparse.Namespace) -> None:
         for chain_effects in EFFECT_CHAINS:
             chain_key_value = chain_key(chain_effects)
             chain_length = len(chain_effects)
-            total_amount_of_parameters = sum(len(EFFECT_PARAMETER_RANGES[fx]) for fx in chain_effects)
+            total_amount_of_parameters = sum(len(effect_predictable_params(fx)) for fx in chain_effects)
             paramter_matrix = generate_parameter_matrix(
                 rng=global_rng,
                 amount_of_samples=args.samples_per_file,
@@ -225,8 +231,14 @@ def create_dataset(args: argparse.Namespace) -> None:
                 effect_parameter_dict: Dict[str, Dict[str, float]] = {}
                 offset = 0
                 for effect in chain_effects:
-                    amount_of_parameters = len(EFFECT_PARAMETER_RANGES[effect])
-                    effect_parameter_dict[effect] = convert_normalized_to_raw(effect, parameter_list[offset : offset + amount_of_parameters])
+                    predictable_params = effect_predictable_params(effect)
+                    amount_of_parameters = len(predictable_params)
+                    effect_parameter_dict[effect] = convert_normalized_to_raw(
+                        predictable_params,
+                        parameter_list[offset : offset + amount_of_parameters],
+                    )
+                    for fixed_param in effect_fixed_params(effect):
+                        effect_parameter_dict[effect][fixed_param["name"]] = float(fixed_param["min"])
                     offset += amount_of_parameters
 
                 board = build_chain(chain_effects, effect_parameter_dict)

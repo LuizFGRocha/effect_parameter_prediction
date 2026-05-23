@@ -10,13 +10,13 @@ EFFECT_PARAMETER_RANGES = {
     "chorus": [
         {"name": "rate_hz", "min": 0.1, "max": 2.0},
         {"name": "depth", "min": 0.0, "max": 0.4},
-        {"name": "mix", "min": 0.5, "max": 0.5},
+        {"name": "mix", "min": 0.5, "max": 0.5, "predict": False},
     ],
     "vibrato": [
         {"name": "rate_hz", "min": 0.1, "max": 3.0},
         {"name": "depth", "min": 0.0, "max": 0.5},
-        {"name": "mix", "min": 1.0, "max": 1.0},
-        {"name": "feedback", "min": 0.0, "max": 0.0},
+        {"name": "mix", "min": 1.0, "max": 1.0, "predict": False},
+        {"name": "feedback", "min": 0.0, "max": 0.0, "predict": False},
     ],
     "flanger": [
         {"name": "rate_hz", "min": 0.1, "max": 3.0},
@@ -32,7 +32,7 @@ EFFECT_PARAMETER_RANGES = {
     "slapback_delay": [
         {"name": "delay_seconds", "min": 0.075, "max": 0.2},
         {"name": "mix", "min": 0.0, "max": 1.0},
-        {"name": "feedback", "min": 0.0, "max": 0.0},
+        {"name": "feedback", "min": 0.0, "max": 0.0, "predict": False},
     ],
     "phaser": [
         {"name": "rate_hz", "min": 0.1, "max": 4.0},
@@ -40,8 +40,8 @@ EFFECT_PARAMETER_RANGES = {
     ],
     "reverb": [
         {"name": "room_size", "min": 0.0, "max": 1.0},
-        {"name": "wet_level", "min": 0.5, "max": 0.5},
-        {"name": "dry_level", "min": 0.5, "max": 0.5},
+        {"name": "wet_level", "min": 0.5, "max": 0.5, "predict": False},
+        {"name": "dry_level", "min": 0.5, "max": 0.5, "predict": False},
     ],
 }
 
@@ -69,3 +69,11 @@ def chain_key_to_effects(chain_key_value: str) -> List[str]:
     if not chain_key_value:
         return []
     return chain_key_value.split(CHAIN_KEY_SEPARATOR)
+
+
+def effect_predictable_params(effect: str) -> List[dict]:
+    return [param for param in EFFECT_PARAMETER_RANGES[effect] if param.get("predict", True)]
+
+
+def effect_fixed_params(effect: str) -> List[dict]:
+    return [param for param in EFFECT_PARAMETER_RANGES[effect] if not param.get("predict", True)]

@@ -10,7 +10,7 @@ import pandas as pd
 from skimage.transform import rescale
 from spafe.features.gfcc import gfcc as sgfcc
 
-from chain_definitions import EFFECT_PARAMETER_RANGES, chain_key, chain_key_to_effects
+from chain_definitions import EFFECT_PARAMETER_RANGES, chain_key, chain_key_to_effects, effect_predictable_params
 
 FEATURE_NAMES = {"Spec", "MFCC40", "Chroma", "GFCC40"}
 
@@ -242,6 +242,6 @@ def parameter_names_for_chain(chain_key_value: str) -> List[str]:
     chain_effects = chain_key_to_effects(chain_key_value)
     names: List[str] = []
     for effect in chain_effects:
-        for param in EFFECT_PARAMETER_RANGES[effect]:
+        for param in effect_predictable_params(effect):
             names.append(f"{effect}_{param['name']}")
     return names
