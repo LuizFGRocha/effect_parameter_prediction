@@ -15,19 +15,26 @@ from chain_definitions import EFFECT_PARAMETER_RANGES, chain_key, chain_key_to_e
 FEATURE_NAMES = {"Spec", "MFCC40", "Chroma", "GFCC40"}
 
 
-def _extract_features(file_path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    y, sr = librosa.load(str(file_path), sr=None)
-    y = librosa.util.normalize(y)
-    y1, sr1 = librosa.load(str(file_path), sr=16000)
-    y1 = librosa.util.normalize(y1)
+def _extract_feature(file_path: Path, feature_name: str) -> np.ndarray:
+    if feature_name in {"Spec", "MFCC40", "Chroma"}:
+        y, sr = librosa.load(str(file_path), sr=None)
+        y = librosa.util.normalize(y)
 
-    spectrogram = np.abs(librosa.stft(y))
-    spectrogram = rescale(spectrogram, scale=(0.25, 1.0))
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
-    chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-    gfcc = sgfcc(y1, num_ceps=40, nfilts=80)
+        if feature_name == "Spec":
+            spectrogram = np.abs(librosa.stft(y))
+            return rescale(spectrogram, scale=(0.25, 1.0))
 
-    return spectrogram, mfcc, chroma, gfcc
+        if feature_name == "MFCC40":
+            return librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
+
+        return librosa.feature.chroma_stft(y=y, sr=sr)
+
+    if feature_name == "GFCC40":
+        y1, sr1 = librosa.load(str(file_path), sr=16000)
+        y1 = librosa.util.normalize(y1)
+        return sgfcc(y1, num_ceps=40, nfilts=80)
+
+    raise ValueError(f"Unsupported feature_name={feature_name}. Expected one of {sorted(FEATURE_NAMES)}")
 
 
 def _read_metadata(dataset_root: Path) -> pd.DataFrame:
@@ -57,79 +64,67 @@ def _chain_folder(dataset_root: Path, chain_key_value: str) -> Path:
     return folder
 
 
-def _feature_cache_files(chain_folder: Path) -> Dict[str, Path]:
-    return {
-        "Spec": chain_folder / "Spec.npz",
-        "MFCC40": chain_folder / "MFCC40.npz",
-        "Chroma": chain_folder / "Chroma.npz",
-        "GFCC40": chain_folder / "GFCC40.npz",
-        "file_names": chain_folder / "file_names.json",
-    }
+def _feature_cache_file(chain_folder: Path, feature_name: str) -> Path:
+    return chain_folder / f"{feature_name}.npz"
 
 
-def _all_cache_exists(cache_files: Dict[str, Path]) -> bool:
-    return all(path.exists() for path in cache_files.values())
+def _file_names_cache_file(chain_folder: Path) -> Path:
+    return chain_folder / "file_names.json"
 
 
-def _build_feature_cache(chain_folder: Path) -> Dict[str, np.ndarray]:
-    specs: List[np.ndarray] = []
-    mfccs: List[np.ndarray] = []
-    chromas: List[np.ndarray] = []
-    gfccs: List[np.ndarray] = []
+def _cache_exists(chain_folder: Path, feature_name: str) -> bool:
+    return _feature_cache_file(chain_folder, feature_name).exists() and _file_names_cache_file(chain_folder).exists()
+
+
+def _build_feature_cache(chain_folder: Path, feature_name: str) -> Dict[str, np.ndarray]:
+    features: List[np.ndarray] = []
 
     wav_files = sorted(path for path in chain_folder.glob("*.wav") if path.is_file())
     if not wav_files:
         raise RuntimeError(f"No wav files found in {chain_folder}")
 
     for wav_file in wav_files:
-        spec, mfcc, chroma, gfcc = _extract_features(wav_file)
-        specs.append(spec)
-        mfccs.append(mfcc)
-        chromas.append(chroma)
-        gfccs.append(gfcc)
+        features.append(_extract_feature(wav_file, feature_name))
+
+    feature_array = np.asarray(features, dtype=np.float32)
+    if feature_name == "GFCC40":
+        feature_array = np.swapaxes(feature_array, 1, 2)
 
     return {
-        "Spec": np.asarray(specs, dtype=np.float32),
-        "MFCC40": np.asarray(mfccs, dtype=np.float32),
-        "Chroma": np.asarray(chromas, dtype=np.float32),
-        "GFCC40": np.swapaxes(np.asarray(gfccs, dtype=np.float32), 1, 2),
+        feature_name: feature_array,
         "file_names": np.array([wav.name for wav in wav_files]),
     }
 
 
-def _save_cache(chain_folder: Path, cache: Dict[str, np.ndarray]) -> None:
-    cache_files = _feature_cache_files(chain_folder)
-    for feat in FEATURE_NAMES:
-        np.savez(cache_files[feat], cache[feat])
-    cache_files["file_names"].write_text(
+def _save_cache(chain_folder: Path, feature_name: str, cache: Dict[str, np.ndarray]) -> None:
+    np.savez(_feature_cache_file(chain_folder, feature_name), cache[feature_name])
+    _file_names_cache_file(chain_folder).write_text(
         json.dumps(cache["file_names"].tolist(), indent=2),
         encoding="utf-8",
     )
 
 
-def _load_cache(chain_folder: Path) -> Dict[str, np.ndarray]:
-    cache_files = _feature_cache_files(chain_folder)
+def _load_cache(chain_folder: Path, feature_name: str) -> Dict[str, np.ndarray]:
     return {
-        "Spec": np.load(cache_files["Spec"])["arr_0"].astype(np.float32, copy=False),
-        "MFCC40": np.load(cache_files["MFCC40"])["arr_0"].astype(np.float32, copy=False),
-        "Chroma": np.load(cache_files["Chroma"])["arr_0"].astype(np.float32, copy=False),
-        "GFCC40": np.load(cache_files["GFCC40"])["arr_0"].astype(np.float32, copy=False),
-        "file_names": np.array(json.loads(cache_files["file_names"].read_text(encoding="utf-8"))),
+        feature_name: np.load(_feature_cache_file(chain_folder, feature_name))["arr_0"].astype(np.float32, copy=False),
+        "file_names": np.array(
+            json.loads(_file_names_cache_file(chain_folder).read_text(encoding="utf-8"))
+        ),
     }
 
 
 def ensure_feature_cache(
     dataset_root: Path,
     chain_key_value: str,
+    feature_name: str,
     force_rebuild: bool = False,
 ) -> Dict[str, np.ndarray]:
     chain_folder = _chain_folder(dataset_root, chain_key_value)
-    cache_files = _feature_cache_files(chain_folder)
-    if _all_cache_exists(cache_files) and not force_rebuild:
-        return _load_cache(chain_folder)
+    if _cache_exists(chain_folder, feature_name) and not force_rebuild:
+        return _load_cache(chain_folder, feature_name)
 
-    cache = _build_feature_cache(chain_folder)
-    _save_cache(chain_folder, cache)
+    cache = _build_feature_cache(chain_folder, feature_name)
+    _save_cache(chain_folder, feature_name, cache)
     return cache
 
 
@@ -154,7 +149,12 @@ def load_chain_dataset(
 
     root = Path(dataset_root).resolve()
     metadata = _ensure_chain_key(_read_metadata(root))
-    cache = ensure_feature_cache(root, chain_key_value, force_rebuild=force_rebuild_cache)
+    cache = ensure_feature_cache(
+        root,
+        chain_key_value,
+        feature_name=feature_name,
+        force_rebuild=force_rebuild_cache,
+    )
 
     file_names = cache["file_names"]
     lookup = _build_target_lookup(metadata, chain_key_value)
