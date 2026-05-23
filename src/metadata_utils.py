@@ -1,5 +1,3 @@
-"""Metadata-driven feature/label loader for fixed-order Paper chain datasets."""
-
 from __future__ import annotations
 
 import json
@@ -12,6 +10,7 @@ import pandas as pd
 from skimage.transform import rescale
 from spafe.features.gfcc import gfcc as sgfcc
 
+from chain_definitions import EFFECT_PARAMETER_RANGES, chain_key, chain_key_to_effects
 
 FEATURE_NAMES = {"Spec", "MFCC40", "Chroma", "GFCC40"}
 
@@ -38,8 +37,21 @@ def _read_metadata(dataset_root: Path) -> pd.DataFrame:
     return pd.read_csv(metadata_path)
 
 
-def _chain_folder(dataset_root: Path, chain_length: int) -> Path:
-    folder = dataset_root / f"L{chain_length}"
+def _ensure_chain_key(metadata: pd.DataFrame) -> pd.DataFrame:
+    if "chain_key" in metadata.columns:
+        return metadata
+
+    def _build_key(effect_order_value: str) -> str:
+        effects = json.loads(effect_order_value)
+        return chain_key(effects)
+
+    metadata = metadata.copy()
+    metadata["chain_key"] = metadata["effect_order"].apply(_build_key)
+    return metadata
+
+
+def _chain_folder(dataset_root: Path, chain_key_value: str) -> Path:
+    folder = dataset_root / chain_key_value
     if not folder.exists():
         raise FileNotFoundError(f"Missing chain folder: {folder}")
     return folder
@@ -108,10 +120,10 @@ def _load_cache(chain_folder: Path) -> Dict[str, np.ndarray]:
 
 def ensure_feature_cache(
     dataset_root: Path,
-    chain_length: int,
+    chain_key_value: str,
     force_rebuild: bool = False,
 ) -> Dict[str, np.ndarray]:
-    chain_folder = _chain_folder(dataset_root, chain_length)
+    chain_folder = _chain_folder(dataset_root, chain_key_value)
     cache_files = _feature_cache_files(chain_folder)
     if _all_cache_exists(cache_files) and not force_rebuild:
         return _load_cache(chain_folder)
@@ -121,8 +133,8 @@ def ensure_feature_cache(
     return cache
 
 
-def _build_target_lookup(metadata: pd.DataFrame, chain_length: int) -> Dict[str, List[float]]:
-    subset = metadata[metadata["chain_length"] == chain_length]
+def _build_target_lookup(metadata: pd.DataFrame, chain_key_value: str) -> Dict[str, List[float]]:
+    subset = metadata[metadata["chain_key"] == chain_key_value]
     lookup: Dict[str, List[float]] = {}
     for _, row in subset.iterrows():
         file_name = row["file_name"]
@@ -133,7 +145,7 @@ def _build_target_lookup(metadata: pd.DataFrame, chain_length: int) -> Dict[str,
 
 def load_chain_dataset(
     dataset_root: str,
-    chain_length: int,
+    chain_key_value: str,
     feature_name: str = "MFCC40",
     force_rebuild_cache: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -141,11 +153,11 @@ def load_chain_dataset(
         raise ValueError(f"Unsupported feature_name={feature_name}. Expected one of {sorted(FEATURE_NAMES)}")
 
     root = Path(dataset_root).resolve()
-    metadata = _read_metadata(root)
-    cache = ensure_feature_cache(root, chain_length, force_rebuild=force_rebuild_cache)
+    metadata = _ensure_chain_key(_read_metadata(root))
+    cache = ensure_feature_cache(root, chain_key_value, force_rebuild=force_rebuild_cache)
 
     file_names = cache["file_names"]
-    lookup = _build_target_lookup(metadata, chain_length)
+    lookup = _build_target_lookup(metadata, chain_key_value)
 
     missing = [name for name in file_names if name not in lookup]
     if missing:
@@ -165,10 +177,11 @@ def load_chain_dataset(
 
 def validate_sidecar_integrity(dataset_root: str) -> Dict[str, int]:
     root = Path(dataset_root).resolve()
-    metadata = _read_metadata(root)
+    metadata = _ensure_chain_key(_read_metadata(root))
 
     required_cols = {
         "file_name",
+        "chain_key",
         "chain_length",
         "effect_order",
         "effect_presence",
@@ -182,39 +195,53 @@ def validate_sidecar_integrity(dataset_root: str) -> Dict[str, int]:
         raise RuntimeError(f"Missing required metadata columns: {missing_cols}")
 
     counts: Dict[str, int] = {}
-    for chain_length in (1, 2, 3):
-        folder = _chain_folder(root, chain_length)
+    chain_keys = sorted(metadata["chain_key"].unique().tolist())
+    for chain_key_value in chain_keys:
+        folder = _chain_folder(root, chain_key_value)
         wavs = sorted(path.name for path in folder.glob("*.wav") if path.is_file())
-        rows = metadata[metadata["chain_length"] == chain_length]
+        rows = metadata[metadata["chain_key"] == chain_key_value]
 
         if len(wavs) != len(rows):
             raise RuntimeError(
-                f"Chain L{chain_length}: wav/metadata mismatch wav={len(wavs)} rows={len(rows)}"
+                f"Chain {chain_key_value}: wav/metadata mismatch wav={len(wavs)} rows={len(rows)}"
             )
 
         row_names = set(rows["file_name"].tolist())
         missing_rows = [name for name in wavs if name not in row_names]
         if missing_rows:
             raise RuntimeError(
-                f"Chain L{chain_length}: metadata missing for wav {missing_rows[0]}"
+                f"Chain {chain_key_value}: metadata missing for wav {missing_rows[0]}"
             )
 
         for _, row in rows.iterrows():
             vec = json.loads(row["normalized_parameter_vector"])
             if not all(0.0 <= float(v) <= 1.0 for v in vec):
                 raise RuntimeError(
-                    f"Chain L{chain_length}: normalized value outside [0,1] in {row['file_name']}"
+                    f"Chain {chain_key_value}: normalized value outside [0,1] in {row['file_name']}"
                 )
 
-        counts[f"L{chain_length}"] = len(wavs)
+        counts[chain_key_value] = len(wavs)
 
     return counts
 
 
-def parameter_names_for_chain(chain_length: int) -> List[str]:
-    mapping = {
-        1: ["overdrive_gain"],
-        2: ["overdrive_gain", "reverb_room_size"],
-        3: ["overdrive_gain", "chorus_mix", "reverb_room_size"],
-    }
-    return mapping[chain_length]
+def list_chain_keys(dataset_root: str) -> List[str]:
+    root = Path(dataset_root).resolve()
+    metadata = _ensure_chain_key(_read_metadata(root))
+    return sorted(metadata["chain_key"].unique().tolist())
+
+
+def chain_keys_for_length(dataset_root: str, chain_length: int) -> List[str]:
+    root = Path(dataset_root).resolve()
+    metadata = _ensure_chain_key(_read_metadata(root))
+    rows = metadata[metadata["chain_length"] == chain_length]
+    return sorted(rows["chain_key"].unique().tolist())
+
+
+def parameter_names_for_chain(chain_key_value: str) -> List[str]:
+    chain_effects = chain_key_to_effects(chain_key_value)
+    names: List[str] = []
+    for effect in chain_effects:
+        for param in EFFECT_PARAMETER_RANGES[effect]:
+            names.append(f"{effect}_{param['name']}")
+    return names

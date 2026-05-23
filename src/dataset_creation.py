@@ -1,9 +1,3 @@
-"""Create fixed-order multi-effect chain datasets with explicit parameter metadata.
-
-This script keeps the binary effect suffix in generated filenames (e.g. __101)
-while storing full parameter targets in a metadata CSV sidecar.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -18,50 +12,10 @@ import pyloudnorm as pyln
 from pedalboard import Chorus, Distortion, Pedalboard, Reverb, Phaser, Delay, load_plugin
 from pedalboard.io import AudioFile
 
+from chain_definitions import EFFECT_CHAINS, EFFECT_PARAMETER_RANGES, chain_key
+
 
 DEFAULT_LOUDNESS_LEVEL = -26.0
-
-EFFECT_PARAMETER_RANGES = {
-    "distortion": [
-        {"name": "drive_db", "min": 0.0, "max": 1.0},
-    ],
-    "chorus": [
-        {"name": "rate_hz", "min": 0.1, "max": 2.0},
-        {"name": "depth", "min": 0.0, "max": 0.4},
-        {"name": "mix", "min": 0.5, "max": 0.5},
-    ],
-    "vibrato": [
-        {"name": "rate_hz", "min": 0.1, "max": 3.0},
-        {"name": "depth", "min": 0.0, "max": 0.5},
-        {"name": "mix", "min": 1.0, "max": 1.0},
-        {"name": "feedback", "min": 0.0, "max": 0.0},
-    ],
-    "flanger": [
-        {"name": "rate_hz", "min": 0.1, "max": 3.0},
-        {"name": "depth", "min": 0.0, "max": 0.4},
-        {"name": "feedback", "min": 0.7, "max": 0.9},
-        {"name": "centre_delay_ms", "min": 0.1, "max": 3.0},
-    ],
-    "feedback_delay": [
-        {"name": "delay_seconds", "min": 0.1, "max": 5.0},
-        {"name": "feedback", "min": 0.0, "max": 0.9},
-        {"name": "mix", "min": 0.0, "max": 1.0},
-    ],
-    "slapback_delay": [
-        {"name": "delay_seconds", "min": 0.075, "max": 0.2},
-        {"name": "mix", "min": 0.0, "max": 1.0},
-        {"name": "feedback", "min": 0.0, "max": 0.0},
-    ],
-    "phaser": [
-        {"name": "rate_hz", "min": 0.1, "max": 4.0},
-        {"name": "depth", "min": 0.0, "max": 1.0},
-    ],
-    "reverb": [
-        {"name": "room_size", "min": 0.0, "max": 1.0},
-        {"name": "wet_level", "min": 0.5, "max": 0.5},
-        {"name": "dry_level", "min": 0.5, "max": 0.5},
-    ]
-}
 
 # plugins nativos do pedalboard (map keys to classes; keep consistent with EFFECT_PARAMETER_RANGES)
 BUILT_IN_PLUGINS = {
@@ -75,26 +29,10 @@ BUILT_IN_PLUGINS = {
     "reverb": Reverb,
 }
 
-# ordem canônica para efeitos em sequência
-CANONICAL_EFFECT_CHAIN_ORDER = ["distortion", "chorus", "slapback_delay"]
-
-# EFFECT_CHAINS: allow all single-effect chains, but only stack the canonical three
-EFFECT_CHAINS = (
-    [[effect] for effect in EFFECT_PARAMETER_RANGES.keys()]
-    + [
-        CANONICAL_EFFECT_CHAIN_ORDER[0:2],
-        CANONICAL_EFFECT_CHAIN_ORDER[1:3],
-        CANONICAL_EFFECT_CHAIN_ORDER[0:3],
-    ]
-)
-
-
-# (duplicate mapping removed above)
-
-
 @dataclass
 class ProcessedRecordMetadata:
     file_name: str
+    chain_key: str
     chain_length: int
     effect_order: List[str]
     effect_presence: Dict[str, int]
@@ -196,6 +134,7 @@ def build_chain(
 
 def make_record(
     output_name: str,
+    chain_key_value: str,
     chain_length: int,
     chain_effects: List[str],
     norm_vector: List[float],
@@ -205,6 +144,7 @@ def make_record(
 ) -> ProcessedRecordMetadata:
     return ProcessedRecordMetadata(
         file_name=output_name,
+        chain_key=chain_key_value,
         chain_length=chain_length,
         effect_order=chain_effects,
         effect_presence=effect_presence(chain_effects),
@@ -219,6 +159,7 @@ def write_metadata_csv(path: Path, records: List[ProcessedRecordMetadata]) -> No
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "file_name",
+        "chain_key",
         "chain_length",
         "effect_order",
         "effect_presence",
@@ -234,6 +175,7 @@ def write_metadata_csv(path: Path, records: List[ProcessedRecordMetadata]) -> No
             writer.writerow(
                 {
                     "file_name": item.file_name,
+                    "chain_key": item.chain_key,
                     "chain_length": item.chain_length,
                     "effect_order": json.dumps(item.effect_order),
                     "effect_presence": json.dumps(item.effect_presence, sort_keys=True),
@@ -267,6 +209,7 @@ def create_dataset(args: argparse.Namespace) -> None:
         file_prefix = clean_audio_id_to_filename_prefix(clean_audio_id)
 
         for chain_effects in EFFECT_CHAINS:
+            chain_key_value = chain_key(chain_effects)
             chain_length = len(chain_effects)
             total_amount_of_parameters = sum(len(EFFECT_PARAMETER_RANGES[fx]) for fx in chain_effects)
             paramter_matrix = generate_parameter_matrix(
@@ -292,7 +235,7 @@ def create_dataset(args: argparse.Namespace) -> None:
 
                 bits = binary_suffix(chain_effects)
                 output_name = f"{file_prefix}__{bits}__s{sample_index:04d}.wav"
-                chain_dir = output_dir / f"L{chain_length}"
+                chain_dir = output_dir / chain_key_value
                 chain_dir.mkdir(parents=True, exist_ok=True)
                 output_path = chain_dir / output_name
 
@@ -302,6 +245,7 @@ def create_dataset(args: argparse.Namespace) -> None:
                 records.append(
                     make_record(
                         output_name=output_name,
+                        chain_key_value=chain_key_value,
                         chain_length=chain_length,
                         chain_effects=chain_effects,
                         norm_vector=parameter_list,

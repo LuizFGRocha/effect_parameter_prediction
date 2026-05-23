@@ -1,5 +1,3 @@
-"""Train one CNN parameter-regression model per fixed chain length."""
-
 from __future__ import annotations
 
 import argparse
@@ -13,7 +11,10 @@ import joblib
 import numpy as np
 from sklearn.model_selection import train_test_split
 from tensorflow.keras import layers, models, optimizers # type: ignore
+from chain_definitions import chain_key_to_effects
 from metadata_utils import (
+    chain_keys_for_length,
+    list_chain_keys,
     load_chain_dataset,
     parameter_names_for_chain,
     validate_sidecar_integrity,
@@ -22,7 +23,7 @@ from metadata_utils import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train fixed-order chain parameter models.")
-    parser.add_argument("--dataset-root", required=True, help="Root folder containing metadata.csv and L1/L2/L3.")
+    parser.add_argument("--dataset-root", required=True, help="Root folder containing metadata.csv and chain folders.")
     parser.add_argument("--feature", default="MFCC40", choices=["Spec", "MFCC40", "Chroma", "GFCC40"])
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -30,11 +31,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split-seed", type=int, default=42)
     parser.add_argument("--results-root", default='results/default_results')
     parser.add_argument(
-        "--chain-length",
-        type=int,
-        choices=[1, 2, 3],
+        "--chain-key",
+        type=str,
         default=None,
-        help="Train only a specific chain length (1, 2 or 3). Defaults to all lengths.",
+        help="Train only a specific chain key (e.g. distortion__chorus).",
     )
     parser.add_argument(
         "--no-clear-session",
@@ -113,9 +113,9 @@ def create_model(
     return model
 
 
-def train_one_length(
+def train_one_chain(
     dataset_root: str,
-    chain_length: int,
+    chain_key_value: str,
     feature: str,
     epochs: int,
     batch_size: int,
@@ -124,9 +124,11 @@ def train_one_length(
     results_root: Path,
     rebuild_cache: bool,
 ) -> Dict[str, float]:
+    chain_effects = chain_key_to_effects(chain_key_value)
+    chain_length = len(chain_effects)
     X, y, file_names = load_chain_dataset(
         dataset_root,
-        chain_length,
+        chain_key_value,
         feature_name=feature,
         force_rebuild_cache=rebuild_cache,
     )
@@ -153,7 +155,7 @@ def train_one_length(
     mse = float(np.mean((pred - y_test) ** 2))
     mae = float(np.mean(np.abs(pred - y_test)))
 
-    out_dir = results_root / f"L{chain_length}"
+    out_dir = results_root / chain_key_value
     choose_path(out_dir)
 
     model.save(out_dir / "model.keras")
@@ -171,20 +173,22 @@ def train_one_length(
         json.dump({k: [float(v) for v in vals] for k, vals in history.history.items()}, handle, indent=2)
 
     metrics = {
+        "chain_key": chain_key_value,
         "chain_length": chain_length,
+        "effect_order": chain_effects,
         "feature": feature,
         "n_train": int(len(train_idx)),
         "n_test": int(len(test_idx)),
         "output_dim": int(y.shape[1]),
         "mae": mae,
         "mse": mse,
-        "parameter_names": parameter_names_for_chain(chain_length),
+        "parameter_names": parameter_names_for_chain(chain_key_value),
     }
     with (out_dir / "metrics.json").open("w", encoding="utf-8") as handle:
         json.dump(metrics, handle, indent=2)
 
     rows = []
-    param_names = parameter_names_for_chain(chain_length)
+    param_names = parameter_names_for_chain(chain_key_value)
     for index, file_name in enumerate(file_names[test_idx]):
         row = {"file_name": str(file_name)}
         for p_i, p_name in enumerate(param_names):
@@ -222,14 +226,20 @@ def main() -> None:
 
     choose_path(results_root)
 
-    chain_lengths = [args.chain_length] if args.chain_length is not None else [1, 2, 3]
+    if args.chain_key:
+        chain_keys = [args.chain_key]
+    else:
+        chain_keys = list_chain_keys(args.dataset_root)
+
+    if not chain_keys:
+        raise RuntimeError("No matching chains found in dataset metadata.")
 
     all_metrics = []
-    for chain_length in chain_lengths:
-        print(f"Training chain length L{chain_length}")
-        metrics = train_one_length(
+    for chain_key_value in chain_keys:
+        print(f"Training chain {chain_key_value}")
+        metrics = train_one_chain(
             dataset_root=args.dataset_root,
-            chain_length=chain_length,
+            chain_key_value=chain_key_value,
             feature=args.feature,
             epochs=args.epochs,
             batch_size=args.batch_size,
@@ -239,7 +249,7 @@ def main() -> None:
             rebuild_cache=args.rebuild_cache,
         )
         all_metrics.append(metrics)
-        print(f"L{chain_length} -> MAE={metrics['mae']:.4f}, MSE={metrics['mse']:.4f}")
+        print(f"{chain_key_value} -> MAE={metrics['mae']:.4f}, MSE={metrics['mse']:.4f}")
         if not args.no_clear_session:
             cleanup_after_chain()
 

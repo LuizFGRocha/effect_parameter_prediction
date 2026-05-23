@@ -1,5 +1,3 @@
-"""Evaluate fixed-chain models and compare L1/L2/L3 baselines."""
-
 from __future__ import annotations
 
 import argparse
@@ -15,7 +13,7 @@ import pandas as pd
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate Paper fixed-order chain models.")
-    parser.add_argument("--results-root", required=True, help="Folder containing L1/L2/L3 model outputs.")
+    parser.add_argument("--results-root", required=True, help="Folder containing per-chain model outputs.")
     return parser.parse_args()
 
 
@@ -35,9 +33,11 @@ def _parameter_columns(df: pd.DataFrame) -> List[str]:
     return sorted(col.replace("y_true_", "") for col in df.columns if col.startswith("y_true_"))
 
 
-def evaluate_length(length_dir: Path, chain_length: int) -> pd.DataFrame:
-    pred_df = _load_predictions(length_dir / "predictions.csv")
-    metrics = _load_metrics(length_dir / "metrics.json")
+def evaluate_chain(chain_dir: Path) -> pd.DataFrame:
+    pred_df = _load_predictions(chain_dir / "predictions.csv")
+    metrics = _load_metrics(chain_dir / "metrics.json")
+    chain_key_value = metrics.get("chain_key", chain_dir.name)
+    chain_length = int(metrics.get("chain_length", len(chain_key_value.split("__"))))
 
     params = _parameter_columns(pred_df)
     rows = []
@@ -48,6 +48,7 @@ def evaluate_length(length_dir: Path, chain_length: int) -> pd.DataFrame:
         mse = float(np.mean((y_pred - y_true) ** 2))
         rows.append(
             {
+                "chain_key": chain_key_value,
                 "chain_length": chain_length,
                 "parameter": param,
                 "mae": mae,
@@ -79,15 +80,19 @@ def plot_length_baseline(summary_df: pd.DataFrame, out_path: Path) -> None:
     plt.close(fig)
 
 
-def plot_estimated_vs_real(results_root: Path, out_path: Path) -> None:
+def plot_estimated_vs_real(results_root: Path, chain_dirs: List[Path], out_path: Path) -> None:
     frames = []
-    for chain_length in (1, 2, 3):
-        pred_df = _load_predictions(results_root / f"L{chain_length}" / "predictions.csv")
+    for chain_dir in chain_dirs:
+        pred_df = _load_predictions(chain_dir / "predictions.csv")
+        metrics = _load_metrics(chain_dir / "metrics.json")
+        chain_key_value = metrics.get("chain_key", chain_dir.name)
+        chain_length = int(metrics.get("chain_length", len(chain_key_value.split("__"))))
         params = _parameter_columns(pred_df)
         for param in params:
             frames.append(
                 pd.DataFrame(
                     {
+                        "chain_key": chain_key_value,
                         "chain_length": chain_length,
                         "parameter": param,
                         "real": pred_df[f"y_true_{param}"].to_numpy(dtype=np.float64),
@@ -112,16 +117,19 @@ def plot_estimated_vs_real(results_root: Path, out_path: Path) -> None:
     axis_max = max_value + padding
 
     colors = {1: "#1f77b4", 2: "#ff7f0e", 3: "#2ca02c"}
+    seen_labels = set()
     for axis, param in zip(axes.flat, parameters):
         param_df = plot_df[plot_df["parameter"] == param]
-        for chain_length, chain_df in param_df.groupby("chain_length"):
+        for (chain_key_value, chain_length), chain_df in param_df.groupby(["chain_key", "chain_length"]):
+            label = chain_key_value if chain_key_value not in seen_labels else None
+            seen_labels.add(chain_key_value)
             axis.scatter(
                 chain_df["real"],
                 chain_df["estimated"],
                 s=18,
                 alpha=0.65,
                 color=colors.get(int(chain_length), "#1f77b4"),
-                label=f"L{int(chain_length)}",
+                label=label,
             )
 
         axis.plot([axis_min, axis_max], [axis_min, axis_max], "k--", linewidth=1, label="Ideal")
@@ -146,10 +154,18 @@ def main() -> None:
     args = parse_args()
     results_root = Path(args.results_root).resolve()
 
+    chain_dirs = sorted(
+        path
+        for path in results_root.iterdir()
+        if path.is_dir() and (path / "metrics.json").exists() and (path / "predictions.csv").exists()
+    )
+
+    if not chain_dirs:
+        raise RuntimeError(f"No chain outputs found under {results_root}")
+
     all_rows = []
-    for chain_length in (1, 2, 3):
-        length_dir = results_root / f"L{chain_length}"
-        df = evaluate_length(length_dir, chain_length)
+    for chain_dir in chain_dirs:
+        df = evaluate_chain(chain_dir)
         all_rows.append(df)
 
     summary_df = pd.concat(all_rows, ignore_index=True)
@@ -160,7 +176,7 @@ def main() -> None:
     plot_length_baseline(summary_df, plot_path)
 
     parity_plot_path = results_root / "estimated_vs_real.png"
-    plot_estimated_vs_real(results_root, parity_plot_path)
+    plot_estimated_vs_real(results_root, chain_dirs, parity_plot_path)
 
     print(f"Saved comparison table: {summary_csv}")
     print(f"Saved baseline plot:     {plot_path}")
