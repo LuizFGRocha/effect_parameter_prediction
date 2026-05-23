@@ -93,7 +93,8 @@ def create_model(
     n_filters=6,
 ):
     model = models.Sequential()
-    model.add(layers.Conv2D(n_filters, kernel_size=kernel_size, activation="relu", input_shape=input_dim))
+    model.add(layers.Input(shape=input_dim))
+    model.add(layers.Conv2D(n_filters, kernel_size=kernel_size, activation="relu"))
     model.add(layers.BatchNormalization())
     model.add(layers.MaxPooling2D(pool_size=(2, 2)))
 
