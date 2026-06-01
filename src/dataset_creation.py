@@ -54,6 +54,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, help="Output root for rendered chain wav files.")
     parser.add_argument("--samples-per-file", type=int, default=8, help="Renders per source file per chain length.")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed for deterministic generation.")
+    parser.add_argument(
+        "--use-full-audio",
+        action="store_true",
+        help="If set, processes the entire audio file instead of a random segment.",
+    )
+    parser.add_argument(
+        "--segment-seconds",
+        type=float,
+        default=2.0,
+        help="Length of the random segment to render (in seconds).",
+    )
+    parser.add_argument(
+        "--ignore-start-seconds",
+        type=float,
+        default=0.5,
+        help="Amount of audio to ignore at the start (in seconds).",
+    )
+    parser.add_argument(
+        "--ignore-end-seconds",
+        type=float,
+        default=0.5,
+        help="Amount of audio to ignore at the end (in seconds).",
+    )
 
     return parser.parse_args()
 
@@ -64,6 +87,40 @@ def normalize_loudness(audio: np.ndarray, sr: int, loudness_level: float = DEFAU
     loudness = meter.integrated_loudness(flat)
     normalized = pyln.normalize.loudness(flat, loudness, loudness_level)
     return np.reshape(normalized, (1, np.shape(audio)[1]))
+
+
+def select_random_segment(
+    audio: np.ndarray,
+    sr: int,
+    rng: np.random.Generator,
+    segment_seconds: float,
+    ignore_start_seconds: float,
+    ignore_end_seconds: float,
+) -> np.ndarray:
+    if segment_seconds <= 0:
+        raise ValueError("segment_seconds must be > 0")
+    if ignore_start_seconds < 0 or ignore_end_seconds < 0:
+        raise ValueError("ignore_start_seconds and ignore_end_seconds must be >= 0")
+
+    total_frames = audio.shape[1]
+    segment_frames = int(round(segment_seconds * sr))
+    if segment_frames <= 0:
+        raise ValueError("segment_seconds is too small for the current sample rate")
+
+    min_start = int(round(ignore_start_seconds * sr))
+    max_end = total_frames - int(round(ignore_end_seconds * sr))
+    max_start = max_end - segment_frames
+    if max_start < min_start:
+        total_seconds = total_frames / sr
+        raise ValueError(
+            "Segment selection exceeds audio length. "
+            f"segment_seconds={segment_seconds}, ignore_start_seconds={ignore_start_seconds}, "
+            f"ignore_end_seconds={ignore_end_seconds}, audio_seconds={total_seconds:.3f}"
+        )
+
+    start = int(rng.integers(min_start, max_start + 1))
+    end = start + segment_frames
+    return audio[:, start:end]
 
 
 def load_audio_file(file_path: Path) -> Tuple[np.ndarray, int]:
@@ -210,7 +267,6 @@ def create_dataset(args: argparse.Namespace) -> None:
 
     for file in clean_audio_files:
         clean_audio, sr = load_audio_file(file)
-        normalized_clean_audio = normalize_loudness(clean_audio, sr)
         clean_audio_id = str(file.relative_to(input_dir))
         file_prefix = clean_audio_id_to_filename_prefix(clean_audio_id)
 
@@ -241,8 +297,22 @@ def create_dataset(args: argparse.Namespace) -> None:
                         effect_parameter_dict[effect][fixed_param["name"]] = float(fixed_param["min"])
                     offset += amount_of_parameters
 
+                if args.use_full_audio:
+                    segment = clean_audio
+                else:
+                    segment = select_random_segment(
+                        clean_audio,
+                        sr,
+                        global_rng,
+                        segment_seconds=args.segment_seconds,
+                        ignore_start_seconds=args.ignore_start_seconds,
+                        ignore_end_seconds=args.ignore_end_seconds,
+                    )
+                    
+                normalized_segment = normalize_loudness(segment, sr)
+
                 board = build_chain(chain_effects, effect_parameter_dict)
-                processed = board(normalized_clean_audio, sr)
+                processed = board(normalized_segment, sr)
                 processed = normalize_loudness(processed, sr)
 
                 bits = binary_suffix(chain_effects)
