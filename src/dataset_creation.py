@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
@@ -23,12 +25,11 @@ from chain_definitions import (
 
 DEFAULT_LOUDNESS_LEVEL = -26.0
 
-# plugins nativos do pedalboard (map keys to classes; keep consistent with EFFECT_PARAMETER_RANGES)
 BUILT_IN_PLUGINS = {
     "distortion": Distortion,
     "chorus": Chorus,
-    "vibrato": Chorus,  # use Chorus for vibrato-like modulation
-    "flanger": Chorus,  # approximate flanger with Chorus. ficou meio ruim.
+    "vibrato": Chorus,
+    "flanger": Chorus,
     "feedback_delay": Delay,
     "slapback_delay": Delay,
     "phaser": Phaser,
@@ -81,9 +82,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+@functools.lru_cache(maxsize=8)
+def get_meter(sr: int) -> pyln.Meter:
+    return pyln.Meter(sr)
+
+
 def normalize_loudness(audio: np.ndarray, sr: int, loudness_level: float = DEFAULT_LOUDNESS_LEVEL) -> np.ndarray:
     flat = np.reshape(audio, np.shape(audio)[1])
-    meter = pyln.Meter(sr)
+    meter = get_meter(sr)
     loudness = meter.integrated_loudness(flat)
     normalized = pyln.normalize.loudness(flat, loudness, loudness_level)
     return np.reshape(normalized, (1, np.shape(audio)[1]))
@@ -172,10 +178,7 @@ def generate_parameter_matrix(
     amount_of_samples: int,
     amount_of_parameters: int,
 ) -> np.ndarray:
-    """Sample a matrix of normalized parameter vectors in [0,1] space. Each row corresponds to a parameter vector for one chain instance (sample)."""
-    
     return rng.random((amount_of_samples, amount_of_parameters), dtype=np.float64)
-
 
 
 def build_chain(
@@ -250,92 +253,129 @@ def write_metadata_csv(path: Path, records: List[ProcessedRecordMetadata]) -> No
             )
 
 
+def process_file(
+    file: Path,
+    input_dir: Path,
+    output_dir: Path,
+    seed_sequence: np.random.SeedSequence,
+    samples_per_file: int,
+    use_full_audio: bool,
+    segment_seconds: float,
+    ignore_start_seconds: float,
+    ignore_end_seconds: float,
+) -> List[ProcessedRecordMetadata]:
+    records: List[ProcessedRecordMetadata] = []
+    file_rng = np.random.default_rng(seed_sequence)
+    
+    clean_audio, sr = load_audio_file(file)
+    clean_audio_id = str(file.relative_to(input_dir))
+    file_prefix = clean_audio_id_to_filename_prefix(clean_audio_id)
+
+    for chain_effects in EFFECT_CHAINS:
+        chain_key_value = chain_key(chain_effects)
+        chain_length = len(chain_effects)
+        total_amount_of_parameters = sum(len(effect_predictable_params(fx)) for fx in chain_effects)
+        parameter_matrix = generate_parameter_matrix(
+            rng=file_rng,
+            amount_of_samples=samples_per_file,
+            amount_of_parameters=total_amount_of_parameters,
+        )
+
+        for sample_index in range(samples_per_file):
+            sample_parameters = parameter_matrix[sample_index]
+            parameter_list = [float(v) for v in sample_parameters.tolist()]
+
+            effect_parameter_dict: Dict[str, Dict[str, float]] = {}
+            offset = 0
+            for effect in chain_effects:
+                predictable_params = effect_predictable_params(effect)
+                amount_of_parameters = len(predictable_params)
+                effect_parameter_dict[effect] = convert_normalized_to_raw(
+                    predictable_params,
+                    parameter_list[offset : offset + amount_of_parameters],
+                )
+                for fixed_param in effect_fixed_params(effect):
+                    effect_parameter_dict[effect][fixed_param["name"]] = float(fixed_param["min"])
+                offset += amount_of_parameters
+
+            if use_full_audio:
+                segment = clean_audio
+            else:
+                segment = select_random_segment(
+                    clean_audio,
+                    sr,
+                    file_rng,
+                    segment_seconds=segment_seconds,
+                    ignore_start_seconds=ignore_start_seconds,
+                    ignore_end_seconds=ignore_end_seconds,
+                )
+                
+            normalized_segment = normalize_loudness(segment, sr)
+
+            board = build_chain(chain_effects, effect_parameter_dict)
+            processed = board(normalized_segment, sr)
+            processed = normalize_loudness(processed, sr)
+
+            bits = binary_suffix(chain_effects)
+            output_name = f"{file_prefix}__{bits}__s{sample_index:04d}.wav"
+            chain_dir = output_dir / chain_key_value
+            chain_dir.mkdir(parents=True, exist_ok=True)
+            output_path = chain_dir / output_name
+
+            export_audio(processed, sr, output_path)
+
+            render_seed = int(file_rng.integers(0, np.iinfo(np.int32).max))
+            records.append(
+                make_record(
+                    output_name=output_name,
+                    chain_key_value=chain_key_value,
+                    chain_length=chain_length,
+                    chain_effects=chain_effects,
+                    norm_vector=parameter_list,
+                    raw_dict=effect_parameter_dict,
+                    source_audio_id=clean_audio_id,
+                    render_seed=render_seed,
+                )
+            )
+            
+    return records
+
+
 def create_dataset(args: argparse.Namespace) -> None:
     input_dir = Path(args.input_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
     metadata_path = output_dir / "metadata.csv"
 
     output_dir.mkdir(parents=True, exist_ok=True)
-        
-    global_rng = np.random.default_rng(args.seed)
-
-    records: List[ProcessedRecordMetadata] = []
 
     clean_audio_files = list(iter_wav_files(input_dir))
     if not clean_audio_files:
         raise RuntimeError(f"No wav files found under: {input_dir}")
 
-    for file in clean_audio_files:
-        clean_audio, sr = load_audio_file(file)
-        clean_audio_id = str(file.relative_to(input_dir))
-        file_prefix = clean_audio_id_to_filename_prefix(clean_audio_id)
+    seed_sequence = np.random.SeedSequence(args.seed)
+    child_seeds = seed_sequence.spawn(len(clean_audio_files))
 
-        for chain_effects in EFFECT_CHAINS:
-            chain_key_value = chain_key(chain_effects)
-            chain_length = len(chain_effects)
-            total_amount_of_parameters = sum(len(effect_predictable_params(fx)) for fx in chain_effects)
-            paramter_matrix = generate_parameter_matrix(
-                rng=global_rng,
-                amount_of_samples=args.samples_per_file,
-                amount_of_parameters=total_amount_of_parameters,
+    records: List[ProcessedRecordMetadata] = []
+
+    with ProcessPoolExecutor() as executor:
+        futures = [
+            executor.submit(
+                process_file,
+                file,
+                input_dir,
+                output_dir,
+                seed,
+                args.samples_per_file,
+                args.use_full_audio,
+                args.segment_seconds,
+                args.ignore_start_seconds,
+                args.ignore_end_seconds,
             )
+            for file, seed in zip(clean_audio_files, child_seeds)
+        ]
 
-            for sample_index in range(args.samples_per_file):
-                sample_parameters = paramter_matrix[sample_index]
-                parameter_list = [float(v) for v in sample_parameters.tolist()]
-
-                effect_parameter_dict: Dict[str, Dict[str, float]] = {}
-                offset = 0
-                for effect in chain_effects:
-                    predictable_params = effect_predictable_params(effect)
-                    amount_of_parameters = len(predictable_params)
-                    effect_parameter_dict[effect] = convert_normalized_to_raw(
-                        predictable_params,
-                        parameter_list[offset : offset + amount_of_parameters],
-                    )
-                    for fixed_param in effect_fixed_params(effect):
-                        effect_parameter_dict[effect][fixed_param["name"]] = float(fixed_param["min"])
-                    offset += amount_of_parameters
-
-                if args.use_full_audio:
-                    segment = clean_audio
-                else:
-                    segment = select_random_segment(
-                        clean_audio,
-                        sr,
-                        global_rng,
-                        segment_seconds=args.segment_seconds,
-                        ignore_start_seconds=args.ignore_start_seconds,
-                        ignore_end_seconds=args.ignore_end_seconds,
-                    )
-                    
-                normalized_segment = normalize_loudness(segment, sr)
-
-                board = build_chain(chain_effects, effect_parameter_dict)
-                processed = board(normalized_segment, sr)
-                processed = normalize_loudness(processed, sr)
-
-                bits = binary_suffix(chain_effects)
-                output_name = f"{file_prefix}__{bits}__s{sample_index:04d}.wav"
-                chain_dir = output_dir / chain_key_value
-                chain_dir.mkdir(parents=True, exist_ok=True)
-                output_path = chain_dir / output_name
-
-                export_audio(processed, sr, output_path)
-
-                render_seed = int(global_rng.integers(0, np.iinfo(np.int32).max))
-                records.append(
-                    make_record(
-                        output_name=output_name,
-                        chain_key_value=chain_key_value,
-                        chain_length=chain_length,
-                        chain_effects=chain_effects,
-                        norm_vector=parameter_list,
-                        raw_dict=effect_parameter_dict,
-                        source_audio_id=clean_audio_id,
-                        render_seed=render_seed,
-                    )
-                )
+        for future in as_completed(futures):
+            records.extend(future.result())
 
     write_metadata_csv(metadata_path, records)
     print(f"Rendered {len(records)} files")
