@@ -341,7 +341,7 @@ def process_file(
     return records
 
 
-def create_dataset(args: argparse.Namespace) -> None:
+def generate_dataset(args: argparse.Namespace) -> None:
     input_dir = Path(args.input_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
     metadata_path = output_dir / "metadata.csv"
@@ -385,4 +385,4 @@ def create_dataset(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     args = parse_args()
-    create_dataset(args)
+    generate_dataset(args)
