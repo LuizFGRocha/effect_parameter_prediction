@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate unified fixed-order chain parameter dataset.")
     parser.add_argument("--input-dir", default="datasets/unprocessed_samples")
     parser.add_argument("--output-dir", required=True, help="Output root for rendered chain wav files.")
-    parser.add_argument("--samples-per-file", type=int, default=8, help="Renders per source file per chain length.")
+    parser.add_argument("--samples-per-file", type=int, default=56, help="Renders per source file per chain length.")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed for deterministic generation.")
     parser.add_argument(
         "--use-full-audio",
