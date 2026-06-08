@@ -25,7 +25,7 @@ EFFECT_PARAMETER_RANGES = {
         {"name": "centre_delay_ms", "min": 0.1, "max": 3.0},
     ],
     "feedback_delay": [
-        {"name": "delay_seconds", "min": 0.1, "max": 5.0},
+        {"name": "delay_seconds", "min": 0.1, "max": 0.9},
         {"name": "feedback", "min": 0.0, "max": 0.9},
         {"name": "mix", "min": 0.0, "max": 1.0},
     ],
