@@ -1,0 +1,16 @@
+{
+  "chain_key": "reverb",
+  "chain_length": 1,
+  "effect_order": [
+    "reverb"
+  ],
+  "feature": "MFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 1,
+  "mae": 0.06449422985315323,
+  "mse": 0.006930842529982328,
+  "parameter_names": [
+    "reverb_room_size"
+  ]
+}

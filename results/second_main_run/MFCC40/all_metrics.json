@@ -1,0 +1,200 @@
+[
+  {
+    "chain_key": "chorus",
+    "chain_length": 1,
+    "effect_order": [
+      "chorus"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.12903082370758057,
+    "mse": 0.03312864527106285,
+    "parameter_names": [
+      "chorus_rate_hz",
+      "chorus_depth"
+    ]
+  },
+  {
+    "chain_key": "chorus__slapback_delay",
+    "chain_length": 2,
+    "effect_order": [
+      "chorus",
+      "slapback_delay"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 4,
+    "mae": 0.15068797767162323,
+    "mse": 0.040917444974184036,
+    "parameter_names": [
+      "chorus_rate_hz",
+      "chorus_depth",
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "distortion",
+    "chain_length": 1,
+    "effect_order": [
+      "distortion"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 1,
+    "mae": 0.038381557911634445,
+    "mse": 0.0026720166206359863,
+    "parameter_names": [
+      "distortion_drive_db"
+    ]
+  },
+  {
+    "chain_key": "distortion__chorus",
+    "chain_length": 2,
+    "effect_order": [
+      "distortion",
+      "chorus"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 3,
+    "mae": 0.11900597810745239,
+    "mse": 0.028606608510017395,
+    "parameter_names": [
+      "distortion_drive_db",
+      "chorus_rate_hz",
+      "chorus_depth"
+    ]
+  },
+  {
+    "chain_key": "distortion__chorus__slapback_delay",
+    "chain_length": 3,
+    "effect_order": [
+      "distortion",
+      "chorus",
+      "slapback_delay"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 5,
+    "mae": 0.1413813680410385,
+    "mse": 0.03701101243495941,
+    "parameter_names": [
+      "distortion_drive_db",
+      "chorus_rate_hz",
+      "chorus_depth",
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "feedback_delay",
+    "chain_length": 1,
+    "effect_order": [
+      "feedback_delay"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 3,
+    "mae": 0.14872398972511292,
+    "mse": 0.04051682725548744,
+    "parameter_names": [
+      "feedback_delay_delay_seconds",
+      "feedback_delay_feedback",
+      "feedback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "flanger",
+    "chain_length": 1,
+    "effect_order": [
+      "flanger"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 4,
+    "mae": 0.10571960359811783,
+    "mse": 0.023939315229654312,
+    "parameter_names": [
+      "flanger_rate_hz",
+      "flanger_depth",
+      "flanger_feedback",
+      "flanger_centre_delay_ms"
+    ]
+  },
+  {
+    "chain_key": "phaser",
+    "chain_length": 1,
+    "effect_order": [
+      "phaser"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.037830278277397156,
+    "mse": 0.004310199990868568,
+    "parameter_names": [
+      "phaser_rate_hz",
+      "phaser_depth"
+    ]
+  },
+  {
+    "chain_key": "reverb",
+    "chain_length": 1,
+    "effect_order": [
+      "reverb"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 1,
+    "mae": 0.06449422985315323,
+    "mse": 0.006930842529982328,
+    "parameter_names": [
+      "reverb_room_size"
+    ]
+  },
+  {
+    "chain_key": "slapback_delay",
+    "chain_length": 1,
+    "effect_order": [
+      "slapback_delay"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.09435483813285828,
+    "mse": 0.018446829169988632,
+    "parameter_names": [
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "vibrato",
+    "chain_length": 1,
+    "effect_order": [
+      "vibrato"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.1608656793832779,
+    "mse": 0.05040568858385086,
+    "parameter_names": [
+      "vibrato_rate_hz",
+      "vibrato_depth"
+    ]
+  }
+]

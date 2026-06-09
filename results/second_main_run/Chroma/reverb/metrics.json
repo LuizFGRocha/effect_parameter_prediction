@@ -1,0 +1,16 @@
+{
+  "chain_key": "reverb",
+  "chain_length": 1,
+  "effect_order": [
+    "reverb"
+  ],
+  "feature": "Chroma",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 1,
+  "mae": 0.14779824018478394,
+  "mse": 0.035387590527534485,
+  "parameter_names": [
+    "reverb_room_size"
+  ]
+}

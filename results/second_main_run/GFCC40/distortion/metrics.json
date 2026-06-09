@@ -1,0 +1,16 @@
+{
+  "chain_key": "distortion",
+  "chain_length": 1,
+  "effect_order": [
+    "distortion"
+  ],
+  "feature": "GFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 1,
+  "mae": 0.04590751603245735,
+  "mse": 0.0032822208013385534,
+  "parameter_names": [
+    "distortion_drive_db"
+  ]
+}

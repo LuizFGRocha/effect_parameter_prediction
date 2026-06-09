@@ -1,0 +1,17 @@
+{
+  "chain_key": "chorus",
+  "chain_length": 1,
+  "effect_order": [
+    "chorus"
+  ],
+  "feature": "GFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 2,
+  "mae": 0.07254581153392792,
+  "mse": 0.013771447353065014,
+  "parameter_names": [
+    "chorus_rate_hz",
+    "chorus_depth"
+  ]
+}

@@ -1,0 +1,200 @@
+[
+  {
+    "chain_key": "chorus",
+    "chain_length": 1,
+    "effect_order": [
+      "chorus"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.07254581153392792,
+    "mse": 0.013771447353065014,
+    "parameter_names": [
+      "chorus_rate_hz",
+      "chorus_depth"
+    ]
+  },
+  {
+    "chain_key": "chorus__slapback_delay",
+    "chain_length": 2,
+    "effect_order": [
+      "chorus",
+      "slapback_delay"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 4,
+    "mae": 0.13111098110675812,
+    "mse": 0.0338236540555954,
+    "parameter_names": [
+      "chorus_rate_hz",
+      "chorus_depth",
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "distortion",
+    "chain_length": 1,
+    "effect_order": [
+      "distortion"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 1,
+    "mae": 0.04590751603245735,
+    "mse": 0.0032822208013385534,
+    "parameter_names": [
+      "distortion_drive_db"
+    ]
+  },
+  {
+    "chain_key": "distortion__chorus",
+    "chain_length": 2,
+    "effect_order": [
+      "distortion",
+      "chorus"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 3,
+    "mae": 0.07792223244905472,
+    "mse": 0.014089121483266354,
+    "parameter_names": [
+      "distortion_drive_db",
+      "chorus_rate_hz",
+      "chorus_depth"
+    ]
+  },
+  {
+    "chain_key": "distortion__chorus__slapback_delay",
+    "chain_length": 3,
+    "effect_order": [
+      "distortion",
+      "chorus",
+      "slapback_delay"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 5,
+    "mae": 0.12403794378042221,
+    "mse": 0.030180824920535088,
+    "parameter_names": [
+      "distortion_drive_db",
+      "chorus_rate_hz",
+      "chorus_depth",
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "feedback_delay",
+    "chain_length": 1,
+    "effect_order": [
+      "feedback_delay"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 3,
+    "mae": 0.1545567810535431,
+    "mse": 0.044963885098695755,
+    "parameter_names": [
+      "feedback_delay_delay_seconds",
+      "feedback_delay_feedback",
+      "feedback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "flanger",
+    "chain_length": 1,
+    "effect_order": [
+      "flanger"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 4,
+    "mae": 0.12659427523612976,
+    "mse": 0.031589772552251816,
+    "parameter_names": [
+      "flanger_rate_hz",
+      "flanger_depth",
+      "flanger_feedback",
+      "flanger_centre_delay_ms"
+    ]
+  },
+  {
+    "chain_key": "phaser",
+    "chain_length": 1,
+    "effect_order": [
+      "phaser"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.04750450700521469,
+    "mse": 0.007316144648939371,
+    "parameter_names": [
+      "phaser_rate_hz",
+      "phaser_depth"
+    ]
+  },
+  {
+    "chain_key": "reverb",
+    "chain_length": 1,
+    "effect_order": [
+      "reverb"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 1,
+    "mae": 0.09752894192934036,
+    "mse": 0.016460806131362915,
+    "parameter_names": [
+      "reverb_room_size"
+    ]
+  },
+  {
+    "chain_key": "slapback_delay",
+    "chain_length": 1,
+    "effect_order": [
+      "slapback_delay"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.10481186956167221,
+    "mse": 0.02494349144399166,
+    "parameter_names": [
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "vibrato",
+    "chain_length": 1,
+    "effect_order": [
+      "vibrato"
+    ],
+    "feature": "GFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.1376737803220749,
+    "mse": 0.04231233894824982,
+    "parameter_names": [
+      "vibrato_rate_hz",
+      "vibrato_depth"
+    ]
+  }
+]

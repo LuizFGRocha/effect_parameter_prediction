@@ -1,0 +1,17 @@
+{
+  "chain_key": "chorus",
+  "chain_length": 1,
+  "effect_order": [
+    "chorus"
+  ],
+  "feature": "Chroma",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 2,
+  "mae": 0.12609857320785522,
+  "mse": 0.03050144761800766,
+  "parameter_names": [
+    "chorus_rate_hz",
+    "chorus_depth"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "chain_key": "vibrato",
+  "chain_length": 1,
+  "effect_order": [
+    "vibrato"
+  ],
+  "feature": "Chroma",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 2,
+  "mae": 0.1311413049697876,
+  "mse": 0.034926217049360275,
+  "parameter_names": [
+    "vibrato_rate_hz",
+    "vibrato_depth"
+  ]
+}

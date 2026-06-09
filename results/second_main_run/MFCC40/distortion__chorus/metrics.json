@@ -1,0 +1,19 @@
+{
+  "chain_key": "distortion__chorus",
+  "chain_length": 2,
+  "effect_order": [
+    "distortion",
+    "chorus"
+  ],
+  "feature": "MFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 3,
+  "mae": 0.11900597810745239,
+  "mse": 0.028606608510017395,
+  "parameter_names": [
+    "distortion_drive_db",
+    "chorus_rate_hz",
+    "chorus_depth"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "chain_key": "vibrato",
+  "chain_length": 1,
+  "effect_order": [
+    "vibrato"
+  ],
+  "feature": "Spec",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 2,
+  "mae": 0.10711976140737534,
+  "mse": 0.02758650854229927,
+  "parameter_names": [
+    "vibrato_rate_hz",
+    "vibrato_depth"
+  ]
+}

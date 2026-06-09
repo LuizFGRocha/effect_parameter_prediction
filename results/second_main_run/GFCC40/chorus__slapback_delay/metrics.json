@@ -1,0 +1,20 @@
+{
+  "chain_key": "chorus__slapback_delay",
+  "chain_length": 2,
+  "effect_order": [
+    "chorus",
+    "slapback_delay"
+  ],
+  "feature": "GFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 4,
+  "mae": 0.13111098110675812,
+  "mse": 0.0338236540555954,
+  "parameter_names": [
+    "chorus_rate_hz",
+    "chorus_depth",
+    "slapback_delay_delay_seconds",
+    "slapback_delay_mix"
+  ]
+}

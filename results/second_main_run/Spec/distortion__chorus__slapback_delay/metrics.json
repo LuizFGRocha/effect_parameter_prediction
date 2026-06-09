@@ -1,0 +1,22 @@
+{
+  "chain_key": "distortion__chorus__slapback_delay",
+  "chain_length": 3,
+  "effect_order": [
+    "distortion",
+    "chorus",
+    "slapback_delay"
+  ],
+  "feature": "Spec",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 5,
+  "mae": 0.10478029400110245,
+  "mse": 0.02310904860496521,
+  "parameter_names": [
+    "distortion_drive_db",
+    "chorus_rate_hz",
+    "chorus_depth",
+    "slapback_delay_delay_seconds",
+    "slapback_delay_mix"
+  ]
+}

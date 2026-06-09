@@ -1,0 +1,17 @@
+{
+  "chain_key": "vibrato",
+  "chain_length": 1,
+  "effect_order": [
+    "vibrato"
+  ],
+  "feature": "MFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 2,
+  "mae": 0.1608656793832779,
+  "mse": 0.05040568858385086,
+  "parameter_names": [
+    "vibrato_rate_hz",
+    "vibrato_depth"
+  ]
+}

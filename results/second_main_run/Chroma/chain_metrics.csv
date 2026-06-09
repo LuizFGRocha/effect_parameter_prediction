@@ -1,0 +1,12 @@
+chain_key,chain_length,effect_order,feature,n_train,n_test,output_dim,mae,mse
+chorus,1,"[""chorus""]",Chroma,17920,4480,2,0.12609857320785522,0.03050144761800766
+chorus__slapback_delay,2,"[""chorus"", ""slapback_delay""]",Chroma,17920,4480,4,0.1756381243467331,0.04992974177002907
+distortion,1,"[""distortion""]",Chroma,17920,4480,1,0.1860899031162262,0.0548311322927475
+distortion__chorus,2,"[""distortion"", ""chorus""]",Chroma,17920,4480,3,0.16453734040260315,0.04668769985437393
+distortion__chorus__slapback_delay,3,"[""distortion"", ""chorus"", ""slapback_delay""]",Chroma,17920,4480,5,0.19960032403469086,0.06169348582625389
+feedback_delay,1,"[""feedback_delay""]",Chroma,17920,4480,3,0.1864599734544754,0.055250294506549835
+flanger,1,"[""flanger""]",Chroma,17920,4480,4,0.17222996056079865,0.04892539978027344
+phaser,1,"[""phaser""]",Chroma,17920,4480,2,0.12856388092041016,0.033049531280994415
+reverb,1,"[""reverb""]",Chroma,17920,4480,1,0.14779824018478394,0.035387590527534485
+slapback_delay,1,"[""slapback_delay""]",Chroma,17920,4480,2,0.156367227435112,0.042155858129262924
+vibrato,1,"[""vibrato""]",Chroma,17920,4480,2,0.1311413049697876,0.034926217049360275

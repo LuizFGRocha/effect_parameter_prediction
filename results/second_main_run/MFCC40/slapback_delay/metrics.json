@@ -1,0 +1,17 @@
+{
+  "chain_key": "slapback_delay",
+  "chain_length": 1,
+  "effect_order": [
+    "slapback_delay"
+  ],
+  "feature": "MFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 2,
+  "mae": 0.09435483813285828,
+  "mse": 0.018446829169988632,
+  "parameter_names": [
+    "slapback_delay_delay_seconds",
+    "slapback_delay_mix"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "chain_key": "reverb",
+  "chain_length": 1,
+  "effect_order": [
+    "reverb"
+  ],
+  "feature": "GFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 1,
+  "mae": 0.09752894192934036,
+  "mse": 0.016460806131362915,
+  "parameter_names": [
+    "reverb_room_size"
+  ]
+}

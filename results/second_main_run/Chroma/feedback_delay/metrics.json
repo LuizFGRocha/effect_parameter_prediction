@@ -1,0 +1,18 @@
+{
+  "chain_key": "feedback_delay",
+  "chain_length": 1,
+  "effect_order": [
+    "feedback_delay"
+  ],
+  "feature": "Chroma",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 3,
+  "mae": 0.1864599734544754,
+  "mse": 0.055250294506549835,
+  "parameter_names": [
+    "feedback_delay_delay_seconds",
+    "feedback_delay_feedback",
+    "feedback_delay_mix"
+  ]
+}

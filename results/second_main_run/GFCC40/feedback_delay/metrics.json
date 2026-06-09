@@ -1,0 +1,18 @@
+{
+  "chain_key": "feedback_delay",
+  "chain_length": 1,
+  "effect_order": [
+    "feedback_delay"
+  ],
+  "feature": "GFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 3,
+  "mae": 0.1545567810535431,
+  "mse": 0.044963885098695755,
+  "parameter_names": [
+    "feedback_delay_delay_seconds",
+    "feedback_delay_feedback",
+    "feedback_delay_mix"
+  ]
+}

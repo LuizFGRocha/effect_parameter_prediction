@@ -1,0 +1,19 @@
+{
+  "chain_key": "flanger",
+  "chain_length": 1,
+  "effect_order": [
+    "flanger"
+  ],
+  "feature": "MFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 4,
+  "mae": 0.10571960359811783,
+  "mse": 0.023939315229654312,
+  "parameter_names": [
+    "flanger_rate_hz",
+    "flanger_depth",
+    "flanger_feedback",
+    "flanger_centre_delay_ms"
+  ]
+}
