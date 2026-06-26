@@ -26,3 +26,6 @@ for feature in "${FEATURES[@]}"; do
   python src/results_evaluation.py \
     --results-root "$results_root"
 done
+
+python src/compare_features.py \
+  --results-base "$RESULTS_BASE"
