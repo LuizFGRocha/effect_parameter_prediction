@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from utils import standard_error
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate fixed-order chain models.")
@@ -40,17 +42,25 @@ def evaluate_chain(chain_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
     params = _parameter_columns(pred_df)
     param_rows = []
+    chain_abs_errors: List[np.ndarray] = []
+    chain_squared_errors: List[np.ndarray] = []
     for param in params:
         y_true = pred_df[f"y_true_{param}"].to_numpy(dtype=np.float64)
         y_pred = pred_df[f"y_pred_{param}"].to_numpy(dtype=np.float64)
-        mae = float(np.mean(np.abs(y_pred - y_true)))
-        mse = float(np.mean((y_pred - y_true) ** 2))
+        abs_error = np.abs(y_pred - y_true)
+        squared_error = (y_pred - y_true) ** 2
+        mae = float(np.mean(abs_error))
+        mse = float(np.mean(squared_error))
+        chain_abs_errors.append(abs_error)
+        chain_squared_errors.append(squared_error)
         param_rows.append(
             {
                 "chain_key": chain_key_value,
                 "parameter": param,
                 "mae": mae,
                 "mse": mse,
+                "mae_sem": standard_error(abs_error),
+                "mse_sem": standard_error(squared_error),
                 "global_mae": float(metrics["mae"]),
                 "global_mse": float(metrics["mse"]),
             }
@@ -67,6 +77,8 @@ def evaluate_chain(chain_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
         "output_dim": int(metrics.get("output_dim", 0)),
         "mae": float(metrics["mae"]),
         "mse": float(metrics["mse"]),
+        "mae_sem": standard_error(np.concatenate(chain_abs_errors)) if chain_abs_errors else 0.0,
+        "mse_sem": standard_error(np.concatenate(chain_squared_errors)) if chain_squared_errors else 0.0,
     }
     return pd.DataFrame([chain_row]), pd.DataFrame(param_rows)
 
@@ -78,8 +90,24 @@ def plot_chain_baseline(chain_df: pd.DataFrame, out_path: Path) -> None:
     width = 0.35
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar(x - width / 2, grouped["mae"], width, label="Mean MAE")
-    ax.bar(x + width / 2, grouped["mse"], width, label="Mean MSE")
+    ax.bar(
+        x - width / 2,
+        grouped["mae"],
+        width,
+        label="Mean MAE",
+        yerr=grouped["mae_sem"] if "mae_sem" in grouped else None,
+        capsize=4,
+        error_kw={"elinewidth": 1, "ecolor": "#444444"},
+    )
+    ax.bar(
+        x + width / 2,
+        grouped["mse"],
+        width,
+        label="Mean MSE",
+        yerr=grouped["mse_sem"] if "mse_sem" in grouped else None,
+        capsize=4,
+        error_kw={"elinewidth": 1, "ecolor": "#444444"},
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(grouped["chain_key"], rotation=30, ha="right")
     ax.set_xlabel("Chain")

@@ -6,6 +6,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from utils import standard_error
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compare feature runs using MAE statistics.")
@@ -66,6 +68,7 @@ def build_feature_comparison(results_base: Path) -> pd.DataFrame:
                 "feature": feature_dir.name,
                 "n_chains": int(len(metrics_df)),
                 "mean_mae": float(metrics_df["mae"].mean()),
+                "mae_sem": standard_error(metrics_df["mae"]),
                 "min_mae": float(metrics_df["mae"].min()),
                 "best_chain_key": str(best_row["chain_key"]),
             }
@@ -81,7 +84,15 @@ def plot_feature_comparison(comparison_df: pd.DataFrame, out_path: Path) -> None
     width = 0.38
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar([index - width / 2 for index in x_positions], ordered_df["mean_mae"], width, label="Mean MAE")
+    ax.bar(
+        [index - width / 2 for index in x_positions],
+        ordered_df["mean_mae"],
+        width,
+        label="Mean MAE",
+        yerr=ordered_df["mae_sem"],
+        capsize=4,
+        error_kw={"elinewidth": 1, "ecolor": "#444444"},
+    )
     ax.bar([index + width / 2 for index in x_positions], ordered_df["min_mae"], width, label="Min MAE")
     ax.set_xticks(x_positions)
     ax.set_xticklabels(ordered_df["feature"], rotation=30, ha="right")
