@@ -1,3 +1,13 @@
+"""Fonte unica de verdade sobre efeitos, parametros e cadeias.
+
+Os valores de parametro circulam **normalizados em [0,1]** em todo o projeto; o
+valor fisico e derivado de `min`/`max` na hora de renderizar. `predict: False`
+marca um parametro fixo, que fica de fora do vetor alvo.
+
+ATENCAO: acrescentar ou reordenar entradas aqui muda silenciosamente o tamanho e
+a ordem do vetor alvo, invalidando datasets ja renderizados e modelos ja
+treinados.
+"""
 from __future__ import annotations
 
 from typing import Iterable, List
@@ -45,10 +55,10 @@ EFFECT_PARAMETER_RANGES = {
     ],
 }
 
-# ordem canonica para efeitos em sequencia
+# Ordem canonica para efeitos em sequencia.
 CANONICAL_EFFECT_CHAIN_ORDER = ["distortion", "chorus", "slapback_delay"]
 
-# EFFECT_CHAINS: allow all single-effect chains, but only stack the canonical three
+# Todos os efeitos isolados, mais os tres subconjuntos empilhados da ordem canonica.
 EFFECT_CHAINS = (
     [[effect] for effect in EFFECT_PARAMETER_RANGES.keys()]
     + [
@@ -62,6 +72,7 @@ CHAIN_KEY_SEPARATOR = "__"
 
 
 def chain_key(chain_effects: Iterable[str]) -> str:
+    """Nome dos efeitos unido por `__`; e o nome de pasta em datasets e resultados."""
     return CHAIN_KEY_SEPARATOR.join(chain_effects)
 
 
@@ -77,3 +88,20 @@ def effect_predictable_params(effect: str) -> List[dict]:
 
 def effect_fixed_params(effect: str) -> List[dict]:
     return [param for param in EFFECT_PARAMETER_RANGES[effect] if not param.get("predict", True)]
+
+
+def parameter_names_for_chain(chain_key_value: str) -> List[str]:
+    """Nomes `<efeito>_<parametro>` na mesma ordem do vetor alvo da cadeia."""
+    names: List[str] = []
+    for effect in chain_key_to_effects(chain_key_value):
+        for param in effect_predictable_params(effect):
+            names.append(f"{effect}_{param['name']}")
+    return names
+
+
+def chain_output_dim(chain_key_value: str) -> int:
+    """Quantidade de parametros previstos pela cadeia (largura da saida do modelo)."""
+    return sum(
+        len(effect_predictable_params(effect))
+        for effect in chain_key_to_effects(chain_key_value)
+    )

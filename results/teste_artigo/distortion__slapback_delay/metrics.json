@@ -1,0 +1,19 @@
+{
+  "chain_key": "distortion__slapback_delay",
+  "chain_length": 2,
+  "effect_order": [
+    "distortion",
+    "slapback_delay"
+  ],
+  "feature": "MFCC40",
+  "n_train": 35840,
+  "n_test": 8960,
+  "output_dim": 3,
+  "mae": 0.06770668178796768,
+  "mse": 0.01265302300453186,
+  "parameter_names": [
+    "distortion_drive_db",
+    "slapback_delay_delay_seconds",
+    "slapback_delay_mix"
+  ]
+}

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
+# Varredura das quatro features + comparacao entre elas.
+# Escreve em <RESULTS_BASE>/<FEATURE>/, que e o layout que `gefx compare-features`
+# e `gefx cross-impl eval --models-root` esperam.
 set -euo pipefail
 
-DATASET_ROOT="datasets/default"
-RESULTS_BASE="results/feature_runs"
-EPOCHS=70
-BATCH_SIZE=32
-TEST_SIZE=0.20
-SPLIT_SEED=42
+DATASET_ROOT="${DATASET_ROOT:-datasets/default}"
+RESULTS_BASE="${RESULTS_BASE:-results/feature_runs}"
+CONFIG="${CONFIG:-experiments/base.yaml}"
 
 FEATURES=("MFCC40" "Spec" "Chroma" "GFCC40")
 
@@ -14,18 +14,13 @@ mkdir -p "$RESULTS_BASE"
 
 for feature in "${FEATURES[@]}"; do
   results_root="$RESULTS_BASE/${feature}"
-  echo "Running feature: $feature -> $results_root"
-  python src/model.py \
+  echo "== feature: $feature -> $results_root"
+  gefx train \
+    --config "$CONFIG" \
     --dataset-root "$DATASET_ROOT" \
     --feature "$feature" \
-    --epochs "$EPOCHS" \
-    --batch-size "$BATCH_SIZE" \
-    --test-size "$TEST_SIZE" \
-    --split-seed "$SPLIT_SEED" \
     --results-root "$results_root"
-  python src/results_evaluation.py \
-    --results-root "$results_root"
+  gefx evaluate --results-root "$results_root"
 done
 
-python src/compare_features.py \
-  --results-base "$RESULTS_BASE"
+gefx compare-features --results-base "$RESULTS_BASE"

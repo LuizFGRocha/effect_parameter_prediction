@@ -1,0 +1,31 @@
+# Experimento base: reproduz a configuracao do POC I.
+# Uso: gefx train --config experiments/base.yaml [--feature Spec ...]
+# Qualquer flag explicita na CLI sobrescreve o que estiver aqui.
+
+dataset:
+  input_dir: datasets/unprocessed_samples
+  output_dir: datasets/default
+  samples_per_file: 56
+  seed: 42
+  segment_seconds: 2.0
+  ignore_start_seconds: 0.5
+  ignore_end_seconds: 0.5
+
+architecture:
+  kernel_size: [3, 3]
+  n_conv: 2
+  n_full: 3
+  n_nodes: 64
+  n_filters: 6
+  dropout: 0.2
+  learning_rate: 0.001
+
+train:
+  dataset_root: datasets/default
+  results_root: results/feature_runs
+  feature: Spec
+  epochs: 70
+  batch_size: 32
+  test_size: 0.20
+  split_seed: 42
+  seed: 42

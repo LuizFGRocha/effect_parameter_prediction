@@ -1,0 +1,2 @@
+[console_scripts]
+gefx = gefx.cli:main

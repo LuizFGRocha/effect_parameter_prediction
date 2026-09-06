@@ -1,0 +1,104 @@
+[
+  {
+    "chain_key": "chorus",
+    "chain_length": 1,
+    "effect_order": [
+      "chorus"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.02918314002454281,
+    "mse": 0.0020388737320899963,
+    "parameter_names": [
+      "chorus_rate_hz",
+      "chorus_depth"
+    ]
+  },
+  {
+    "chain_key": "distortion",
+    "chain_length": 1,
+    "effect_order": [
+      "distortion"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 1,
+    "mae": 0.016210615634918213,
+    "mse": 0.0004499482165556401,
+    "parameter_names": [
+      "distortion_drive_db"
+    ]
+  },
+  {
+    "chain_key": "distortion__slapback_delay",
+    "chain_length": 2,
+    "effect_order": [
+      "distortion",
+      "slapback_delay"
+    ],
+    "feature": "MFCC40",
+    "n_train": 35840,
+    "n_test": 8960,
+    "output_dim": 3,
+    "mae": 0.06770668178796768,
+    "mse": 0.01265302300453186,
+    "parameter_names": [
+      "distortion_drive_db",
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  },
+  {
+    "chain_key": "phaser",
+    "chain_length": 1,
+    "effect_order": [
+      "phaser"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.04861745983362198,
+    "mse": 0.007546247914433479,
+    "parameter_names": [
+      "phaser_rate_hz",
+      "phaser_depth"
+    ]
+  },
+  {
+    "chain_key": "reverb",
+    "chain_length": 1,
+    "effect_order": [
+      "reverb"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 1,
+    "mae": 0.04366437345743179,
+    "mse": 0.007177052553743124,
+    "parameter_names": [
+      "reverb_room_size"
+    ]
+  },
+  {
+    "chain_key": "slapback_delay",
+    "chain_length": 1,
+    "effect_order": [
+      "slapback_delay"
+    ],
+    "feature": "MFCC40",
+    "n_train": 17920,
+    "n_test": 4480,
+    "output_dim": 2,
+    "mae": 0.0412345752120018,
+    "mse": 0.004903552122414112,
+    "parameter_names": [
+      "slapback_delay_delay_seconds",
+      "slapback_delay_mix"
+    ]
+  }
+]

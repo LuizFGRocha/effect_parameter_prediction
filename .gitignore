@@ -4,3 +4,5 @@ results
 plugins
 *.md
 *.pyc
+!CLAUDE.md
+documents

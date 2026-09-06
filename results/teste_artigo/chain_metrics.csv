@@ -1,0 +1,7 @@
+chain_key,chain_length,effect_order,feature,n_train,n_test,output_dim,mae,mse
+chorus,1,"[""chorus""]",MFCC40,17920,4480,2,0.02918314002454281,0.0020388737320899963
+distortion,1,"[""distortion""]",MFCC40,17920,4480,1,0.016210615634918213,0.0004499482165556401
+distortion__slapback_delay,2,"[""distortion"", ""slapback_delay""]",MFCC40,35840,8960,3,0.06770668178796768,0.01265302300453186
+phaser,1,"[""phaser""]",MFCC40,17920,4480,2,0.04861745983362198,0.007546247914433479
+reverb,1,"[""reverb""]",MFCC40,17920,4480,1,0.04366437345743179,0.007177052553743124
+slapback_delay,1,"[""slapback_delay""]",MFCC40,17920,4480,2,0.0412345752120018,0.004903552122414112

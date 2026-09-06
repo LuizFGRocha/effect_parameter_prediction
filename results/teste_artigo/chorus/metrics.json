@@ -1,0 +1,17 @@
+{
+  "chain_key": "chorus",
+  "chain_length": 1,
+  "effect_order": [
+    "chorus"
+  ],
+  "feature": "MFCC40",
+  "n_train": 17920,
+  "n_test": 4480,
+  "output_dim": 2,
+  "mae": 0.02918314002454281,
+  "mse": 0.0020388737320899963,
+  "parameter_names": [
+    "chorus_rate_hz",
+    "chorus_depth"
+  ]
+}

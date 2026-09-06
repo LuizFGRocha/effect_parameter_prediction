@@ -8,10 +8,8 @@ scikit-image
 scikit-learn
 joblib
 tensorflow[and-cuda]==2.21.0
-keras>=3.12
 matplotlib
 pyloudnorm
 pedalboard
 spafe
 pyyaml
-# For GPU support, install CUDA 12.5
