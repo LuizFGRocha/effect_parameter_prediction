@@ -13,8 +13,13 @@ Requires-Dist: scikit-image
 Requires-Dist: scikit-learn
 Requires-Dist: joblib
 Requires-Dist: tensorflow[and-cuda]==2.21.0
+Requires-Dist: keras>=3.12
 Requires-Dist: matplotlib
 Requires-Dist: pyloudnorm
 Requires-Dist: pedalboard
 Requires-Dist: spafe
 Requires-Dist: pyyaml
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: pytest-mock; extra == "dev"

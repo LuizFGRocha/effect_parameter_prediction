@@ -24,11 +24,17 @@ class DatasetConfig:
     input_dir: str = "datasets/unprocessed_samples"
     output_dir: str = "datasets/default"
     samples_per_file: int = 56
-    seed: int = 42
+    # Nome proprio, e nao `seed`: os overrides da CLI sao achatados, entao um
+    # campo homonimo em duas secoes seria escrito nas duas de uma vez.
+    render_seed: int = 42
     use_full_audio: bool = False
     segment_seconds: float = 2.0
     ignore_start_seconds: float = 0.5
     ignore_end_seconds: float = 0.5
+    # Serializa `effect_presence` e `raw_parameter_dict` em ordem alfabetica, como
+    # antes, em vez da ordem do catalogo. Ligado em `experiments/base.yaml` para o
+    # sidecar do POC I continuar byte a byte igual.
+    legacy: bool = False
 
 
 @dataclass
@@ -125,6 +131,11 @@ def load_config(path: Optional[str | Path] = None, **overrides: Any) -> Experime
         if unknown:
             raise ValueError(f"Chaves desconhecidas em '{name}': {unknown}")
         sections[name] = values
+
+    known_fields = {f.name for cls in _SECTIONS.values() for f in dataclasses.fields(cls)}
+    unknown = sorted(set(overrides) - known_fields)
+    if unknown:
+        raise ValueError(f"Overrides desconhecidos: {unknown}")
 
     for key, value in overrides.items():
         if value is None:

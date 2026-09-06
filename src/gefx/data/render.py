@@ -118,7 +118,7 @@ def generate_dataset(config: DatasetConfig) -> Path:
     if not clean_audio_files:
         raise RuntimeError(f"No wav files found under: {input_dir}")
 
-    child_seeds = np.random.SeedSequence(config.seed).spawn(len(clean_audio_files))
+    child_seeds = np.random.SeedSequence(config.render_seed).spawn(len(clean_audio_files))
 
     records: List[RenderRecord] = []
     with ProcessPoolExecutor() as executor:
@@ -130,7 +130,7 @@ def generate_dataset(config: DatasetConfig) -> Path:
             records.extend(future.result())
 
     metadata_path = output_dir / "metadata.csv"
-    write_metadata_csv(metadata_path, records)
+    write_metadata_csv(metadata_path, records, legacy=config.legacy)
     print(f"Renderizados {len(records)} arquivos")
     print(f"Audio:    {output_dir}")
     print(f"Metadata: {metadata_path}")

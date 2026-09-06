@@ -6,3 +6,9 @@ plugins
 *.pyc
 !CLAUDE.md
 documents
+
+# Artefatos da suite de testes
+.pytest_cache/
+.coverage
+htmlcov/
+__pycache__/

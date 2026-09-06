@@ -24,11 +24,12 @@ def _cmd_render_dataset(args: argparse.Namespace) -> None:
         input_dir=args.input_dir,
         output_dir=args.output_dir,
         samples_per_file=args.samples_per_file,
-        seed=args.seed,
+        render_seed=args.seed,
         use_full_audio=args.use_full_audio or None,
         segment_seconds=args.segment_seconds,
         ignore_start_seconds=args.ignore_start_seconds,
         ignore_end_seconds=args.ignore_end_seconds,
+        legacy=True if args.legacy else (False if args.no_legacy else None),
     )
     generate_dataset(config.dataset)
 
@@ -64,7 +65,7 @@ def _cmd_train(args: argparse.Namespace) -> None:
 def _cmd_evaluate(args: argparse.Namespace) -> None:
     from gefx.evaluation.runner import evaluate_run
 
-    evaluate_run(args.results_root)
+    evaluate_run(args.results_root, legacy=args.legacy)
 
 
 def _cmd_compare_features(args: argparse.Namespace) -> None:
@@ -85,6 +86,7 @@ def _cmd_cross_impl_render(args: argparse.Namespace) -> None:
             seed=args.seed,
             arms=args.arm,
             effects=args.effect,
+            legacy=args.legacy,
         )
     )
 
@@ -131,7 +133,13 @@ def build_parser() -> argparse.ArgumentParser:
     render_dataset.add_argument("--output-dir", default=None)
     render_dataset.add_argument("--samples-per-file", type=int, default=None,
                                 help="Renders por arquivo-fonte por cadeia.")
-    render_dataset.add_argument("--seed", type=int, default=None)
+    render_dataset.add_argument("--seed", type=int, default=None,
+                                help="Seed da renderizacao (dataset.render_seed).")
+    render_dataset.add_argument("--legacy", action="store_true",
+                                help="Ordena as colunas JSON do sidecar alfabeticamente, "
+                                     "como nos datasets ja renderizados.")
+    render_dataset.add_argument("--no-legacy", action="store_true",
+                                help="Forca a convencao nova mesmo que o YAML peca legacy.")
     render_dataset.add_argument("--use-full-audio", action="store_true",
                                 help="Processa o audio inteiro em vez de um segmento aleatorio.")
     render_dataset.add_argument("--segment-seconds", type=float, default=None)
@@ -150,7 +158,8 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--test-size", type=float, default=None)
     train_parser.add_argument("--split-seed", type=int, default=None)
     train_parser.add_argument("--seed", type=int, default=None,
-                              help="Seed global (numpy/random/tensorflow).")
+                              help="Seed global do treino (numpy/random/tensorflow). "
+                                   "Nao afeta a renderizacao: essa e dataset.render_seed.")
     train_parser.add_argument("--chain-key", default=None,
                               help="Treina so esta cadeia (ex.: distortion__chorus).")
     train_parser.add_argument("--rebuild-cache", action="store_true",
@@ -174,6 +183,9 @@ def build_parser() -> argparse.ArgumentParser:
         "evaluate", help="Agrega metricas e graficos de um run ja treinado."
     )
     evaluate_parser.add_argument("--results-root", required=True)
+    evaluate_parser.add_argument("--legacy", action="store_true",
+                                 help="Ordena os parametros alfabeticamente, como nas "
+                                      "tabelas ja geradas, em vez da ordem do vetor alvo.")
     evaluate_parser.set_defaults(func=_cmd_evaluate)
 
     # gefx compare-features
@@ -197,6 +209,8 @@ def build_parser() -> argparse.ArgumentParser:
     cross_render.add_argument("--output-root", default="datasets/cross_impl")
     cross_render.add_argument("--segment-seconds", type=float, default=2.0)
     cross_render.add_argument("--seed", type=int, default=7)
+    cross_render.add_argument("--legacy", action="store_true",
+                              help="Ordena as colunas JSON do sidecar alfabeticamente.")
     cross_render.set_defaults(func=_cmd_cross_impl_render)
 
     cross_eval = cross_sub.add_parser("eval", help="Roda os modelos treinados em cada braco.")

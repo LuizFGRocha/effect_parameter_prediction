@@ -16,7 +16,18 @@ def convert_normalized_to_raw(
     params: Sequence[Dict[str, float]],
     norm_values: Sequence[float],
 ) -> Dict[str, float]:
-    """Aplica `min + (max - min) * v` para cada parametro, na ordem dada."""
+    """Aplica `min + (max - min) * v` para cada parametro, na ordem dada.
+
+    O `zip` sozinho truncaria em silencio: um vetor curto devolveria um dict
+    parcial, e o efeito seria renderizado com os defaults do plugin nos
+    parametros que faltassem.
+    """
+    if len(norm_values) != len(params):
+        raise ValueError(
+            f"Vetor normalizado com {len(norm_values)} valores para {len(params)} parametros: "
+            f"{[param['name'] for param in params]}"
+        )
+
     raw_values: Dict[str, float] = {}
     for value, param in zip(norm_values, params):
         raw = param["min"] + (param["max"] - param["min"]) * float(value)

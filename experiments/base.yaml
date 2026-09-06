@@ -6,10 +6,13 @@ dataset:
   input_dir: datasets/unprocessed_samples
   output_dir: datasets/default
   samples_per_file: 56
-  seed: 42
+  render_seed: 42
   segment_seconds: 2.0
   ignore_start_seconds: 0.5
   ignore_end_seconds: 0.5
+  # Sidecar na convencao antiga (colunas JSON em ordem alfabetica), para o
+  # dataset do POC I sair byte a byte igual ao que ja esta em disco.
+  legacy: true
 
 architecture:
   kernel_size: [3, 3]

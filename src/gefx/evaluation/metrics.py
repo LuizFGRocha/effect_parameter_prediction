@@ -35,8 +35,14 @@ def load_metrics(chain_dir: Path) -> Dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def parameter_columns(frame: pd.DataFrame) -> List[str]:
-    return sorted(col.replace("y_true_", "") for col in frame.columns if col.startswith("y_true_"))
+def parameter_columns(frame: pd.DataFrame, legacy: bool = False) -> List[str]:
+    """Nomes dos parametros na ordem em que as colunas foram gravadas.
+
+    Essa e a ordem do vetor alvo, a mesma de `metrics.json["parameter_names"]`.
+    `legacy=True` volta a ordenar alfabeticamente, como nas tabelas ja geradas.
+    """
+    names = [col[len("y_true_") :] for col in frame.columns if col.startswith("y_true_")]
+    return sorted(names) if legacy else names
 
 
 def find_chain_dirs(results_root: Path) -> List[Path]:
@@ -50,7 +56,7 @@ def find_chain_dirs(results_root: Path) -> List[Path]:
     )
 
 
-def evaluate_chain(chain_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def evaluate_chain(chain_dir: Path, legacy: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Devolve (linha da cadeia, linhas por parametro) para uma cadeia."""
     predictions = load_predictions(chain_dir)
     metrics = load_metrics(chain_dir)
@@ -59,7 +65,7 @@ def evaluate_chain(chain_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     param_rows = []
     abs_errors: List[np.ndarray] = []
     squared_errors: List[np.ndarray] = []
-    for param in parameter_columns(predictions):
+    for param in parameter_columns(predictions, legacy=legacy):
         y_true = predictions[f"y_true_{param}"].to_numpy(dtype=np.float64)
         y_pred = predictions[f"y_pred_{param}"].to_numpy(dtype=np.float64)
         abs_error = np.abs(y_pred - y_true)
@@ -96,14 +102,14 @@ def evaluate_chain(chain_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return pd.DataFrame([chain_row]), pd.DataFrame(param_rows)
 
 
-def build_prediction_frame(chain_dirs: List[Path]) -> pd.DataFrame:
+def build_prediction_frame(chain_dirs: List[Path], legacy: bool = False) -> pd.DataFrame:
     """Junta todas as predicoes em formato longo: chain_key, parameter, real, estimated."""
     frames = []
     for chain_dir in chain_dirs:
         predictions = load_predictions(chain_dir)
         metrics = load_metrics(chain_dir)
         chain_key_value = metrics.get("chain_key", Path(chain_dir).name)
-        for param in parameter_columns(predictions):
+        for param in parameter_columns(predictions, legacy=legacy):
             frames.append(
                 pd.DataFrame(
                     {

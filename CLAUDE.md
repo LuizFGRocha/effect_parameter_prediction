@@ -43,9 +43,11 @@ gefx inspect-plugin plugins/real/ChowCentaur.vst3
 gefx inspect-plugin plugins/real/ChowPhaserMono.vst3 --sweep lfo_freq
 ```
 
-There is no test suite, linter, or build step. `validate_sidecar_integrity`
-(`gefx/data/metadata.py`, run automatically at the start of every training run) is the
-de facto consistency check on a dataset.
+There is no linter or build step. `pytest` (config in `pyproject.toml`, dev deps under
+the `dev` extra) runs a fast unit suite over the pure logic and the on-disk formats — no
+GPU, no VST3, no fixture bigger than a `tmp_path`. `validate_sidecar_integrity`
+(`gefx/data/metadata.py`, run automatically at the start of every training run) remains
+the consistency check on a *dataset*, which the suite does not touch.
 
 ## Experiment configuration
 
@@ -59,11 +61,26 @@ Every run writes `<results-root>/run.json` with the resolved config, the git SHA
 timestamp and the per-chain metrics, and each chain's `metrics.json` records the
 architecture that produced it.
 
-Seeds: `--seed` fixes `random`, `numpy` and Keras. That alone is *not* enough for two
-runs to match bit for bit on GPU — residual nondeterminism is around 1e-4 — so
-`--deterministic` additionally enables TensorFlow's deterministic kernels (verified to
-give identical predictions, at a cost in speed). `--split-seed` is separate and controls
-only the train/test split.
+Seeds: there are three, deliberately named apart because CLI overrides are flat — a field
+name shared by two sections would be written to both at once. `dataset.render_seed`
+picks the audio segments and the parameter vectors (i.e. the data); `train.split_seed`
+picks the test rows; `train.seed` fixes `random`, `numpy` and Keras (weight init, dropout,
+batch order). `--seed` on `train` sets the last one, `--seed` on `render-dataset` sets the
+first. `train.seed` alone is *not* enough for two runs to match bit for bit on GPU —
+residual nondeterminism is around 1e-4 — so `--deterministic` additionally enables
+TensorFlow's deterministic kernels (verified to give identical predictions, at a cost in
+speed).
+
+`render_seed` reproduces a dataset only *together with the exact contents of the input
+directory*: the spawned `SeedSequence` children are zipped against the sorted wav list, so
+inserting a file anywhere but at the end re-seeds every file after it.
+
+`dataset.legacy` (and `--legacy` on `evaluate` / `cross-impl render`) restores two older
+conventions: alphabetically sorted `effect_presence`/`raw_parameter_dict` in the sidecar,
+and alphabetically sorted parameter rows in `parameter_metrics.csv`. Both default to
+catalog/target order now. `experiments/base.yaml` sets `legacy: true`, so re-rendering the
+POC I dataset or re-running `gefx evaluate --legacy` reproduces the committed artifacts
+byte for byte.
 
 ## Architecture
 

@@ -35,3 +35,6 @@ src/gefx/training/architecture.py
 src/gefx/training/inference.py
 src/gefx/training/scaling.py
 src/gefx/training/trainer.py
+tests/test_cli.py
+tests/test_config.py
+tests/test_import_hygiene.py

@@ -84,6 +84,9 @@ def parity_axis(axis, real: np.ndarray, estimated: np.ndarray, title: str) -> No
 
 def parity_grid(panels: Sequence[tuple], out_path: Path, suptitle: str, ncols_cap: int = 2) -> None:
     """Grade de paineis de paridade. Cada painel e (titulo, real, estimated)."""
+    if not panels:
+        raise ValueError("parity_grid precisa de pelo menos um painel.")
+
     ncols = min(ncols_cap, len(panels))
     nrows = math.ceil(len(panels) / ncols)
     fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 6 * nrows), squeeze=False)

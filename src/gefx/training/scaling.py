@@ -22,7 +22,19 @@ def fit_scalers(features: np.ndarray) -> Dict[int, StandardScaler]:
 
 
 def apply_scalers(features: np.ndarray, scalers: Dict[int, StandardScaler]) -> np.ndarray:
-    """Aplica os scalers e acrescenta o eixo de canal. Nao altera `features`."""
+    """Aplica os scalers e acrescenta o eixo de canal. Nao altera `features`.
+
+    Exige uma scaler por linha. Sem essa checagem, um array com menos linhas do
+    que scalers seria escalado so em parte e devolvido sem erro — e o `crossimpl`
+    reusa scalers persistidos, entao a comparacao entre implementacoes sairia
+    errada em silencio.
+    """
+    if features.shape[1] != len(scalers):
+        raise ValueError(
+            f"Numero de linhas incompativel com os scalers: features={features.shape[1]}, "
+            f"scalers={len(scalers)}"
+        )
+
     scaled = features.copy()
     for index in range(scaled.shape[1]):
         scaled[:, index, :] = scalers[index].transform(scaled[:, index, :])

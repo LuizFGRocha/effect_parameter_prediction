@@ -34,8 +34,6 @@ class TrainedChain:
 
 
 def load_trained_chain(model_dir: str | Path) -> TrainedChain:
-    import keras
-
     directory = Path(model_dir)
     model_path = directory / MODEL_FILENAME
     scalers_path = directory / SCALERS_FILENAME
@@ -43,6 +41,9 @@ def load_trained_chain(model_dir: str | Path) -> TrainedChain:
         raise FileNotFoundError(f"Modelo nao encontrado: {model_path}")
     if not scalers_path.exists():
         raise FileNotFoundError(f"Scalers nao encontrados: {scalers_path}")
+
+    # Depois das checagens: um caminho errado nao precisa pagar o TensorFlow.
+    import keras
 
     return TrainedChain(
         model=keras.models.load_model(model_path),

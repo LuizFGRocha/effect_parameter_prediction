@@ -8,8 +8,14 @@ scikit-image
 scikit-learn
 joblib
 tensorflow[and-cuda]==2.21.0
+keras>=3.12
 matplotlib
 pyloudnorm
 pedalboard
 spafe
 pyyaml
+
+[dev]
+pytest>=8
+pytest-cov
+pytest-mock

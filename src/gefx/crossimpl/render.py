@@ -6,7 +6,6 @@ todos, e e o que torna a comparacao entre bracos legitima.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -20,7 +19,7 @@ from gefx.audio import (
     normalize_loudness,
     select_random_segment,
 )
-from gefx.data.metadata import append_metadata_csv
+from gefx.data.metadata import RenderRecord, append_metadata_csv
 from gefx.effects.catalog import EFFECT_PARAMETER_RANGES, effect_predictable_params
 from gefx.effects.parameters import effect_presence, raw_params_for_effect
 from gefx.effects.pedalboard_backend import build_chain
@@ -37,6 +36,8 @@ class RenderOptions:
     seed: int = 7
     arms: Optional[Sequence[str]] = None
     effects: Optional[Sequence[str]] = None
+    # Ordem alfabetica nas colunas JSON do sidecar, como nos bracos ja renderizados.
+    legacy: bool = False
 
 
 def _apply_mapping(plugin, spec: dict, raw: dict, norm_row: np.ndarray, names: List[str]) -> None:
@@ -100,19 +101,17 @@ def render(options: RenderOptions) -> None:
                 name = f"{source.stem}__{effect}__{index:05d}.wav"
                 export_audio(out, sr, out_dir / name)
                 rows.append(
-                    {
-                        "file_name": name,
-                        "chain_key": effect,
-                        "chain_length": 1,
-                        "effect_order": json.dumps([effect]),
-                        "effect_presence": json.dumps(effect_presence([effect]), sort_keys=True),
-                        "normalized_parameter_vector": json.dumps(
-                            [float(value) for value in norm[index]]
-                        ),
-                        "raw_parameter_dict": json.dumps({effect: raw}, sort_keys=True),
-                        "source_audio_id": source.name,
-                        "random_seed": int(options.seed),
-                    }
+                    RenderRecord(
+                        file_name=name,
+                        chain_key=effect,
+                        chain_length=1,
+                        effect_order=[effect],
+                        effect_presence=effect_presence([effect]),
+                        normalized_parameter_vector=[float(value) for value in norm[index]],
+                        raw_parameter_dict={effect: raw},
+                        source_audio_id=source.name,
+                        random_seed=int(options.seed),
+                    ).as_row(legacy=options.legacy)
                 )
 
             print(f" -> {len(rows)} renders")

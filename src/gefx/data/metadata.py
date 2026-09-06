@@ -13,7 +13,12 @@ from typing import Dict, List, Sequence
 
 import pandas as pd
 
-from gefx.effects.catalog import chain_key
+from gefx.effects.catalog import (
+    EFFECT_PARAMETER_RANGES,
+    chain_key,
+    chain_key_to_effects,
+    chain_output_dim,
+)
 
 METADATA_FILENAME = "metadata.csv"
 
@@ -44,27 +49,39 @@ class RenderRecord:
     source_audio_id: str
     random_seed: int
 
-    def as_row(self) -> Dict[str, object]:
+    def as_row(self, legacy: bool = False) -> Dict[str, object]:
+        """Serializa a linha. Por padrao preserva a ordem do catalogo em todas as
+        colunas JSON; `legacy=True` volta a ordenar `effect_presence` e
+        `raw_parameter_dict` alfabeticamente, como nos datasets ja renderizados.
+
+        A ordem do catalogo e a mesma do sufixo binario do nome do arquivo e a
+        mesma do vetor alvo; alfabetica era uma terceira convencao para a mesma
+        informacao.
+        """
         return {
             "file_name": self.file_name,
             "chain_key": self.chain_key,
             "chain_length": self.chain_length,
             "effect_order": json.dumps(self.effect_order),
-            "effect_presence": json.dumps(self.effect_presence, sort_keys=True),
+            "effect_presence": json.dumps(self.effect_presence, sort_keys=legacy),
             "normalized_parameter_vector": json.dumps(self.normalized_parameter_vector),
-            "raw_parameter_dict": json.dumps(self.raw_parameter_dict, sort_keys=True),
+            "raw_parameter_dict": json.dumps(self.raw_parameter_dict, sort_keys=legacy),
             "source_audio_id": self.source_audio_id,
             "random_seed": self.random_seed,
         }
 
 
-def write_metadata_csv(path: Path, records: Sequence[RenderRecord]) -> None:
+def write_metadata_csv(
+    path: Path,
+    records: Sequence[RenderRecord],
+    legacy: bool = False,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=METADATA_COLUMNS)
         writer.writeheader()
         for item in records:
-            writer.writerow(item.as_row())
+            writer.writerow(item.as_row(legacy=legacy))
 
 
 def append_metadata_csv(root: Path, rows: Sequence[Dict[str, object]]) -> None:
@@ -115,10 +132,13 @@ def target_lookup(metadata: pd.DataFrame, chain_key_value: str) -> Dict[str, Lis
 
 
 def validate_sidecar_integrity(dataset_root: str | Path) -> Dict[str, int]:
-    """Confere que sidecar e audio batem, e que os valores estao em [0,1].
+    """Confere que sidecar e audio batem e que as linhas sao coerentes com o catalogo.
 
-    Roda no inicio de todo treino; e a checagem de consistencia de facto do
-    dataset, ja que o projeto nao tem suite de testes.
+    Por cadeia: colunas obrigatorias, um wav por linha, efeitos existentes no
+    catalogo, `effect_order`/`chain_length` de acordo com a `chain_key`, e o vetor
+    normalizado com o comprimento previsto e todos os valores em [0,1].
+
+    Roda no inicio de todo treino; e a checagem de consistencia de facto do dataset.
     """
     root = Path(dataset_root).resolve()
     metadata = read_metadata(root)
@@ -145,16 +165,43 @@ def validate_sidecar_integrity(dataset_root: str | Path) -> Dict[str, int]:
                 f"Chain {chain_key_value}: metadata missing for wav {missing_rows[0]}"
             )
 
-        vectors = rows["normalized_parameter_vector"].map(json.loads)
-        out_of_range = [
-            file_name
-            for file_name, vector in zip(rows["file_name"], vectors)
-            if not all(0.0 <= float(value) <= 1.0 for value in vector)
-        ]
-        if out_of_range:
+        effects = chain_key_to_effects(chain_key_value)
+        unknown_effects = [effect for effect in effects if effect not in EFFECT_PARAMETER_RANGES]
+        if unknown_effects:
             raise RuntimeError(
-                f"Chain {chain_key_value}: normalized value outside [0,1] in {out_of_range[0]}"
+                f"Chain {chain_key_value}: effect not in catalog: {unknown_effects[0]}"
             )
+
+        # `effect_order` e `chain_length` sao constantes dentro de uma cadeia, entao
+        # conferir os valores distintos custa muito menos que percorrer linha a linha.
+        bad_orders = [
+            order for order in rows["effect_order"].unique() if json.loads(order) != effects
+        ]
+        if bad_orders:
+            raise RuntimeError(
+                f"Chain {chain_key_value}: effect_order {bad_orders[0]} does not match the chain key"
+            )
+
+        bad_lengths = [
+            length for length in rows["chain_length"].unique() if int(length) != len(effects)
+        ]
+        if bad_lengths:
+            raise RuntimeError(
+                f"Chain {chain_key_value}: chain_length {bad_lengths[0]} != {len(effects)}"
+            )
+
+        expected_dim = chain_output_dim(chain_key_value)
+        vectors = rows["normalized_parameter_vector"].map(json.loads)
+        for file_name, vector in zip(rows["file_name"], vectors):
+            if len(vector) != expected_dim:
+                raise RuntimeError(
+                    f"Chain {chain_key_value}: expected {expected_dim} normalized values, "
+                    f"got {len(vector)} in {file_name}"
+                )
+            if not all(0.0 <= float(value) <= 1.0 for value in vector):
+                raise RuntimeError(
+                    f"Chain {chain_key_value}: normalized value outside [0,1] in {file_name}"
+                )
 
         counts[chain_key_value] = len(wavs)
 

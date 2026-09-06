@@ -26,8 +26,20 @@ dependencies = [
     "pyyaml",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "pytest-mock",
+]
+
 [project.scripts]
 gefx = "gefx.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-q", "--strict-markers"]
+
 
 [tool.setuptools.packages.find]
 where = ["src"]
