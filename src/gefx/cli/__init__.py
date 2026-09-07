@@ -103,6 +103,55 @@ def _cmd_cross_impl_eval(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_disent_calibrate(args: argparse.Namespace) -> None:
+    from gefx.disent.calibrate import calibrate_arms
+
+    calibrate_arms(
+        arm_keys_wanted=args.arm,
+        input_dir=Path(args.input_dir),
+        output=Path(args.output),
+        points=args.points,
+        n_probes=args.probes,
+        segment_seconds=args.segment_seconds,
+        **({"descriptor": args.descriptor} if args.descriptor else {}),
+        range_mode=args.range_mode,
+        level_mode=args.level_mode,
+    )
+
+
+def _cmd_disent_render(args: argparse.Namespace) -> None:
+    from gefx.disent.render import RenderOptions, render
+
+    render(
+        RenderOptions(
+            input_dir=Path(args.input_dir),
+            output_root=Path(args.output_root),
+            calibration=Path(args.calibration) if args.calibration else None,
+            n_contents=args.contents,
+            segment_seconds=args.segment_seconds,
+            seed=args.seed,
+            split_seed=args.split_seed,
+            arms=args.arm,
+            workers=args.workers,
+        )
+    )
+
+
+def _cmd_disent_cache(args: argparse.Namespace) -> None:
+    from gefx.disent.features import build_all_caches
+
+    build_all_caches(Path(args.output_root), args.feature, arms=args.arm, rebuild=args.rebuild)
+
+
+def _cmd_disent_validate(args: argparse.Namespace) -> None:
+    from gefx.disent.sidecar import validate_pairing
+
+    summary = validate_pairing(Path(args.output_root))
+    print("grade pareada e completa:")
+    for name, value in summary.items():
+        print(f"  {name:14s} {value}")
+
+
 def _cmd_inspect_plugin(args: argparse.Namespace) -> None:
     from gefx.effects.inspect import inspect_plugin
 
@@ -218,6 +267,67 @@ def build_parser() -> argparse.ArgumentParser:
     cross_eval.add_argument("--models-root", default="results/second_main_run")
     cross_eval.add_argument("--output-root", default="datasets/cross_impl")
     cross_eval.set_defaults(func=_cmd_cross_impl_eval)
+
+    # gefx disent
+    disent = sub.add_parser("disent", help="POC II: recuperacao em espaco latente desemaranhado.")
+    disent_sub = disent.add_subparsers(dest="disent_command", required=True)
+
+    disent_calibrate = disent_sub.add_parser(
+        "calibrate", help="Calibra os extremos do knob de drive de cada arm contra a referencia."
+    )
+    disent_calibrate.add_argument("--arm", action="append", default=None,
+                                  help="Repetivel. Padrao: todos os arms do roster.")
+    disent_calibrate.add_argument("--input-dir", default="datasets/unprocessed_samples")
+    disent_calibrate.add_argument("--output", default="datasets/disent/arms_calibration.json")
+    disent_calibrate.add_argument("--points", type=int, default=33, help="Pontos da varredura.")
+    disent_calibrate.add_argument("--probes", type=int, default=8,
+                                  help="Segmentos de guitarra usados como probe.")
+    disent_calibrate.add_argument("--segment-seconds", type=float, default=2.0)
+    # Sem valor cravado aqui: o padrao e o `PRIMARY_DESCRIPTOR` do modulo, para o
+    # CLI nao sobrepor silenciosamente a escolha de desenho (ja aconteceu).
+    disent_calibrate.add_argument("--descriptor", default=None,
+                                  choices=["thd", "crest_drop", "hf_ratio", "flatness", "thd_flatness"],
+                                  help="Padrao: o PRIMARY_DESCRIPTOR de disent/calibrate.py.")
+    disent_calibrate.add_argument("--range-mode", default="intersection",
+                                  choices=["intersection", "reference"],
+                                  help="intersection: faixa que todos os arms alcancam.")
+    disent_calibrate.add_argument("--level-mode", default="descriptor",
+                                  choices=["descriptor", "knob"],
+                                  help="descriptor: casa os 8 niveis contra a referencia. "
+                                       "knob: uniformes no knob nativo (condicao de comparacao).")
+    disent_calibrate.set_defaults(func=_cmd_disent_calibrate)
+
+    disent_render = disent_sub.add_parser(
+        "render", help="Renderiza a grade combinatoria conteudo x configuracao x arm."
+    )
+    disent_render.add_argument("--arm", action="append", default=None,
+                               help="Repetivel. Padrao: os arms aprovados na calibracao.")
+    disent_render.add_argument("--input-dir", default="datasets/unprocessed_samples")
+    disent_render.add_argument("--output-root", default="datasets/disent")
+    disent_render.add_argument("--calibration", default=None,
+                               help="Padrao: <output-root>/arms_calibration.json")
+    disent_render.add_argument("--contents", type=int, default=100,
+                               help="Gravacoes distintas usadas como conteudo.")
+    disent_render.add_argument("--segment-seconds", type=float, default=2.0)
+    disent_render.add_argument("--seed", type=int, default=20260906)
+    disent_render.add_argument("--split-seed", type=int, default=20260906)
+    disent_render.add_argument("--workers", type=int, default=4)
+    disent_render.set_defaults(func=_cmd_disent_render)
+
+    disent_cache = disent_sub.add_parser(
+        "cache", help="Extrai o cache de features de cada arm."
+    )
+    disent_cache.add_argument("--output-root", default="datasets/disent")
+    disent_cache.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
+    disent_cache.add_argument("--arm", action="append", default=None)
+    disent_cache.add_argument("--rebuild", action="store_true")
+    disent_cache.set_defaults(func=_cmd_disent_cache)
+
+    disent_validate = disent_sub.add_parser(
+        "validate", help="Confere que a grade esta cruzada e pareada entre os arms."
+    )
+    disent_validate.add_argument("--output-root", default="datasets/disent")
+    disent_validate.set_defaults(func=_cmd_disent_validate)
 
     # gefx inspect-plugin
     inspect_parser = sub.add_parser(

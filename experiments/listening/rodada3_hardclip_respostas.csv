@@ -1,0 +1,7 @@
+ensaio,resposta  # 1 a 4
+1,2
+2,2 # muito estranho. a referência não tem chiado, mas todos os outros tem. também é difícil de diferenciar. chutei nesse.
+3,2 # mesma coisa do anterior.
+4,2 # mesma coisa do anterior.
+5,1 # esse aqui ficou extremamente fácil. a primeira opção tem MUITO ganho, enquanto as outras estão bem limpas. só a primeira opção chega perto da referência.
+6,3 # o 3 parece chegar mais perto. mas a referência parece ter mais ganho que todos os outros.
