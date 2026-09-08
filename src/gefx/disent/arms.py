@@ -330,6 +330,25 @@ REJECTED_ARMS: Dict[str, str] = {
 # "chiado" que passa por distorcao mas pode ser caracteristica do circuito, e
 # nenhum dos descritores testados (THD, crest, centroide, razao de agudos,
 # planicidade, e a combinacao) o captura.
+# LIMITE DO `byod-bigmuff`, medido em 2026-09-07 sobre o AUDIO RENDERIZADO (nao
+# sobre os probes): contraste minimo 0,51-0,65, abaixo do CONTRAST_THRESHOLD de
+# 1,0 de `disent/oracle.py`. A porteira original nao pegou porque rodou sobre os
+# probes da calibracao, onde ele media 1,6 -- probes nao tem conteudo variado nem
+# estagio de tom, e os dois elevam o piso da distancia e comprimem a razao.
+#
+# O casamento do oraculo e [0, 0, 0, 0, 2, 4, 5, 6]: os niveis 0 a 3 da
+# referencia sao TODOS melhor casados pelo nivel 0 deste arm.
+#
+# DECISAO: manter e declarar. Recalibrar foi descartado por medicao, nao por
+# custo -- renderizando nove knobs abaixo do escolhido, os minimos da distancia
+# do oraculo para os niveis 0, 1 e 2 caem todos no mesmo knob e o piso fica em
+# ~0,58 em qualquer ajuste. E limite fisico do circuito (fuzz de tres estagios
+# com tone stack nao tem regiao limpa parecida com uma tanh saturada), da mesma
+# especie do teto de THD que reprovou os arms da Chow.
+#
+# Consequencia para quem for treinar: os niveis 0 a 3 deste arm carregam rotulo
+# sonicamente errado. E ruido de rotulo CONHECIDO, a declarar no relatorio e a
+# verificar no leave-one-arm-out da etapa 7.
 PERCEPTUAL_BIAS: Dict[str, Dict[str, Any]] = {
     "byod-bigmuff": {
         "bias_levels": -1.17,

@@ -2,7 +2,7 @@
 
 Duas coisas que juntas definem o desenho fatorial do dataset:
 
-- **A grade de configuracoes**: 8 niveis de drive x 8 de tone. O nivel e um
+- **A grade de configuracoes**: 8 niveis de drive x 5 de tone. O nivel e um
   indice, nao um valor -- o valor de knob correspondente depende do arm e sai da
   calibracao (`disent/calibrate.py`), enquanto o corte do tone e o mesmo em todos
   os arms por construcao.

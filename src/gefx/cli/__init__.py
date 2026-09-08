@@ -143,6 +143,56 @@ def _cmd_disent_cache(args: argparse.Namespace) -> None:
     build_all_caches(Path(args.output_root), args.feature, arms=args.arm, rebuild=args.rebuild)
 
 
+def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
+    import json
+
+    from gefx.disent.retrieval import baseline_b0, cross_arm_table
+
+    result = baseline_b0(
+        Path(args.output_root),
+        query_split=args.query_split,
+        catalog_split=args.catalog_split,
+        arms=args.arm,
+        same_arm=args.same_arm,
+    )
+    overall = result.metrics["overall"]
+    rotulo = "mesmo arm (controle)" if args.same_arm else "entre implementacoes"
+    print(f"B0 -- vizinho mais proximo, {rotulo}, {overall['n']} consultas")
+    for axis in ("drive_level", "tone_level"):
+        item = overall[axis]
+        print(f"  {axis:12s} exato {item['exact']:.1%} (acaso {item['chance']:.1%})  "
+              f"+-1 {item['within_one']:.1%}  MAE {item['mae_levels']:.2f} niveis")
+    print(f"  {'config':12s} exato {overall['config_exact']:.1%} "
+          f"(acaso {overall['config_chance']:.2%})")
+    print(f"  {'drive':12s} MAE {overall['mae_db']:.2f} dB equivalentes")
+    print("\npor arm de consulta (drive exato):")
+    for arm, item in sorted(result.metrics["per_query_arm"].items()):
+        print(f"  {arm:16s} {item['drive_level']['exact']:.1%}  "
+              f"MAE {item['drive_level']['mae_levels']:.2f}  "
+              f"{item['mae_db']:.2f} dB")
+
+    if args.output:
+        destino = Path(args.output)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        result.predictions.to_csv(destino.with_suffix(".csv"), index=False)
+        destino.with_suffix(".json").write_text(
+            json.dumps(result.metrics, indent=2), encoding="utf-8"
+        )
+        cross_arm_table(result.predictions).to_csv(
+            destino.parent / f"{destino.stem}_cross_arm.csv"
+        )
+        print(f"\nescrito em {destino.parent}/{destino.stem}.{{csv,json}}")
+
+
+def _cmd_disent_plots(args: argparse.Namespace) -> None:
+    from gefx.disent.plots import build_all
+
+    escritos = build_all(Path(args.results_dir), Path(args.out_dir) if args.out_dir else None)
+    print(f"{len(escritos)} figuras:")
+    for caminho in escritos:
+        print(f"  {caminho}")
+
+
 def _cmd_disent_validate(args: argparse.Namespace) -> None:
     from gefx.disent.sidecar import validate_pairing
 
@@ -313,6 +363,27 @@ def build_parser() -> argparse.ArgumentParser:
     disent_render.add_argument("--split-seed", type=int, default=20260906)
     disent_render.add_argument("--workers", type=int, default=4)
     disent_render.set_defaults(func=_cmd_disent_render)
+
+    disent_retrieve = disent_sub.add_parser(
+        "retrieve",
+        help="Baseline B0: recuperacao por vizinho mais proximo, sem aprendizado.")
+    disent_retrieve.add_argument("--output-root", default="datasets/disent")
+    disent_retrieve.add_argument("--arm", action="append", default=None,
+                                 help="Restringe o roster. Padrao: todos.")
+    disent_retrieve.add_argument("--query-split", default="query")
+    disent_retrieve.add_argument("--catalog-split", default="catalog")
+    disent_retrieve.add_argument("--same-arm", action="store_true",
+                                 help="Controle: deixa o arm da consulta no catalogo.")
+    disent_retrieve.add_argument("--output", default=None,
+                                 help="Prefixo para gravar predicoes e metricas.")
+    disent_retrieve.set_defaults(func=_cmd_disent_retrieve)
+
+    disent_plots = disent_sub.add_parser(
+        "plots", help="Figuras dos baselines, a partir do que `retrieve` gravou.")
+    disent_plots.add_argument("--results-dir", default="results/disent")
+    disent_plots.add_argument("--out-dir", default=None,
+                              help="Padrao: <results-dir>/figuras.")
+    disent_plots.set_defaults(func=_cmd_disent_plots)
 
     disent_cache = disent_sub.add_parser(
         "cache", help="Extrai o cache de features de cada arm."
