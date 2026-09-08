@@ -36,7 +36,13 @@ SHAPE = (32, 24)
 
 
 def _dataset(tmp_path, seed=0):
-    """Dataset minusculo mas com a grade cruzada de verdade."""
+    """Dataset minusculo mas com a grade cruzada de verdade.
+
+    Idempotente: um teste que treina duas tecnicas tem de reusar o mesmo
+    dataset, senao a comparacao entre elas mediria dois datasets.
+    """
+    if (tmp_path / ARMS[0] / "metadata.csv").exists():
+        return tmp_path
     rng = np.random.default_rng(seed)
     for arm_index, arm in enumerate(ARMS):
         rows = []
@@ -175,9 +181,95 @@ def test_criteria_that_need_another_run_are_left_out_and_not_passed_by_default()
 
 def test_the_beta_vae_verdict_compares_against_the_contrastive_run():
     verdicts = decide(
-        _metrics(0.50, 3.0, 0.3), {"contrastive": {"drive_exact": 0.40}}
+        _metrics(0.50, 3.0, 0.3), {"contrastive": {"drive_exact": 0.40}},
+        technique="beta_vae",
     )["verdicts"]
     assert verdicts["beta_vae_nao_ganha"] is False
+
+
+def test_the_beta_vae_criterion_is_not_applied_to_the_supervised_techniques():
+    """Aplicado a uma linha da escada, ele compararia duas tecnicas
+    supervisionadas e reportaria falha por uma ser melhor que a outra -- o
+    contrario do que a escada mostra."""
+    verdicts = decide(
+        _metrics(0.50, 3.0, 0.3), {"contrastive": {"drive_exact": 0.40}},
+        technique="contrastive_aux",
+    )["verdicts"]
+    assert "beta_vae_nao_ganha" not in verdicts
+
+
+def test_the_untrained_control_is_not_asked_to_beat_itself():
+    verdicts = decide(
+        _metrics(0.30, 5.6, 0.2), {"random_encoder": {"drive_exact": 0.30}},
+        technique="random_encoder",
+    )["verdicts"]
+    assert "supera_encoder_aleatorio" not in verdicts
+
+
+def test_the_study_order_makes_every_reference_available_before_it_is_needed():
+    from gefx.disent.train import STUDY_ORDER
+
+    assert set(STUDY_ORDER) == set(TECHNIQUES)
+    posicao = {name: index for index, name in enumerate(STUDY_ORDER)}
+    assert posicao["random_encoder"] == 0
+    assert posicao["contrastive"] < posicao["beta_vae"]
+
+
+def test_the_alternative_aggregate_drops_the_noisy_label_arm():
+    from gefx.disent.train import EXCLUDED_FROM_AGGREGATE, aggregate_without
+
+    metrics = {
+        "per_query_arm": {
+            "pedalboard-tanh": {"n": 10, "drive_level": {"exact": 0.6}, "mae_db": 3.0},
+            "lsp-tanh": {"n": 10, "drive_level": {"exact": 0.5}, "mae_db": 3.5},
+            "byod-bigmuff": {"n": 10, "drive_level": {"exact": 0.2}, "mae_db": 6.0},
+        }
+    }
+    assert EXCLUDED_FROM_AGGREGATE == ("byod-bigmuff",)
+    resumo = aggregate_without(metrics)
+    assert resumo["arms"] == 2
+    assert resumo["drive_exact"] == pytest.approx(0.55)
+    assert resumo["mae_db"] == pytest.approx(3.25)
+
+
+def test_the_alternative_aggregate_refuses_unbalanced_arms():
+    """A media das taxas por arm so e o agregado das linhas se os arms tiverem o
+    mesmo numero de consultas. Se deixarem de ter, isto tem de gritar."""
+    from gefx.disent.train import aggregate_without
+
+    metrics = {
+        "per_query_arm": {
+            "pedalboard-tanh": {"n": 10, "drive_level": {"exact": 0.6}, "mae_db": 3.0},
+            "lsp-tanh": {"n": 7, "drive_level": {"exact": 0.5}, "mae_db": 3.5},
+        }
+    }
+    with pytest.raises(ValueError, match="numeros de consultas diferentes"):
+        aggregate_without(metrics)
+
+
+def test_every_measured_summary_carries_the_aggregate_without_bigmuff(tmp_path):
+    manifest = train_module.train(_config(tmp_path), verbose=False)
+    assert "sem_bigmuff" in manifest["decision"]["measured"]
+
+
+def test_rescore_reapplies_the_criteria_without_retraining(tmp_path):
+    """Corrigir um criterio nao pode custar horas de GPU: o veredito sai de
+    `metrics.json`, que ja esta em disco."""
+    from gefx.disent.train import rescore
+
+    estudo = tmp_path / "study"
+    train_module.train(_config(tmp_path, technique="random_encoder",
+                               output_dir=estudo / "random_encoder"), verbose=False)
+    train_module.train(_config(tmp_path, technique="contrastive",
+                               output_dir=estudo / "contrastive"), verbose=False)
+    antes = json.loads((estudo / "contrastive" / "run.json").read_text())
+    assert "supera_encoder_aleatorio" not in antes["decision"]["verdicts"]
+
+    decisoes = rescore(estudo)
+    assert "supera_encoder_aleatorio" in decisoes["contrastive"]["verdicts"]
+    depois = json.loads((estudo / "contrastive" / "run.json").read_text())
+    assert depois["decision"] == decisoes["contrastive"]
+    assert depois["decision"]["measured"] == antes["decision"]["measured"]
 
 
 # --- dados --------------------------------------------------------------------

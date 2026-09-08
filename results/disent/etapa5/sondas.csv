@@ -1,0 +1,19 @@
+technique,factor,meaning,accuracy,chance,classes,above_chance
+random_encoder,arm,implementacao (deve sair de z_e),0.3107127746480733,0.14285714285714285,7,0.19583157042275215
+random_encoder,content_id,conteudo (deve sair de z_e),0.6157138146935559,0.05,20,0.5954882259932167
+random_encoder,drive_level,configuracao (deve ficar em z_e),0.35749865138536546,0.125,8,0.26571274444041765
+contrastive,arm,implementacao (deve sair de z_e),0.2523227841912321,0.14285714285714285,7,0.1277099148897708
+contrastive,content_id,conteudo (deve sair de z_e),0.1575013495714381,0.05,20,0.1131593153383559
+contrastive,drive_level,configuracao (deve ficar em z_e),0.5253582607454303,0.125,8,0.45755229799477753
+contrastive_aux,arm,implementacao (deve sair de z_e),0.2712514206141033,0.14285714285714285,7,0.14979332404978718
+contrastive_aux,content_id,conteudo (deve sair de z_e),0.19339344356093202,0.05,20,0.15094046690624424
+contrastive_aux,drive_level,configuracao (deve ficar em z_e),0.5348235357604377,0.125,8,0.46836975515478596
+grl,arm,implementacao (deve sair de z_e),0.25696634328619544,0.14285714285714285,7,0.13312740050056135
+grl,content_id,conteudo (deve sair de z_e),0.16464551480146422,0.05,20,0.12067948926469918
+grl,drive_level,configuracao (deve ficar em z_e),0.5612489195295666,0.125,8,0.4985701937480761
+full,arm,implementacao (deve sair de z_e),0.26768062968391226,0.14285714285714285,7,0.14562740129789764
+full,content_id,conteudo (deve sair de z_e),0.1969665308196955,0.05,20,0.15470161138915317
+full,drive_level,configuracao (deve ficar em z_e),0.4808939721949055,0.125,8,0.4067359682227491
+beta_vae,arm,implementacao (deve sair de z_e),0.22321519296910117,0.14285714285714285,7,0.09375105846395136
+beta_vae,content_id,conteudo (deve sair de z_e),0.11767947195159034,0.05,20,0.07124154942272667
+beta_vae,drive_level,configuracao (deve ficar em z_e),0.3491046136494153,0.125,8,0.25611955845647466

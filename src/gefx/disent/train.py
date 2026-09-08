@@ -71,15 +71,33 @@ TECHNIQUES: Dict[str, Dict[str, float]] = {
 #: Tecnicas que nao executam passo de otimizacao.
 UNTRAINED: Tuple[str, ...] = ("random_encoder",)
 
+#: Ordem de execucao do estudo. Nao e a ordem de `TECHNIQUES` nem a de exibicao:
+#: e a ordem em que as **referencias** ficam disponiveis. O `random_encoder`
+#: precisa vir antes de todos (e o criterio mais duro) e o `beta_vae` depois do
+#: `contrastive` (e contra ele que o controle e julgado). Rodar fora desta ordem
+#: nao quebra nada -- so deixa criterios de fora, silenciosamente.
+STUDY_ORDER: Tuple[str, ...] = (
+    "random_encoder", "contrastive", "contrastive_aux", "grl", "full", "beta_vae",
+)
+
 #: Baselines da etapa 4, na tarefa entre implementacoes (consulta x catalogo,
 #: sem o proprio arm no catalogo). Ficam aqui porque sao os limiares dos
 #: criterios, e um criterio sem numero nao e criterio.
 BASELINES: Dict[str, Dict[str, float]] = {
     "B0_marginal": {"drive_exact": 0.210, "mae_db": 8.15, "top_arm_share": 0.646},
     "B1_poc1_regressor": {"drive_exact": 0.317, "mae_db": 4.36},
-    "chance": {"drive_exact": 0.125, "mae_db": float("nan")},
+    # O acaso nao tem erro em dB: sortear um nivel nao e uma estimativa de nivel.
+    # A chave simplesmente nao existe, em vez de existir como NaN -- NaN nao e
+    # JSON valido e nao sobrevive a um ida-e-volta por disco.
+    "chance": {"drive_exact": 0.125},
     "paired_content_ceiling": {"drive_exact": 0.696, "mae_db": 2.67},
 }
+
+#: Arms que saem do agregado alternativo. O `byod-bigmuff` reprova a porteira de
+#: contraste quando medida no audio renderizado (minimo 0,51-0,65 contra o limiar
+#: de 1,0) e carrega ruido de rotulo conhecido; a decisao registrada foi mante-lo
+#: e **reportar todo agregado tambem sem ele**. Ver `disent/arms.py`.
+EXCLUDED_FROM_AGGREGATE: Tuple[str, ...] = ("byod-bigmuff",)
 
 #: Criterios pre-declarados. Avaliados por `decide()` sobre as metricas finais.
 CRITERIA: Dict[str, str] = {
@@ -288,15 +306,48 @@ def evaluate(
     return cross.predictions, metrics
 
 
+def aggregate_without(
+    metrics: Mapping[str, object], excluded: Sequence[str] = EXCLUDED_FROM_AGGREGATE
+) -> Dict[str, float]:
+    """Agregado sobre os arms restantes, para acompanhar todo agregado dos sete.
+
+    E media das taxas por arm, e nao das linhas: da no mesmo aqui porque o split
+    de consulta e balanceado (800 linhas por arm), e falha ruidosamente se
+    algum dia deixar de ser -- o `n` de cada arm vai junto no resultado.
+    """
+    por_arm = dict(metrics["per_query_arm"])  # type: ignore[index]
+    mantidos = [arm for arm in por_arm if arm not in set(excluded)]
+    if not mantidos:
+        raise ValueError(f"a exclusao de {list(excluded)} esvazia o agregado")
+    tamanhos = {int(por_arm[arm]["n"]) for arm in mantidos}
+    if len(tamanhos) != 1:
+        raise ValueError(
+            f"arms com numeros de consultas diferentes ({sorted(tamanhos)}): a media "
+            "das taxas por arm deixaria de ser o agregado das linhas"
+        )
+    return {
+        "arms": len(mantidos),
+        "excluded": list(excluded),
+        "drive_exact": float(
+            np.mean([por_arm[arm]["drive_level"]["exact"] for arm in mantidos])
+        ),
+        "mae_db": float(np.mean([por_arm[arm]["mae_db"] for arm in mantidos])),
+    }
+
+
 def decide(
     metrics: Mapping[str, object],
     references: Optional[Mapping[str, Mapping[str, float]]] = None,
+    technique: Optional[str] = None,
 ) -> Dict[str, object]:
     """Aplica `CRITERIA` as metricas finais. Sem interpretacao, so o veredito.
 
-    Os criterios que dependem de outra execucao (`supera_encoder_aleatorio`,
-    `beta_vae_nao_ganha`) so aparecem quando a referencia e passada; ausencia de
-    referencia deixa o criterio **de fora**, e nao aprovado por omissao.
+    Os criterios que dependem de outra execucao so aparecem quando a referencia
+    e passada; ausencia de referencia deixa o criterio **de fora**, e nao
+    aprovado por omissao. E `beta_vae_nao_ganha` so vale para o proprio controle:
+    aplicado a uma tecnica supervisionada ele compararia duas linhas da escada e
+    reportaria "falha" por uma delas ser melhor que a outra, que e o contrario do
+    que a escada quer mostrar.
     """
     overall = metrics["overall"]  # type: ignore[index]
     hub = metrics.get("hubness", {})
@@ -312,20 +363,50 @@ def decide(
         "abaixo_do_teto": bool(drive <= BASELINES["paired_content_ceiling"]["drive_exact"]),
     }
     references = references or {}
-    if "random_encoder" in references:
+    if "random_encoder" in references and technique != "random_encoder":
         verdicts["supera_encoder_aleatorio"] = bool(
             drive > references["random_encoder"]["drive_exact"]
         )
-    if "contrastive" in references:
+    if technique == "beta_vae" and "contrastive" in references:
         verdicts["beta_vae_nao_ganha"] = bool(
             references["contrastive"]["drive_exact"] >= drive
         )
+
+    measured = {"drive_exact": drive, "mae_db": mae_db, "top_arm_share": top_share}
+    if "per_query_arm" in metrics:
+        measured["sem_bigmuff"] = aggregate_without(metrics)
     return {
         "criteria": CRITERIA,
-        "measured": {"drive_exact": drive, "mae_db": mae_db, "top_arm_share": top_share},
+        "technique": technique,
+        "measured": measured,
         "baselines": BASELINES,
         "verdicts": verdicts,
     }
+
+
+def rescore(results_dir: Path = Path("results/disent/etapa5")) -> Dict[str, Dict[str, object]]:
+    """Reaplica `CRITERIA` sobre as metricas ja gravadas e regrava os `run.json`.
+
+    Existe porque criterio e resultado sao coisas separadas: corrigir a regra nao
+    pode custar horas de GPU, e recomputar o veredito a partir de `metrics.json`
+    da o mesmo numero que a execucao daria. A ordem de visita e a da escada, que
+    e o que garante que as referencias (`random_encoder`, `contrastive`) ja
+    existam quando os criterios que dependem delas forem avaliados.
+    """
+    results_dir = Path(results_dir)
+    references: Dict[str, Mapping[str, float]] = {}
+    out: Dict[str, Dict[str, object]] = {}
+    for name in STUDY_ORDER:
+        if not (results_dir / name / "run.json").exists():
+            continue
+        pasta = results_dir / name
+        metrics = json.loads((pasta / "metrics.json").read_text(encoding="utf-8"))
+        manifest = json.loads((pasta / "run.json").read_text(encoding="utf-8"))
+        manifest["decision"] = decide(metrics, references, technique=name)
+        (pasta / "run.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        references[name] = manifest["decision"]["measured"]
+        out[name] = manifest["decision"]
+    return out
 
 
 # --- laco ---------------------------------------------------------------------
@@ -455,7 +536,7 @@ def train(
         "splits": {name: int(len(frame)) for name, frame in frames.items()},
         "steps_executed": steps,
         "checkpoints": checkpoints,
-        "decision": decide(metrics, references),
+        "decision": decide(metrics, references, technique=config.technique),
     }
     (out_dir / "run.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if verbose:
@@ -483,13 +564,25 @@ def compare(
         if not manifest_path.exists():
             continue
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        measured = manifest["decision"]["measured"]
+        measured = dict(manifest["decision"]["measured"])
+        sem = measured.pop("sem_bigmuff", None)
         rows.append(
             {
                 "technique": name,
                 "kind": "control" if name == "beta_vae" else "learned",
                 **measured,
-                "verdicts": sum(manifest["decision"]["verdicts"].values()),
+                # O agregado sem o arm de rotulo ruidoso acompanha o dos sete por
+                # decisao registrada: sem ele nao da para saber quanto do numero
+                # e o `byod-bigmuff`.
+                "drive_exact_sem_bigmuff": sem["drive_exact"] if sem else None,
+                "mae_db_sem_bigmuff": sem["mae_db"] if sem else None,
+                # "n de m": o numero de criterios varia por tecnica (os que
+                # dependem de referencia so existem para quem tem referencia),
+                # entao a contagem crua nao e comparavel entre linhas.
+                "verdicts": "{}/{}".format(
+                    sum(manifest["decision"]["verdicts"].values()),
+                    len(manifest["decision"]["verdicts"]),
+                ),
                 "steps": manifest.get("steps_executed", manifest["config"]["steps"]),
             }
         )
