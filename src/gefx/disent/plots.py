@@ -419,8 +419,8 @@ TECHNIQUE_LABEL = {
     "beta_vae": "β-VAE\n(controle)",
     "contrastive": "contrastivo",
     "contrastive_aux": "+ regressão\nauxiliar",
-    "grl": "+ GRL\n(impl., conteúdo)",
-    "full": "+ GRL config.\n+ ortogonalidade",
+    "grl": "+ GRL\nimpl. + conteúdo",
+    "full": "+ GRL config.\n+ ortogonal.",
 }
 
 
@@ -524,6 +524,7 @@ def plot_training_curves(
     # A rampa so e desenhada quando ha adversario: numa tecnica sem reversao ela
     # existe no historico mas nao multiplica gradiente nenhum, e mostra-la
     # sugeriria uma agenda que nao esta em vigor.
+    eixo_lambda = None
     if any(termo.startswith("adversary") for termo in termos):
         eixo_lambda = left.twinx()
         eixo_lambda.plot(completa["step"], completa["lambda"], color="k",
@@ -534,7 +535,12 @@ def plot_training_curves(
     left.set_xlabel("passo")
     left.set_ylabel("perda (média móvel de 50 passos)")
     left.set_title(f"Termos da perda — técnica «{nome_completa}»")
-    left.legend(fontsize=8)
+    # A legenda vai no eixo de cima (o do λ, quando existe): desenhada no de
+    # baixo, a curva pontilhada passa por dentro dela.
+    handles, labels = left.get_legend_handles_labels()
+    (eixo_lambda if eixo_lambda is not None else left).legend(
+        handles, labels, fontsize=8, loc="upper right", framealpha=0.95
+    )
 
     for nome in ordered_techniques(checkpoints):
         pontos = list(checkpoints[nome])
@@ -555,7 +561,9 @@ def plot_training_curves(
     right.set_xlabel("passo")
     right.set_ylabel("acerto exato do nível de drive (%)")
     right.set_title("Recuperação ao longo do treino")
-    right.legend(fontsize=8, loc="lower right")
+    # Fora dos eixos: as seis curvas ocupam a faixa inteira do painel e qualquer
+    # canto que a legenda escolha cobre pontos de avaliacao.
+    right.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3)
 
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight", dpi=150)

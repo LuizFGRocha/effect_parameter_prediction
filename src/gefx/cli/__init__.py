@@ -195,9 +195,12 @@ def _cmd_disent_plots(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
-    from gefx.disent.train import TECHNIQUES, TrainConfig, compare, train
+    from gefx.disent.train import STUDY_ORDER, TECHNIQUES, TrainConfig, compare, train
 
     escolhidas = args.technique or ["full"]
+    # A ordem de execucao decide quais criterios podem ser avaliados, entao ela e
+    # imposta e nao herdada da linha de comando.
+    escolhidas = [nome for nome in STUDY_ORDER if nome in set(escolhidas)] or escolhidas
     saida_base = Path(args.output_dir) if args.output_dir else None
     # As referencias sao acumuladas na ordem em que as tecnicas rodam: o
     # `random_encoder` tem de vir antes de quem ele avalia, senao o criterio mais
@@ -233,6 +236,19 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
     print(tabela.to_string(index=False))
     destino = raiz / "comparacao.csv"
     destino.parent.mkdir(parents=True, exist_ok=True)
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
+
+
+def _cmd_disent_probe(args: argparse.Namespace) -> None:
+    from gefx.disent.diagnostics import probe_study
+
+    tabela = probe_study(
+        Path(args.results_dir), Path(args.output_root),
+        techniques=args.technique, split=args.split, folds=args.folds, seed=args.seed,
+    )
+    print(tabela.to_string(index=False))
+    destino = Path(args.results_dir) / "sondas.csv"
     tabela.to_csv(destino, index=False)
     print(f"\ntabela em {destino}")
 
@@ -466,6 +482,20 @@ def build_parser() -> argparse.ArgumentParser:
     disent_train.add_argument("--output-dir", default=None,
                               help="Padrao: results/disent/etapa5/<tecnica>.")
     disent_train.set_defaults(func=_cmd_disent_train)
+
+    disent_probe = disent_sub.add_parser(
+        "probe",
+        help="Sondas lineares sobre o z_e das execucoes da etapa 5.",
+    )
+    disent_probe.add_argument("--results-dir", default="results/disent/etapa5")
+    disent_probe.add_argument("--output-root", default="datasets/disent")
+    disent_probe.add_argument("--technique", action="append", default=None)
+    disent_probe.add_argument("--split", default="catalog",
+                              help="Particao sondada. O catalogo e o padrao porque "
+                                   "e o que a busca de fato consulta.")
+    disent_probe.add_argument("--folds", type=int, default=3)
+    disent_probe.add_argument("--seed", type=int, default=0)
+    disent_probe.set_defaults(func=_cmd_disent_probe)
 
     disent_validate = disent_sub.add_parser(
         "validate", help="Confere que a grade esta cruzada e pareada entre os arms."
