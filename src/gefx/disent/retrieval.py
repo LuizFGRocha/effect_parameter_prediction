@@ -164,22 +164,45 @@ def block_size(n_catalog: int, dims: int, budget: int = NEAREST_BLOCK_BYTES) -> 
     return max(1, budget // per_query)
 
 
+#: Metricas de busca. `l1` e a do descritor cru (a mesma do oraculo, so que
+#: reduzida); `cosine` e a do codigo aprendido, onde `z_e` vive na esfera e o
+#: contrastivo otimiza produto interno. Buscar em L1 um espaco treinado em
+#: cosseno mediria outra coisa que nao o que a rede aprendeu.
+METRICS: Tuple[str, ...] = ("l1", "cosine")
+
+
 def nearest(
-    queries: np.ndarray, catalog: np.ndarray, chunk: Optional[int] = None
+    queries: np.ndarray,
+    catalog: np.ndarray,
+    chunk: Optional[int] = None,
+    metric: str = "l1",
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Indice e distancia L1 media do item de catalogo mais proximo de cada consulta.
+    """Indice e distancia do item de catalogo mais proximo de cada consulta.
 
     Em blocos porque a matriz de diferencas nao cabe inteira: 5.600 x 4.800 x
     4.096 em float32 seriam 440 GB. `chunk=None` dimensiona o bloco pelo
     orcamento de memoria, que e o que mantem isto valido quando o descritor muda
     de tamanho.
     """
+    if metric not in METRICS:
+        raise ValueError(f"metrica desconhecida: {metric!r}. Ha {list(METRICS)}")
     queries = np.ascontiguousarray(queries, dtype=np.float32)
     catalog = np.ascontiguousarray(catalog, dtype=np.float32)
     if queries.shape[1] != catalog.shape[1]:
         raise ValueError(
             f"dimensoes incompativeis: {queries.shape[1]} e {catalog.shape[1]}"
         )
+
+    if metric == "cosine":
+        # Sem bloco: o produto de matrizes e 5.600 x 5.600, cabe folgado, e a
+        # normalizacao aqui torna a funcao segura mesmo se o codigo chegar sem
+        # norma unitaria.
+        q = queries / (np.linalg.norm(queries, axis=1, keepdims=True) + 1e-12)
+        c = catalog / (np.linalg.norm(catalog, axis=1, keepdims=True) + 1e-12)
+        similarity = q @ c.T
+        picks = similarity.argmax(axis=1)
+        return picks, (1.0 - similarity.max(axis=1)).astype(np.float32)
+
     if chunk is None:
         chunk = block_size(len(catalog), queries.shape[1])
     picks = np.empty(len(queries), dtype=np.int64)
@@ -206,6 +229,7 @@ def retrieve(
     catalog_frame: pd.DataFrame,
     query_descriptors: np.ndarray,
     catalog_descriptors: np.ndarray,
+    metric: str = "l1",
 ) -> pd.DataFrame:
     """Uma linha por consulta, com o que foi recuperado e o que era certo."""
     if set(query_frame["content_id"]) & set(catalog_frame["content_id"]):
@@ -213,7 +237,7 @@ def retrieve(
             "consulta e catalogo compartilham conteudo: o acerto poderia vir de "
             "reconhecer a execucao, e nao o ajuste"
         )
-    picks, dists = nearest(query_descriptors, catalog_descriptors)
+    picks, dists = nearest(query_descriptors, catalog_descriptors, metric=metric)
     hit = catalog_frame.iloc[picks]
     out = pd.DataFrame(
         {
@@ -272,6 +296,68 @@ def alphabet(frame: pd.DataFrame) -> Dict[str, int]:
     esconderia isso.
     """
     return {axis: int(frame[axis].nunique()) for axis in LEVEL_AXES}
+
+
+def retrieve_by_arm(
+    queries: pd.DataFrame,
+    catalog: pd.DataFrame,
+    query_vectors: np.ndarray,
+    catalog_vectors: np.ndarray,
+    same_arm: bool = False,
+    metric: str = "l1",
+) -> RetrievalResult:
+    """A tarefa do POC II, dada uma representacao qualquer das duas particoes.
+
+    Separada de `baseline_b0` porque e exatamente o mesmo protocolo que avalia o
+    codigo aprendido: mesma exclusao do proprio arm, mesmo alfabeto, mesmo
+    denominador de sorvedouro. Se as duas avaliacoes divergissem em qualquer
+    detalhe, a comparacao entre B0 e a rede deixaria de medir a rede.
+
+    `same_arm=False` (o padrao) e a tarefa: o catalogo nao contem o arm da
+    consulta, entao a resposta tem de atravessar implementacoes.
+    """
+    if len(queries) != len(query_vectors) or len(catalog) != len(catalog_vectors):
+        raise ValueError(
+            f"tabelas e vetores desalinhados: {len(queries)}/{len(query_vectors)} "
+            f"consultas, {len(catalog)}/{len(catalog_vectors)} catalogo"
+        )
+    parts: List[pd.DataFrame] = []
+    for arm in sorted(queries["arm"].unique()):
+        q_where = np.flatnonzero((queries["arm"] == arm).to_numpy())
+        keep = (
+            np.ones(len(catalog), dtype=bool)
+            if same_arm
+            else (catalog["arm"] != arm).to_numpy()
+        )
+        c_where = np.flatnonzero(keep)
+        parts.append(
+            retrieve(
+                queries.iloc[q_where].reset_index(drop=True),
+                catalog.iloc[c_where].reset_index(drop=True),
+                query_vectors[q_where],
+                catalog_vectors[c_where],
+                metric=metric,
+            )
+        )
+    predictions = pd.concat(parts, ignore_index=True)
+
+    sizes = alphabet(queries)
+    por_arm = int(len(catalog) / catalog["arm"].nunique())
+    metrics: Dict[str, object] = {
+        "overall": score(predictions, sizes),
+        "per_query_arm": {
+            str(arm): score(part, sizes)
+            for arm, part in predictions.groupby("query_arm", sort=True)
+        },
+        "same_arm": bool(same_arm),
+        "metric": metric,
+        "alphabet": sizes,
+        # Quantos itens cada consulta de fato pode alcancar. Sem `same_arm` o
+        # proprio arm sai do catalogo, entao nao e `len(catalog)` -- e e este o
+        # denominador da ocupacao esperada no diagnostico de sorvedouro.
+        "catalog_size": len(catalog) if same_arm else len(catalog) - por_arm,
+    }
+    return RetrievalResult(predictions=predictions, metrics=metrics)
 
 
 # --- fidelidade da reducao ----------------------------------------------------
@@ -351,41 +437,7 @@ def baseline_b0(
     q_desc = load_descriptors(root, queries, bands=bands)
     c_desc = load_descriptors(root, catalog, bands=bands)
 
-    parts: List[pd.DataFrame] = []
-    for arm in sorted(queries["arm"].unique()):
-        q_where = np.flatnonzero((queries["arm"] == arm).to_numpy())
-        keep = (
-            np.ones(len(catalog), dtype=bool)
-            if same_arm
-            else (catalog["arm"] != arm).to_numpy()
-        )
-        c_where = np.flatnonzero(keep)
-        parts.append(
-            retrieve(
-                queries.iloc[q_where].reset_index(drop=True),
-                catalog.iloc[c_where].reset_index(drop=True),
-                q_desc[q_where],
-                c_desc[c_where],
-            )
-        )
-    predictions = pd.concat(parts, ignore_index=True)
-
-    sizes = alphabet(queries)
-    por_arm = int(len(catalog) / catalog["arm"].nunique())
-    metrics: Dict[str, object] = {
-        "overall": score(predictions, sizes),
-        "per_query_arm": {
-            str(arm): score(part, sizes)
-            for arm, part in predictions.groupby("query_arm", sort=True)
-        },
-        "same_arm": bool(same_arm),
-        "alphabet": sizes,
-        # Quantos itens cada consulta de fato pode alcancar. Sem `same_arm` o
-        # proprio arm sai do catalogo, entao nao e `len(catalog)` -- e e este o
-        # denominador da ocupacao esperada no diagnostico de sorvedouro.
-        "catalog_size": len(catalog) if same_arm else len(catalog) - por_arm,
-    }
-    return RetrievalResult(predictions=predictions, metrics=metrics)
+    return retrieve_by_arm(queries, catalog, q_desc, c_desc, same_arm=same_arm)
 
 
 def cross_arm_table(

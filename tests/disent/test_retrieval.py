@@ -15,6 +15,7 @@ from gefx.disent.retrieval import (
     nearest,
     pool_time,
     retrieve,
+    retrieve_by_arm,
     score,
 )
 
@@ -268,3 +269,47 @@ def test_paired_ceiling_keeps_content_fixed_and_crosses_implementations(tmp_path
     # E sempre dentro do proprio conteudo.
     assert res.metrics["overall"]["cross_implementation"] is True
     assert res.metrics["note"].startswith("teto")
+
+
+def test_cosine_and_l1_are_both_available_and_disagree_where_the_norm_matters():
+    """A metrica nao e detalhe: o descritor cru vive em L1 (a distancia do
+    oraculo, reduzida) e o codigo aprendido vive em cosseno (onde o contrastivo
+    otimiza). Buscar um no espaco do outro mediria outra coisa.
+    """
+    queries = np.array([[2.0, 0.0]], dtype=np.float32)
+    catalog = np.array([[1.0, 0.0], [2.0, 0.6]], dtype=np.float32)
+    assert nearest(queries, catalog, metric="cosine")[0][0] == 0
+    assert nearest(queries, catalog, metric="l1")[0][0] == 1
+
+
+def test_an_unknown_metric_is_refused():
+    with pytest.raises(ValueError, match="metrica desconhecida"):
+        nearest(np.zeros((1, 2), np.float32), np.zeros((1, 2), np.float32), metric="l2")
+
+
+def _multi_arm(arms, contents, split):
+    return pd.concat([_frame(arm, contents, split) for arm in arms], ignore_index=True)
+
+
+def test_retrieve_by_arm_never_lets_a_query_reach_its_own_arm():
+    arms = ["m0", "m1", "m2"]
+    queries = _multi_arm(arms, ["q0", "q1"], "query")
+    catalog = _multi_arm(arms, ["k0", "k1"], "catalog")
+    rng = np.random.default_rng(0)
+    result = retrieve_by_arm(
+        queries, catalog,
+        rng.random((len(queries), 3)).astype(np.float32),
+        rng.random((len(catalog), 3)).astype(np.float32),
+        same_arm=False,
+    )
+    assert not (result.predictions["query_arm"] == result.predictions["retrieved_arm"]).any()
+    # O denominador do sorvedouro exclui o proprio arm: nao e `len(catalog)`.
+    assert result.metrics["catalog_size"] == len(catalog) - len(catalog) // len(arms)
+
+
+def test_retrieve_by_arm_refuses_vectors_that_do_not_match_the_tables():
+    queries = _multi_arm(["m0", "m1"], ["q0"], "query")
+    catalog = _multi_arm(["m0", "m1"], ["k0"], "catalog")
+    with pytest.raises(ValueError, match="desalinhados"):
+        retrieve_by_arm(queries, catalog, np.zeros((1, 3), np.float32),
+                        np.zeros((len(catalog), 3), np.float32))

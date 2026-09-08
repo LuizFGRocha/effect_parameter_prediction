@@ -194,3 +194,93 @@ def build_index(
     if frame.empty:
         raise ValueError(f"recorte vazio (split={split!r}, arms={arms!r})")
     return GridIndex(frame)
+
+
+@dataclass(frozen=True)
+class Batch:
+    """Um batch balanceado por configuracao, em indices de linha do `GridIndex`.
+
+    `rows` sao as ancoras -- e so elas que o passo para frente da fase 1 encoda.
+    `effect_donor` e `swap_target` acompanham linha a linha, sem custo (sao
+    consultas na tabela do indice), e ficam ali para a fase 2: a reconstrucao com
+    troca de codigos precisa exatamente destas duas colunas, e produzi-las aqui e
+    o que impede que acrescentar o decoder vire uma reescrita do pipeline.
+    """
+
+    rows: np.ndarray
+    content: np.ndarray
+    config: np.ndarray
+    arm: np.ndarray
+    effect_donor: np.ndarray
+    swap_target: np.ndarray
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+
+def class_balanced_batch(
+    index: GridIndex,
+    rng: np.random.Generator,
+    configs_per_batch: int = 8,
+    views_per_config: int = 8,
+) -> Batch:
+    """`P` configuracoes x `K` vistas, cada vista com conteudo e arm sorteados.
+
+    O contrastivo supervisionado so produz termo para ancoras que tenham ao menos
+    um positivo no batch. Sorteio uniforme sobre 40 configuracoes num batch de 64
+    deixaria a maioria das ancoras sem par -- a perda passaria a medir a sorte da
+    amostragem. Dai o batch ser montado por classe, e nao por linha.
+
+    Dentro de uma configuracao as `K` vistas variam em conteudo **e** em
+    implementacao. E essa a afirmacao que o treino inteiro faz: mesmo ajuste,
+    outro violao, outro plugin, mesmo lugar no espaco.
+    """
+    n_contents, n_configs, n_arms = index.shape
+    if configs_per_batch > n_configs:
+        raise ValueError(
+            f"pedidas {configs_per_batch} configuracoes por batch, ha {n_configs}"
+        )
+    if views_per_config < 2:
+        raise ValueError("sao precisas ao menos 2 vistas por configuracao para haver positivo")
+
+    chosen = rng.choice(n_configs, size=configs_per_batch, replace=False)
+    rows: List[int] = []
+    donors: List[int] = []
+    targets: List[int] = []
+    for config in chosen:
+        # Sem reposicao no conteudo: duas vistas do mesmo conteudo e mesma
+        # configuracao so diferem na implementacao, e um batch cheio delas
+        # ensinaria invariancia a implementacao a custo de nao ver conteudo.
+        replace = n_contents < views_per_config
+        contents = rng.choice(n_contents, size=views_per_config, replace=replace)
+        arms = rng.integers(0, n_arms, size=views_per_config)
+        for content, arm in zip(contents, arms):
+            donor_content = _other(rng, n_contents, int(content))
+            donor_config = int(rng.integers(0, n_configs))
+            rows.append(index.row(int(content), int(config), int(arm)))
+            donors.append(index.row(donor_content, donor_config, int(rng.integers(0, n_arms))))
+            targets.append(index.row(int(content), donor_config, int(arm)))
+
+    rows_array = np.array(rows, dtype=np.int64)
+    labels = index.labels(rows_array)
+    return Batch(
+        rows=rows_array,
+        content=labels["content"],
+        config=labels["config"],
+        arm=labels["arm"],
+        effect_donor=np.array(donors, dtype=np.int64),
+        swap_target=np.array(targets, dtype=np.int64),
+    )
+
+
+def batch_stream(
+    index: GridIndex,
+    steps: int,
+    configs_per_batch: int = 8,
+    views_per_config: int = 8,
+    seed: int = 0,
+):
+    """`steps` batches balanceados. Gerador porque nada disto precisa existir junto."""
+    rng = np.random.default_rng(seed)
+    for _ in range(steps):
+        yield class_balanced_batch(index, rng, configs_per_batch, views_per_config)

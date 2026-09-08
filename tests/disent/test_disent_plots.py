@@ -164,3 +164,100 @@ def test_build_all_refuses_results_without_the_catalog_size(tmp_path):
 
     with pytest.raises(KeyError, match="catalog_size"):
         build_all(tmp_path)
+
+
+# --- figuras da etapa 5 -------------------------------------------------------
+def _etapa5_run(root, nome, drive_exact, mae_db, passos=3, checkpoints=None):
+    import json
+
+    pasta = root / nome
+    pasta.mkdir(parents=True)
+    (pasta / "run.json").write_text(
+        json.dumps(
+            {
+                "decision": {"measured": {"drive_exact": drive_exact, "mae_db": mae_db,
+                                          "top_arm_share": 0.2}},
+                "checkpoints": checkpoints or [],
+                "config": {"steps": passos},
+                "steps_executed": passos,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pasta / "metrics.json").write_text(
+        json.dumps(
+            {
+                "alphabet": {"drive_level": 8, "tone_level": 5},
+                "per_query_arm": {
+                    arm: {"drive_level": {"exact": 0.5 if arm != "byod-bigmuff" else 0.2}}
+                    for arm in ("pedalboard-tanh", "lsp-tanh", "byod-bigmuff")
+                },
+                "hubness": {"by_retrieved_arm": {"pedalboard-tanh": 0.4, "lsp-tanh": 0.35,
+                                                 "byod-bigmuff": 0.25}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pasta / "history.json").write_text(
+        json.dumps(
+            [
+                {"step": passo, "lambda": passo / passos, "total": 3.0 - passo * 0.1,
+                 "contrastive": 3.0 - passo * 0.1, "adversary_arm": 1.9}
+                for passo in range(1, passos + 1)
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return pasta
+
+
+def test_the_technique_order_is_the_ladder_and_not_the_ranking():
+    """Ordenar por resultado esconderia o que a escada mostra: que cada linha
+    acrescenta uma ideia a anterior."""
+    from gefx.disent.plots import TECHNIQUE_ORDER, ordered_techniques
+
+    assert ordered_techniques({"full", "contrastive", "random_encoder"}) == [
+        "random_encoder", "contrastive", "full"
+    ]
+    assert list(TECHNIQUE_ORDER).index("contrastive") < list(TECHNIQUE_ORDER).index("full")
+
+
+def test_every_technique_of_the_study_has_a_label():
+    from gefx.disent.plots import TECHNIQUE_LABEL, TECHNIQUE_ORDER
+    from gefx.disent.train import TECHNIQUES
+
+    assert set(TECHNIQUE_ORDER) == set(TECHNIQUES)
+    assert set(TECHNIQUE_LABEL) == set(TECHNIQUES)
+
+
+def test_build_etapa5_writes_every_figure_from_the_runs_on_disk(tmp_path):
+    from gefx.disent.plots import build_etapa5
+
+    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
+    _etapa5_run(tmp_path, "full", 0.45, 3.8,
+                checkpoints=[{"step": 1, "drive_exact": 0.40, "mae_db": 4.2}])
+    escritos = build_etapa5(tmp_path, tmp_path / "figuras")
+    nomes = {caminho.name for caminho in escritos}
+    assert nomes == {
+        "escada_de_tecnicas.png", "curvas_de_treino.png",
+        "sorvedouro_por_tecnica.png", "por_arm_melhor_tecnica.png",
+    }
+    assert all(caminho.stat().st_size > 0 for caminho in escritos)
+
+
+def test_build_etapa5_refuses_a_directory_without_runs(tmp_path):
+    from gefx.disent.plots import build_etapa5
+
+    (tmp_path / "vazio").mkdir()
+    with pytest.raises(FileNotFoundError, match="run.json"):
+        build_etapa5(tmp_path)
+
+
+def test_the_untrained_control_has_no_curve_and_does_not_break_the_figure(tmp_path):
+    """O controle nao treina, entao nao tem historico. A figura tem de sair
+    assim mesmo -- e ele que ancora a comparacao."""
+    from gefx.disent.plots import build_etapa5
+
+    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
+    escritos = build_etapa5(tmp_path, tmp_path / "figuras")
+    assert not any(caminho.name == "curvas_de_treino.png" for caminho in escritos)

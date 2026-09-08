@@ -17,7 +17,9 @@ from gefx.disent.sampler import (
     GridIndex,
     SwapTuple,
     as_arrays,
+    batch_stream,
     build_index,
+    class_balanced_batch,
     swap_tuples,
 )
 
@@ -185,3 +187,81 @@ def test_file_names_follow_the_row_order():
     index = build_index(_frame())
     rows = [3, 1, 0]
     assert index.file_names(rows) == [index.frame["file_name"][row] for row in rows]
+
+
+# --- batches balanceados por classe ------------------------------------------
+def test_the_batch_has_the_asked_shape_and_the_configs_are_distinct():
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(0), 2, 3)
+    assert len(batch) == 6
+    assert len(set(batch.config)) == 2
+    assert list(np.sort(np.bincount(batch.config, minlength=3))[-2:]) == [3, 3]
+
+
+def test_every_anchor_in_the_batch_has_at_least_one_positive():
+    """E a condicao de o contrastivo supervisionado produzir termo. Sem ela a
+    perda passaria a medir a sorte da amostragem, e nao o que a rede aprendeu."""
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(1), 3, 2)
+    counts = np.bincount(batch.config)
+    assert all(counts[label] >= 2 for label in batch.config)
+
+
+def test_the_batch_labels_match_the_rows_it_carries():
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(2), 2, 2)
+    labels = index.labels(batch.rows)
+    assert np.array_equal(labels["config"], batch.config)
+    assert np.array_equal(labels["content"], batch.content)
+    assert np.array_equal(labels["arm"], batch.arm)
+
+
+def test_the_batch_carries_the_swap_target_of_the_phase_two_seam():
+    """Cada alvo tem o conteudo e a implementacao da ancora e a configuracao do
+    doador. E a mesma propriedade que `swap_tuples` garante -- e ela tem de
+    sobreviver ao caminho que o treino da fase 1 realmente usa."""
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(3), 3, 3)
+    anchors = index.labels(batch.rows)
+    donors = index.labels(batch.effect_donor)
+    targets = index.labels(batch.swap_target)
+    assert np.array_equal(targets["content"], anchors["content"])
+    assert np.array_equal(targets["arm"], anchors["arm"])
+    assert np.array_equal(targets["config"], donors["config"])
+
+
+def test_the_effect_donor_never_shares_the_anchor_content_in_a_batch():
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(4), 3, 3)
+    assert not np.any(index.labels(batch.effect_donor)["content"] == batch.content)
+
+
+def test_a_batch_with_a_single_view_per_config_is_refused():
+    index = build_index(_frame())
+    with pytest.raises(ValueError, match="positivo"):
+        class_balanced_batch(index, np.random.default_rng(0), 2, 1)
+
+
+def test_asking_for_more_configs_than_the_grid_has_is_refused():
+    index = build_index(_frame())
+    with pytest.raises(ValueError, match="configuracoes"):
+        class_balanced_batch(index, np.random.default_rng(0), len(CONFIGS) + 1, 2)
+
+
+def test_the_batch_stream_is_deterministic_in_the_seed():
+    index = build_index(_frame())
+    first = [b.rows for b in batch_stream(index, 3, 2, 2, seed=7)]
+    second = [b.rows for b in batch_stream(index, 3, 2, 2, seed=7)]
+    other = [b.rows for b in batch_stream(index, 3, 2, 2, seed=8)]
+    assert all(np.array_equal(a, b) for a, b in zip(first, second))
+    assert any(not np.array_equal(a, b) for a, b in zip(first, other))
+
+
+def test_the_views_of_one_config_vary_in_content():
+    """Se as vistas repetissem conteudo, o batch ensinaria invariancia a
+    implementacao sem nunca mostrar conteudo diferente sob a mesma configuracao."""
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(5), 2, 4)
+    for label in set(batch.config):
+        where = batch.config == label
+        assert len(set(batch.content[where])) == int(where.sum())
