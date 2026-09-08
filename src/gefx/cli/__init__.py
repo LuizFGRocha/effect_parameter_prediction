@@ -185,12 +185,56 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_plots(args: argparse.Namespace) -> None:
-    from gefx.disent.plots import build_all
+    from gefx.disent.plots import build_all, build_etapa5
 
-    escritos = build_all(Path(args.results_dir), Path(args.out_dir) if args.out_dir else None)
+    constroi = build_etapa5 if args.etapa5 else build_all
+    escritos = constroi(Path(args.results_dir), Path(args.out_dir) if args.out_dir else None)
     print(f"{len(escritos)} figuras:")
     for caminho in escritos:
         print(f"  {caminho}")
+
+
+def _cmd_disent_train(args: argparse.Namespace) -> None:
+    from gefx.disent.train import TECHNIQUES, TrainConfig, compare, train
+
+    escolhidas = args.technique or ["full"]
+    saida_base = Path(args.output_dir) if args.output_dir else None
+    # As referencias sao acumuladas na ordem em que as tecnicas rodam: o
+    # `random_encoder` tem de vir antes de quem ele avalia, senao o criterio mais
+    # duro do estudo fica de fora.
+    referencias: dict = {}
+    for nome in escolhidas:
+        if nome not in TECHNIQUES:
+            raise SystemExit(f"tecnica desconhecida: {nome}. Ha {sorted(TECHNIQUES)}")
+        print(f"[{nome}]")
+        config = TrainConfig(
+            dataset_root=Path(args.output_root),
+            feature=args.feature,
+            technique=nome,
+            arms=tuple(args.arm) if args.arm else None,
+            steps=args.steps,
+            configs_per_batch=args.configs_per_batch,
+            views_per_config=args.views_per_config,
+            learning_rate=args.learning_rate,
+            temperature=args.temperature,
+            beta=args.beta,
+            eval_every=args.eval_every,
+            seed=args.seed,
+            output_dir=(saida_base / nome) if saida_base else None,
+        )
+        manifesto = train(config, references=referencias)
+        referencias[nome] = manifesto["decision"]["measured"]
+        for criterio, veredito in manifesto["decision"]["verdicts"].items():
+            print(f"    {'PASSA' if veredito else 'FALHA'}  {criterio}")
+
+    raiz = saida_base or Path("results/disent/etapa5")
+    tabela = compare(raiz)
+    print()
+    print(tabela.to_string(index=False))
+    destino = raiz / "comparacao.csv"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
 
 
 def _cmd_disent_validate(args: argparse.Namespace) -> None:
@@ -381,6 +425,9 @@ def build_parser() -> argparse.ArgumentParser:
     disent_plots = disent_sub.add_parser(
         "plots", help="Figuras dos baselines, a partir do que `retrieve` gravou.")
     disent_plots.add_argument("--results-dir", default="results/disent")
+    disent_plots.add_argument("--etapa5", action="store_true",
+                              help="Figuras do estudo comparativo (results/disent/etapa5) "
+                                   "em vez das dos baselines da etapa 4.")
     disent_plots.add_argument("--out-dir", default=None,
                               help="Padrao: <results-dir>/figuras.")
     disent_plots.set_defaults(func=_cmd_disent_plots)
@@ -393,6 +440,32 @@ def build_parser() -> argparse.ArgumentParser:
     disent_cache.add_argument("--arm", action="append", default=None)
     disent_cache.add_argument("--rebuild", action="store_true")
     disent_cache.set_defaults(func=_cmd_disent_cache)
+
+    disent_train = disent_sub.add_parser(
+        "train",
+        help="Etapa 5: treina o encoder desemaranhado e roda o estudo comparativo.",
+    )
+    disent_train.add_argument("--output-root", default="datasets/disent",
+                              help="Raiz do dataset do POC II.")
+    disent_train.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
+    disent_train.add_argument("--technique", action="append", default=None,
+                              help="Repetivel. Padrao: full. Rode 'random_encoder' "
+                                   "primeiro para que o criterio mais duro valha.")
+    disent_train.add_argument("--arm", action="append", default=None,
+                              help="Restringe as implementacoes (leave-one-arm-out).")
+    disent_train.add_argument("--steps", type=int, default=4000)
+    disent_train.add_argument("--configs-per-batch", type=int, default=8)
+    disent_train.add_argument("--views-per-config", type=int, default=8)
+    disent_train.add_argument("--learning-rate", type=float, default=1e-3)
+    disent_train.add_argument("--temperature", type=float, default=0.07)
+    disent_train.add_argument("--beta", type=float, default=4.0,
+                              help="Peso do KL no controle beta-VAE.")
+    disent_train.add_argument("--eval-every", type=int, default=500,
+                              help="0 desliga a avaliacao intermediaria.")
+    disent_train.add_argument("--seed", type=int, default=20260908)
+    disent_train.add_argument("--output-dir", default=None,
+                              help="Padrao: results/disent/etapa5/<tecnica>.")
+    disent_train.set_defaults(func=_cmd_disent_train)
 
     disent_validate = disent_sub.add_parser(
         "validate", help="Confere que a grade esta cruzada e pareada entre os arms."

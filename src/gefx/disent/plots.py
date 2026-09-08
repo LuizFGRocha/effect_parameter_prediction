@@ -399,3 +399,297 @@ def build_all(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path]:
         escritos.append(alvo)
 
     return escritos
+
+
+# --- etapa 5: o estudo comparativo -------------------------------------------
+COLOR_LEARNED = "#4c72b0"
+COLOR_CONTROL = "#dd8452"
+COLOR_RANDOM = "#937860"
+COLOR_CEILING = "#55a868"
+
+#: Ordem das tecnicas nas figuras: a escada de acumulo, depois os controles.
+#: Ordenar por resultado esconderia justamente o que a escada mostra -- que cada
+#: linha acrescenta uma ideia a anterior.
+TECHNIQUE_ORDER = (
+    "random_encoder", "beta_vae",
+    "contrastive", "contrastive_aux", "grl", "full",
+)
+TECHNIQUE_LABEL = {
+    "random_encoder": "encoder\nnão treinado",
+    "beta_vae": "β-VAE\n(controle)",
+    "contrastive": "contrastivo",
+    "contrastive_aux": "+ regressão\nauxiliar",
+    "grl": "+ GRL\n(impl., conteúdo)",
+    "full": "+ GRL config.\n+ ortogonalidade",
+}
+
+
+def ordered_techniques(present: Sequence[str]) -> List[str]:
+    present = set(present)
+    return [name for name in TECHNIQUE_ORDER if name in present]
+
+
+def plot_technique_ladder(runs: Dict[str, Dict[str, object]], out_path: Path) -> None:
+    """Acerto e erro por tecnica, com os baselines da etapa 4 como linhas.
+
+    As linhas horizontais sao o ponto da figura: sem o B1 e sem o encoder nao
+    treinado desenhados no mesmo eixo, uma barra de 44% parece um numero bom em
+    vez de um numero **comparado**. O encoder nao treinado e o mais duro dos
+    dois, porque separa o que o aprendizado trouxe do que a arquitetura ja dava.
+    """
+    from gefx.disent.train import BASELINES
+
+    names = ordered_techniques(runs)
+    exact = [runs[name]["drive_exact"] * 100 for name in names]
+    erro = [runs[name]["mae_db"] for name in names]
+    cores = [
+        COLOR_CONTROL if name in ("beta_vae",) else
+        COLOR_RANDOM if name == "random_encoder" else COLOR_LEARNED
+        for name in names
+    ]
+    rotulos = [TECHNIQUE_LABEL.get(name, name) for name in names]
+    posicoes = np.arange(len(names))
+
+    fig, (left, right) = plt.subplots(1, 2, figsize=(13, 5.5))
+
+    left.bar(posicoes, exact, color=cores)
+    # Rotulo dentro da barra: as linhas de referencia cruzam o topo delas, e um
+    # rotulo por cima cairia em cima de uma linha justamente nos casos
+    # interessantes -- os que empatam com um baseline.
+    for x, valor in zip(posicoes, exact):
+        left.annotate(f"{valor:.1f}", xy=(x, valor), xytext=(0, -14),
+                      textcoords="offset points", ha="center", fontsize=9,
+                      color="white", fontweight="bold")
+    for chave, cor, estilo, texto in (
+        ("chance", COLOR_CHANCE, ":", "acaso (12,5%)"),
+        ("B0_marginal", COLOR_B0, "--", "B0 sem aprendizado (21,0%)"),
+        ("B1_poc1_regressor", COLOR_B1, "--", "B1 regressor do POC I (31,7%)"),
+        ("paired_content_ceiling", COLOR_CEILING, "-.", "teto pareado (69,6%)"),
+    ):
+        left.axhline(BASELINES[chave]["drive_exact"] * 100, color=cor,
+                     linestyle=estilo, linewidth=1.4, label=texto)
+    left.set_xticks(posicoes)
+    left.set_xticklabels(rotulos, fontsize=8)
+    left.set_ylabel("acerto exato do nível de drive (%)")
+    left.set_ylim(0, max(75, max(exact) * 1.25))
+    left.set_title("Recuperação entre implementações")
+    left.legend(fontsize=8, loc="upper left")
+
+    right.bar(posicoes, erro, color=cores)
+    for x, valor in zip(posicoes, erro):
+        right.annotate(f"{valor:.2f}", xy=(x, valor), xytext=(0, -14),
+                       textcoords="offset points", ha="center", fontsize=9,
+                       color="white", fontweight="bold")
+    right.axhline(BASELINES["B1_poc1_regressor"]["mae_db"], color=COLOR_B1,
+                  linestyle="--", linewidth=1.4, label="B1 (4,36 dB)")
+    right.axhline(BASELINES["paired_content_ceiling"]["mae_db"], color=COLOR_CEILING,
+                  linestyle="-.", linewidth=1.4, label="teto pareado (2,67 dB)")
+    right.axhline(GRID_STEP_DB, color="k", linestyle=":", linewidth=1.2,
+                  label=f"um degrau da grade ({GRID_STEP_DB:.2f} dB)")
+    right.set_xticks(posicoes)
+    right.set_xticklabels(rotulos, fontsize=8)
+    right.set_ylabel("erro médio (dB equivalentes)")
+    right.set_ylim(0, max(erro) * 1.3)
+    right.set_title("Distância do ajuste certo")
+    right.legend(fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def plot_training_curves(
+    histories: Dict[str, pd.DataFrame],
+    checkpoints: Dict[str, List[Dict[str, object]]],
+    runs: Dict[str, Dict[str, object]],
+    out_path: Path,
+) -> None:
+    """A esquerda, os termos da perda da tecnica completa; a direita, a
+    recuperacao ao longo do treino, por tecnica.
+
+    Os dois paineis respondem perguntas diferentes e nao intercambiaveis: perda
+    caindo nao e recuperacao subindo, e e justamente onde os dois se descolam que
+    a tecnica esta otimizando a coisa errada.
+    """
+    from gefx.disent.train import BASELINES
+
+    fig, (left, right) = plt.subplots(1, 2, figsize=(13, 5))
+
+    nome_completa = "full" if "full" in histories else next(iter(histories))
+    completa = histories[nome_completa]
+    termos = [c for c in completa.columns if c not in ("step", "lambda", "total")]
+    for termo in sorted(termos):
+        suave = completa[termo].rolling(50, min_periods=1).mean()
+        left.plot(completa["step"], suave, linewidth=1.6, label=termo)
+    # A rampa so e desenhada quando ha adversario: numa tecnica sem reversao ela
+    # existe no historico mas nao multiplica gradiente nenhum, e mostra-la
+    # sugeriria uma agenda que nao esta em vigor.
+    if any(termo.startswith("adversary") for termo in termos):
+        eixo_lambda = left.twinx()
+        eixo_lambda.plot(completa["step"], completa["lambda"], color="k",
+                         linestyle=":", linewidth=1.2, label="λ")
+        eixo_lambda.set_ylabel("λ da reversão de gradiente (linha pontilhada)",
+                               fontsize=9)
+        eixo_lambda.set_ylim(0, 1.05)
+    left.set_xlabel("passo")
+    left.set_ylabel("perda (média móvel de 50 passos)")
+    left.set_title(f"Termos da perda — técnica «{nome_completa}»")
+    left.legend(fontsize=8)
+
+    for nome in ordered_techniques(checkpoints):
+        pontos = list(checkpoints[nome])
+        if not pontos:
+            continue
+        # O ultimo ponto e a avaliacao final, que nao esta em `checkpoints`. Sem
+        # ele a curva termina antes do numero que a figura da escada reporta.
+        passos = [int(p["step"]) for p in pontos] + [len(histories[nome])]
+        acertos = [float(p["drive_exact"]) * 100 for p in pontos]
+        acertos.append(float(runs[nome]["drive_exact"]) * 100)
+        right.plot(passos, acertos, marker="o", linewidth=1.8,
+                   label=TECHNIQUE_LABEL.get(nome, nome).replace("\n", " "))
+    right.axhline(BASELINES["B1_poc1_regressor"]["drive_exact"] * 100,
+                  color=COLOR_B1, linestyle="--", linewidth=1.4, label="B1")
+    right.axhline(BASELINES["paired_content_ceiling"]["drive_exact"] * 100,
+                  color=COLOR_CEILING, linestyle="-.", linewidth=1.4,
+                  label="teto pareado")
+    right.set_xlabel("passo")
+    right.set_ylabel("acerto exato do nível de drive (%)")
+    right.set_title("Recuperação ao longo do treino")
+    right.legend(fontsize=8, loc="lower right")
+
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def plot_hub_by_technique(shares: Dict[str, Dict[str, float]], out_path: Path) -> None:
+    """De qual implementacao vem a resposta, por tecnica, contra o B0.
+
+    O adversario de implementacao existe por causa desta figura: no B0 um unico
+    arm respondia 64,6% das consultas, e uma acuracia agregada nao mostra isso.
+    """
+    from gefx.disent.train import BASELINES
+
+    names = ordered_techniques(shares)
+    arms = ordered_arms({arm for share in shares.values() for arm in share})
+    uniforme = 100.0 / len(arms)
+
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    largura = 0.8 / len(arms)
+    posicoes = np.arange(len(names))
+    for indice, arm in enumerate(arms):
+        valores = [shares[name].get(arm, 0.0) * 100 for name in names]
+        ax.bar(posicoes + indice * largura - 0.4 + largura / 2, valores,
+               width=largura, label=_short(arm))
+    ax.axhline(uniforme, color="k", linestyle="--", linewidth=1.2)
+    ax.annotate(f"uniforme ({uniforme:.1f}%)", xy=(-0.45, uniforme),
+                xytext=(0, 4), textcoords="offset points", ha="left", fontsize=9)
+    ax.axhline(BASELINES["B0_marginal"]["top_arm_share"] * 100, color=COLOR_CHANCE,
+               linestyle=":", linewidth=1.4)
+    ax.annotate("pior caso do B0 (64,6%)",
+                xy=(0, BASELINES["B0_marginal"]["top_arm_share"] * 100),
+                xytext=(4, 4), textcoords="offset points", fontsize=9,
+                color=COLOR_CHANCE)
+    ax.set_xticks(posicoes)
+    ax.set_xticklabels([TECHNIQUE_LABEL.get(n, n) for n in names], fontsize=8)
+    ax.set_ylabel("fatia das consultas respondidas (%)")
+    ax.set_title("Concentração das respostas por implementação")
+    ax.legend(fontsize=8, ncol=4)
+
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def plot_by_arm_with_and_without_bigmuff(
+    metrics: Dict[str, object], technique: str, out_path: Path
+) -> None:
+    """Acerto por implementacao consultada, com o agregado nos dois recortes.
+
+    O agregado sem o `byod-bigmuff` acompanha todo agregado deste trabalho por
+    decisao registrada: o arm reprova a porteira de contraste no audio
+    renderizado e carrega ruido de rotulo conhecido. Mostrar so o agregado cheio
+    esconderia quanto do resultado e ele.
+    """
+    por_arm = metrics["per_query_arm"]  # type: ignore[index]
+    arms = ordered_arms(por_arm)
+    valores = [por_arm[arm]["drive_level"]["exact"] * 100 for arm in arms]
+    acaso = 100.0 / metrics["alphabet"]["drive_level"]  # type: ignore[index]
+
+    cheio = float(np.mean(valores))
+    sem = float(np.mean([v for a, v in zip(arms, valores) if a != "byod-bigmuff"]))
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    cores = [COLOR_CHANCE if arm == "byod-bigmuff" else COLOR_LEARNED for arm in arms]
+    ax.bar([_short(arm) for arm in arms], valores, color=cores)
+    for indice, valor in enumerate(valores):
+        ax.annotate(f"{valor:.1f}", xy=(indice, valor), xytext=(0, -14),
+                    textcoords="offset points", ha="center", fontsize=9,
+                    color="white", fontweight="bold")
+    ax.axhline(acaso, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
+               label=f"acaso ({acaso:.1f}%)")
+    ax.axhline(cheio, color="k", linestyle="--", linewidth=1.3,
+               label=f"média dos 7 arms ({cheio:.1f}%)")
+    ax.axhline(sem, color=COLOR_CEILING, linestyle="-.", linewidth=1.3,
+               label=f"média sem o byod-bigmuff ({sem:.1f}%)")
+    ax.set_ylabel("acerto exato do nível de drive (%)")
+    ax.set_ylim(0, max(valores) * 1.3)
+    ax.set_title(f"Por implementação consultada — técnica «{technique}»")
+    ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def build_etapa5(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path]:
+    """Figuras do estudo comparativo, a partir dos `run.json` ja gravados."""
+    results_dir = Path(results_dir)
+    out_dir = Path(out_dir or results_dir / "figuras")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    runs: Dict[str, Dict[str, object]] = {}
+    checkpoints: Dict[str, List[Dict[str, object]]] = {}
+    histories: Dict[str, pd.DataFrame] = {}
+    shares: Dict[str, Dict[str, float]] = {}
+    metrics: Dict[str, Dict[str, object]] = {}
+
+    for pasta in sorted(results_dir.iterdir()):
+        manifesto = pasta / "run.json"
+        if not pasta.is_dir() or not manifesto.exists():
+            continue
+        dados = json.loads(manifesto.read_text(encoding="utf-8"))
+        runs[pasta.name] = dados["decision"]["measured"]
+        checkpoints[pasta.name] = dados.get("checkpoints", [])
+        metrics[pasta.name] = json.loads(
+            (pasta / "metrics.json").read_text(encoding="utf-8")
+        )
+        shares[pasta.name] = metrics[pasta.name]["hubness"]["by_retrieved_arm"]
+        historico = json.loads((pasta / "history.json").read_text(encoding="utf-8"))
+        if historico:
+            histories[pasta.name] = pd.DataFrame(historico)
+
+    if not runs:
+        raise FileNotFoundError(f"nenhuma execucao com run.json em {results_dir}")
+
+    escritos: List[Path] = []
+
+    alvo = out_dir / "escada_de_tecnicas.png"
+    plot_technique_ladder(runs, alvo)
+    escritos.append(alvo)
+
+    if histories:
+        alvo = out_dir / "curvas_de_treino.png"
+        plot_training_curves(histories, checkpoints, runs, alvo)
+        escritos.append(alvo)
+
+    alvo = out_dir / "sorvedouro_por_tecnica.png"
+    plot_hub_by_technique(shares, alvo)
+    escritos.append(alvo)
+
+    melhor = max(runs, key=lambda nome: runs[nome]["drive_exact"])
+    alvo = out_dir / "por_arm_melhor_tecnica.png"
+    plot_by_arm_with_and_without_bigmuff(metrics[melhor], melhor, alvo)
+    escritos.append(alvo)
+
+    return escritos
