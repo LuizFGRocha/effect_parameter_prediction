@@ -223,6 +223,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             beta=args.beta,
             eval_every=args.eval_every,
             seed=args.seed,
+            permute_labels=args.permute_labels,
             output_dir=(saida_base / nome) if saida_base else None,
         )
         manifesto = train(config, references=referencias)
@@ -249,6 +250,31 @@ def _cmd_disent_probe(args: argparse.Namespace) -> None:
     )
     print(tabela.to_string(index=False))
     destino = Path(args.results_dir) / "sondas.csv"
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
+
+
+def _cmd_disent_loo(args: argparse.Namespace) -> None:
+    from gefx.disent.loo import leave_one_arm_out, transfer_cost
+
+    tabela = leave_one_arm_out(Path(args.output_root), Path(args.results_dir),
+                               technique=args.technique, steps=args.steps, seed=args.seed)
+    custo = transfer_cost(tabela)
+    print()
+    print(custo.to_string(index=False))
+    print(f"\ncusto medio de nunca ter visto a implementacao: "
+          f"{custo.custo_pontos.mean():+.1f} pontos")
+    print(custo.groupby("estrato").custo_pontos.mean().round(1).to_string())
+    custo.to_csv(Path(args.results_dir) / "custo_de_transferencia.csv", index=False)
+
+
+def _cmd_disent_ablate(args: argparse.Namespace) -> None:
+    from gefx.disent.diagnostics import ablate_representation
+
+    tabela = ablate_representation(Path(args.output_root), seed=args.seed)
+    print(tabela.to_string(index=False))
+    destino = Path(args.results_dir) / "ablacao_representacao.csv"
+    destino.parent.mkdir(parents=True, exist_ok=True)
     tabela.to_csv(destino, index=False)
     print(f"\ntabela em {destino}")
 
@@ -479,6 +505,10 @@ def build_parser() -> argparse.ArgumentParser:
     disent_train.add_argument("--eval-every", type=int, default=500,
                               help="0 desliga a avaliacao intermediaria.")
     disent_train.add_argument("--seed", type=int, default=20260908)
+    disent_train.add_argument("--permute-labels", action="store_true",
+                              help="Controle de permutacao: embaralha a configuracao "
+                                   "dentro de cada (conteudo, implementacao). Testa se "
+                                   "o ganho vem do rotulo ou do procedimento de treino.")
     disent_train.add_argument("--output-dir", default=None,
                               help="Padrao: results/disent/etapa5/<tecnica>.")
     disent_train.set_defaults(func=_cmd_disent_train)
@@ -496,6 +526,24 @@ def build_parser() -> argparse.ArgumentParser:
     disent_probe.add_argument("--folds", type=int, default=3)
     disent_probe.add_argument("--seed", type=int, default=0)
     disent_probe.set_defaults(func=_cmd_disent_probe)
+
+    disent_loo = disent_sub.add_parser(
+        "loo", help="Etapa 7: leave-one-arm-out, a transferencia para implementacao inedita.")
+    disent_loo.add_argument("--output-root", default="datasets/disent")
+    disent_loo.add_argument("--results-dir", default="results/disent/etapa5/loo")
+    disent_loo.add_argument("--technique", default="contrastive_aux")
+    disent_loo.add_argument("--steps", type=int, default=4000)
+    disent_loo.add_argument("--seed", type=int, default=20260908)
+    disent_loo.set_defaults(func=_cmd_disent_loo)
+
+    disent_ablate = disent_sub.add_parser(
+        "ablate",
+        help="Separa o ganho sobre o B0 em representacao, escala, dimensao e arquitetura.",
+    )
+    disent_ablate.add_argument("--output-root", default="datasets/disent")
+    disent_ablate.add_argument("--results-dir", default="results/disent/etapa5")
+    disent_ablate.add_argument("--seed", type=int, default=0)
+    disent_ablate.set_defaults(func=_cmd_disent_ablate)
 
     disent_validate = disent_sub.add_parser(
         "validate", help="Confere que a grade esta cruzada e pareada entre os arms."

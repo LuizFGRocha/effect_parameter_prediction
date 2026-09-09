@@ -21,7 +21,7 @@ hora de montar o indice, e nao uma tupla silenciosamente errada no meio do trein
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -284,3 +284,45 @@ def batch_stream(
     rng = np.random.default_rng(seed)
     for _ in range(steps):
         yield class_balanced_batch(index, rng, configs_per_batch, views_per_config)
+
+
+# --- controle de permutacao ---------------------------------------------------
+#: Colunas que descrevem a configuracao. Permutar todas juntas mantem cada linha
+#: internamente coerente -- o rotulo, o nivel e o valor em dB continuam falando
+#: da mesma configuracao, so que da configuracao errada.
+CONFIG_COLUMNS: Tuple[str, ...] = (
+    "config_index", "config_key", "drive_level", "tone_level",
+    "drive_knob", "tone_cutoff_hz", "drive_db_equivalente",
+)
+
+
+def permute_configs(frame: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
+    """Embaralha a configuracao **dentro de cada (conteudo, implementacao)**.
+
+    E o controle de permutacao do estudo, e a forma do embaralhamento e o ponto.
+    Sortear rotulo ao acaso destruiria o balanceamento do batch e o contrastivo
+    ficaria sem positivos -- o gradiente sumiria, e ai o controle mediria "treino
+    sem gradiente" em vez de "treino com rotulo sem sentido". Permutando o eixo
+    de configuracao dentro de cada par (conteudo, arm), a grade continua cruzada,
+    cada pseudo-configuracao continua tendo exatamente uma linha por par, os
+    batches continuam balanceados e a perda continua tendo positivos. **So o
+    agrupamento deixa de ter relacao com o audio.**
+
+    Se a recuperacao melhorar mesmo assim, o ganho nao vinha do rotulo -- vinha
+    do procedimento de treino, e a conclusao do estudo estaria errada.
+    """
+    frame = frame.reset_index(drop=True)
+    faltando = [c for c in ("content_id", "arm") if c not in frame.columns]
+    if faltando:
+        raise ValueError(f"faltam colunas para agrupar: {faltando}")
+
+    columns = [c for c in CONFIG_COLUMNS if c in frame.columns]
+    if not columns:
+        raise ValueError(f"nenhuma coluna de configuracao em {list(frame.columns)}")
+
+    rng = np.random.default_rng(seed)
+    out = frame.copy()
+    for _, positions in frame.groupby(["content_id", "arm"], sort=True).indices.items():
+        shuffled = rng.permutation(positions)
+        out.loc[positions, columns] = frame.loc[shuffled, columns].to_numpy()
+    return out

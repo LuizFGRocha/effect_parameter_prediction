@@ -20,6 +20,7 @@ from gefx.disent.sampler import (
     batch_stream,
     build_index,
     class_balanced_batch,
+    permute_configs,
     swap_tuples,
 )
 
@@ -265,3 +266,54 @@ def test_the_views_of_one_config_vary_in_content():
     for label in set(batch.config):
         where = batch.config == label
         assert len(set(batch.content[where])) == int(where.sum())
+
+
+# --- controle de permutacao ---------------------------------------------------
+def test_the_permutation_keeps_the_grid_crossed_and_the_batches_balanced():
+    """A forma do embaralhamento e o ponto do controle: rotulo sorteado ao acaso
+    deixaria o contrastivo sem positivos, e ai o controle mediria "treino sem
+    gradiente" em vez de "treino com rotulo sem sentido"."""
+    frame = _frame()
+    permuted = permute_configs(frame, seed=0)
+    index = build_index(permuted)
+    assert index.shape == (len(CONTENTS), len(CONFIGS), len(ARMS))
+    batch = class_balanced_batch(index, np.random.default_rng(0), 2, 2)
+    counts = np.bincount(batch.config)
+    assert all(counts[label] >= 2 for label in batch.config)
+
+
+def test_the_permutation_moves_the_configuration_and_not_the_audio():
+    frame = _frame()
+    permuted = permute_configs(frame, seed=0)
+    assert permuted["file_name"].equals(frame["file_name"])
+    assert permuted["content_id"].equals(frame["content_id"])
+    assert permuted["arm"].equals(frame["arm"])
+    assert not permuted["config_index"].equals(frame["config_index"])
+
+
+def test_the_permutation_preserves_the_configuration_marginal():
+    frame = _frame()
+    permuted = permute_configs(frame, seed=1)
+    assert sorted(permuted["config_index"]) == sorted(frame["config_index"])
+
+
+def test_the_permutation_keeps_each_row_internally_coherent():
+    """Rotulo, nivel e valor tem de andar juntos: uma linha com o `config_index`
+    de uma configuracao e o `drive_level` de outra nao e um controle, e um bug."""
+    frame = _frame()
+    frame["drive_level"] = frame["config_index"] * 10
+    permuted = permute_configs(frame, seed=2)
+    assert (permuted["drive_level"] == permuted["config_index"] * 10).all()
+
+
+def test_the_permutation_is_deterministic_in_the_seed():
+    frame = _frame()
+    a = permute_configs(frame, seed=3)["config_index"].to_numpy()
+    b = permute_configs(frame, seed=3)["config_index"].to_numpy()
+    c = permute_configs(frame, seed=4)["config_index"].to_numpy()
+    assert np.array_equal(a, b) and not np.array_equal(a, c)
+
+
+def test_the_permutation_needs_the_grouping_columns():
+    with pytest.raises(ValueError, match="agrupar"):
+        permute_configs(pd.DataFrame({"config_index": [0, 1]}))

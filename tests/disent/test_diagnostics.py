@@ -102,3 +102,64 @@ def test_probe_study_skips_techniques_that_were_not_run(tmp_path, monkeypatch):
     table = probe_study(tmp_path, tmp_path)
     assert list(table["technique"]) == ["contrastive"]
     assert list(table["factor"]) == ["arm"]
+
+
+# --- ablacao da representacao -------------------------------------------------
+def test_the_ablation_scorer_reports_the_three_numbers_the_table_needs():
+    """`_score` e o unico pedaco da ablacao que faz conta; o resto e montagem.
+    Ele passa pelo mesmo `retrieve_by_arm` do estudo, entao o que se testa aqui e
+    que os tres numeros da tabela saem de la, e nao que a busca funciona."""
+    from gefx.disent.diagnostics import _score
+
+    arms = ["a0", "a1"]
+    def tabela(contents, split):
+        return pd.DataFrame([
+            {"file_name": f"{c}_{d}_{a}.wav", "arm": a, "content_id": c, "split": split,
+             "drive_level": d, "tone_level": 0, "drive_db_equivalente": 10.0 + 5 * d}
+            for c, d, a in itertools.product(contents, (0, 1), arms)
+        ])
+    frames = {"query": tabela(["q0", "q1"], "query"),
+              "catalog": tabela(["k0", "k1"], "catalog")}
+    rng = np.random.default_rng(0)
+    numeros = _score(frames,
+                     rng.normal(size=(len(frames["query"]), 3)).astype(np.float32),
+                     rng.normal(size=(len(frames["catalog"]), 3)).astype(np.float32))
+    assert set(numeros) == {"drive_exact", "mae_db", "top_arm_share"}
+    assert 0.0 <= numeros["drive_exact"] <= 1.0
+    assert 0.0 < numeros["top_arm_share"] <= 1.0
+
+
+def test_the_ablation_reduces_to_the_dimension_the_encoder_uses():
+    """A ablacao so responde a pergunta se o degrau linear terminar na MESMA
+    largura do `z_e`; em outra largura ela mediria outra coisa."""
+    from gefx.disent.diagnostics import ABLATION_DIMS
+    from gefx.disent.model import EncoderConfig
+
+    assert ABLATION_DIMS == (EncoderConfig().effect_dim,)
+
+
+# --- resolucao da grade -------------------------------------------------------
+def test_the_level_subsets_all_keep_the_axis_ends_and_a_uniform_step():
+    """Subconjunto com passo irregular mediria resolucao misturada com posicao no
+    eixo, e o eixo nao e uniforme em dificuldade -- a metade de cima e mais
+    discriminavel."""
+    from gefx.disent.diagnostics import LEVEL_SUBSETS
+
+    for nome, niveis in LEVEL_SUBSETS.items():
+        passos = {b - a for a, b in zip(niveis, niveis[1:])}
+        assert len(passos) == 1, f"{nome}: passos {passos}"
+        assert set(niveis) <= set(range(8))
+
+
+def test_there_are_two_subsets_of_the_same_size_shifted_by_one_level():
+    """Pares e impares tem o mesmo passo e o mesmo tamanho e diferem so em onde
+    o eixo comeca -- e o unico par que isola a POSICAO da resolucao."""
+    from gefx.disent.diagnostics import LEVEL_SUBSETS
+
+    pares = LEVEL_SUBSETS["4 niveis pares (8,3 dB)"]
+    impares = LEVEL_SUBSETS["4 niveis impares (8,3 dB)"]
+    assert len(pares) == len(impares)
+    assert [b - a for a, b in zip(pares, pares[1:])] == [
+        b - a for a, b in zip(impares, impares[1:])
+    ]
+    assert all(i - p == 1 for p, i in zip(pares, impares))

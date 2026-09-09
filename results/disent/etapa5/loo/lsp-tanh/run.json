@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-09-09T02:11:17+00:00",
+  "git_revision": "089f94c522263c1f2a7fe4cc152f9294572ed5ac",
+  "elapsed_seconds": 674.3,
+  "config": {
+    "dataset_root": "datasets/disent",
+    "feature": "Spec",
+    "technique": "contrastive_aux",
+    "arms": [
+      "byod-bigmuff",
+      "byod-mxr",
+      "lsp-arctan",
+      "lsp-hardclip",
+      "lsp-sine",
+      "pedalboard-tanh"
+    ],
+    "steps": 4000,
+    "configs_per_batch": 8,
+    "views_per_config": 8,
+    "learning_rate": 0.001,
+    "temperature": 0.07,
+    "ramp_gamma": 10.0,
+    "beta": 4.0,
+    "eval_every": 0,
+    "embed_batch": 128,
+    "seed": 20260908,
+    "permute_labels": false,
+    "output_dir": "results/disent/etapa5/loo/lsp-tanh",
+    "encoder": {
+      "input_shape": [
+        256,
+        173,
+        1
+      ],
+      "filters": [
+        32,
+        64,
+        96,
+        128
+      ],
+      "kernel_size": 3,
+      "trunk_units": 256,
+      "dropout": 0.2,
+      "effect_dim": 32,
+      "content_dim": 64,
+      "adversary_units": 128
+    },
+    "weights": {
+      "contrastive": 1.0,
+      "aux_regression": 1.0
+    }
+  },
+  "heads": {
+    "n_arms": 6,
+    "n_contents": 60,
+    "n_configs": 40,
+    "n_aux": 2
+  },
+  "splits": {
+    "train": 14400,
+    "catalog": 4800,
+    "query": 4800
+  },
+  "steps_executed": 4000,
+  "checkpoints": [],
+  "decision": {
+    "criteria": {
+      "supera_b1_acerto": "acerto exato de drive > 0,317 (B1, o regressor do POC I)",
+      "supera_b1_erro": "erro medio < 4,36 dB (B1)",
+      "supera_b0_acerto": "acerto exato de drive > 0,210 (B0, sem aprendizado)",
+      "reduz_sorvedouro": "fracao das respostas vinda do arm mais atrator < 0,646 (B0) -- o adversario de implementacao existe para isso",
+      "abaixo_do_teto": "acerto <= 0,696 (teto com conteudo pareado). Ultrapassar seria sinal de vazamento, nao de sucesso",
+      "supera_encoder_aleatorio": "acerto > o do encoder nao treinado. E o criterio mais duro: separa o que o aprendizado trouxe do que a arquitetura ja dava de graca",
+      "beta_vae_nao_ganha": "o controle nao supervisionado nao supera o contrastivo; se superar, e a supervisao que esta mal empregada (Locatello et al. 2019)"
+    },
+    "technique": "contrastive_aux",
+    "measured": {
+      "drive_exact": 0.39520833333333333,
+      "mae_db": 4.324298204559196,
+      "top_arm_share": 0.2006,
+      "sem_bigmuff": {
+        "arms": 5,
+        "excluded": [
+          "byod-bigmuff"
+        ],
+        "drive_exact": 0.4325,
+        "mae_db": 3.558270658901697
+      }
+    },
+    "baselines": {
+      "B0_marginal": {
+        "drive_exact": 0.21,
+        "mae_db": 8.15,
+        "top_arm_share": 0.646
+      },
+      "B1_poc1_regressor": {
+        "drive_exact": 0.317,
+        "mae_db": 4.36
+      },
+      "chance": {
+        "drive_exact": 0.125
+      },
+      "paired_content_ceiling": {
+        "drive_exact": 0.696,
+        "mae_db": 2.67
+      }
+    },
+    "verdicts": {
+      "supera_b1_acerto": true,
+      "supera_b1_erro": true,
+      "supera_b0_acerto": true,
+      "reduz_sorvedouro": true,
+      "abaixo_do_teto": true
+    }
+  }
+}

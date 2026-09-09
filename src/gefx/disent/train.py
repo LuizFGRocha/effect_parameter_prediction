@@ -31,7 +31,12 @@ from gefx.disent.features import FeatureStore, PixelStandardizer
 from gefx.disent.losses import DEFAULT_TEMPERATURE, RAMP_GAMMA, lambda_ramp, total_loss
 from gefx.disent.model import BetaVAE, DisentModel, EncoderConfig, HeadConfig
 from gefx.disent.retrieval import hubness, retrieve_by_arm
-from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
+from gefx.disent.sampler import (
+    GridIndex,
+    build_index,
+    class_balanced_batch,
+    permute_configs,
+)
 from gefx.disent.sidecar import read_dataset
 
 #: As tecnicas do estudo comparativo, em ordem de acumulo. Cada uma acrescenta
@@ -141,6 +146,10 @@ class TrainConfig:
     eval_every: int = 500
     embed_batch: int = 128
     seed: int = 20260908
+    #: Controle de permutacao: embaralha a configuracao dentro de cada
+    #: (conteudo, implementacao). Nao e uma tecnica -- e a checagem de que o
+    #: ganho vem do rotulo e nao do procedimento de treino.
+    permute_labels: bool = False
     output_dir: Optional[Path] = None
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     weights: Optional[Dict[str, float]] = None
@@ -155,7 +164,8 @@ class TrainConfig:
         return dict(TECHNIQUES[self.technique])
 
     def resolved_output(self) -> Path:
-        return Path(self.output_dir or Path("results/disent/etapa5") / self.technique)
+        nome = f"{self.technique}_permutado" if self.permute_labels else self.technique
+        return Path(self.output_dir or Path("results/disent/etapa5") / nome)
 
     def as_dict(self) -> Dict[str, object]:
         out = asdict(self)
@@ -427,7 +437,10 @@ def train(
         name: FeatureStore(root, frame, config.feature)
         for name, frame in frames.items()
     }
-    index: GridIndex = build_index(frames["train"], arms=config.arms)
+    treino = frames["train"]
+    if config.permute_labels:
+        treino = permute_configs(treino, seed=config.seed)
+    index: GridIndex = build_index(treino, arms=config.arms)
     # O laco indexa o `FeatureStore` com linhas do `GridIndex`. As duas tabelas
     # sao a mesma, mas isso e invariante e nao garantia: um recorte a mais em
     # qualquer um dos dois lados desalinharia features e rotulos em silencio --

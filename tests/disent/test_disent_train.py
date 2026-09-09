@@ -376,3 +376,22 @@ def test_compare_reads_the_runs_from_disk_without_retraining(tmp_path):
 def test_compare_skips_techniques_that_were_not_run(tmp_path):
     table = compare(tmp_path / "vazio")
     assert set(table["technique"]) == set(BASELINES)
+
+
+def test_the_permutation_control_writes_to_its_own_directory():
+    from gefx.disent.train import TrainConfig
+
+    assert TrainConfig(technique="grl").resolved_output().name == "grl"
+    assert TrainConfig(technique="grl", permute_labels=True).resolved_output().name == (
+        "grl_permutado"
+    )
+
+
+def test_the_permutation_control_trains_on_scrambled_configurations(tmp_path):
+    """O controle tem de rodar pelo mesmo laco -- se rodasse por outro caminho,
+    a comparacao mediria a diferenca de caminho e nao a do rotulo."""
+    manifest = train_module.train(
+        _config(tmp_path, permute_labels=True, output_dir=tmp_path / "perm"), verbose=False
+    )
+    assert manifest["config"]["permute_labels"] is True
+    assert (tmp_path / "perm" / "metrics.json").exists()
