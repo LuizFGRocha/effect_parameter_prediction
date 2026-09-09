@@ -339,3 +339,20 @@ def test_the_structure_reference_line_is_the_dimension_share_not_a_half(tmp_path
     finally:
         plt.Axes.axhline = original
     assert capturadas == [pytest.approx(100 / 3)]
+
+
+def test_the_curve_averages_the_seeds_and_still_shows_them(tmp_path):
+    """A dispersao entre sementes e da ordem da excursao da curva. Uma linha
+    media sozinha faria a curva parecer ter forma."""
+    from gefx.disent.plots import build_etapa5
+
+    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
+    _etapa5_run(tmp_path, "contrastive_aux", 0.44, 3.8, passos=0)
+    for pasta, deslocamento in (("diversidade", 0.0), ("diversidade_s2", 0.05)):
+        (tmp_path / pasta).mkdir()
+        dados = _curva()
+        dados["drive_exact"] = dados["drive_exact"] + deslocamento
+        dados.to_csv(tmp_path / pasta / "resumo.csv", index=False)
+
+    nomes = {caminho.name for caminho in build_etapa5(tmp_path, tmp_path / "figuras")}
+    assert "curva_de_diversidade.png" in nomes

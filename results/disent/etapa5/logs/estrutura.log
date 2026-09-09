@@ -1,0 +1,32 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1788929228.612508 2025817 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+I0000 00:00:1788929230.424413 2025817 gpu_device.cc:2043] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 9719 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3060, pci bus id: 0000:09:00.0, compute capability: 8.6
+I0000 00:00:1788929231.359831 2025817 cuda_dnn.cc:461] Loaded cuDNN version 92101
+      technique      factor esperado_em  massa_z_e  massa_nula  dim_z_e  dim_z_c  separacao_por_bloco  completude  informatividade    acaso      mig  desemaranhamento
+ random_encoder drive_level         z_e   0.362690    0.333333       32       64             0.055106    0.013405         0.613214 0.125000 0.034760          0.026985
+ random_encoder  tone_level         z_e   0.326266    0.333333       32       64             0.088934    0.008704         0.788214 0.200000 0.008381          0.026985
+ random_encoder         arm         z_c   0.365644    0.333333       32       64             0.052731    0.004190         0.304643 0.142857 0.013228          0.026985
+ random_encoder  content_id         z_c   0.419552    0.333333       32       64             0.018755    0.025165         0.959643 0.050000 0.004015          0.026985
+    contrastive drive_level         z_e   0.429629    0.333333       32       64             0.014336    0.018205         0.700714 0.125000 0.014964          0.033617
+    contrastive  tone_level         z_e   0.365156    0.333333       32       64             0.053120    0.015336         0.824286 0.200000 0.012484          0.033617
+    contrastive         arm         z_c   0.270687    0.333333       32       64             0.157551    0.004886         0.287500 0.142857 0.004767          0.033617
+    contrastive  content_id         z_c   0.203759    0.333333       32       64             0.270618    0.015692         0.860357 0.050000 0.001175          0.033617
+contrastive_aux drive_level         z_e   0.438413    0.333333       32       64             0.010972    0.023268         0.690714 0.125000 0.046853          0.043205
+contrastive_aux  tone_level         z_e   0.412234    0.333333       32       64             0.022341    0.022322         0.826786 0.200000 0.008891          0.043205
+contrastive_aux         arm         z_c   0.263641    0.333333       32       64             0.167810    0.004893         0.288571 0.142857 0.000405          0.043205
+contrastive_aux  content_id         z_c   0.204490    0.333333       32       64             0.269183    0.014579         0.859643 0.050000 0.001408          0.043205
+            grl drive_level         z_e   0.446940    0.333333       32       64             0.008139    0.029602         0.705357 0.125000 0.004743          0.048057
+            grl  tone_level         z_e   0.382170    0.333333       32       64             0.040440    0.021365         0.825000 0.200000 0.022761          0.048057
+            grl         arm         z_c   0.249659    0.333333       32       64             0.189263    0.006248         0.298929 0.142857 0.003025          0.048057
+            grl  content_id         z_c   0.199166    0.333333       32       64             0.279744    0.015180         0.867143 0.050000 0.013757          0.048057
+           full drive_level         z_e   0.439003    0.333333       32       64             0.010762    0.016937         0.656786 0.125000 0.015070          0.056618
+           full  tone_level         z_e   0.453698    0.333333       32       64             0.006195    0.023444         0.821429 0.200000 0.038348          0.056618
+           full         arm         z_c   0.304524    0.333333       32       64             0.113249    0.005862         0.288214 0.142857 0.001744          0.056618
+           full  content_id         z_c   0.142074    0.333333       32       64             0.410356    0.051995         0.951071 0.050000 0.051134          0.056618
+       beta_vae drive_level         z_e   0.404457    0.333333       32       64             0.026502    0.008943         0.472857 0.125000 0.008975          0.009542
+       beta_vae  tone_level         z_e   0.419501    0.333333       32       64             0.018779    0.007259         0.531429 0.200000 0.004097          0.009542
+       beta_vae         arm         z_c   0.418482    0.333333       32       64             0.019260    0.007200         0.318929 0.142857 0.003928          0.009542
+       beta_vae  content_id         z_c   0.398730    0.333333       32       64             0.029797    0.010847         0.608214 0.050000 0.000452          0.009542
+
+tabela em results/disent/etapa5/estrutura.csv

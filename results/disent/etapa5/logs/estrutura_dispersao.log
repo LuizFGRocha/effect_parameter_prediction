@@ -1,0 +1,20 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1788939829.303306 2050378 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+I0000 00:00:1788939831.061125 2050378 gpu_device.cc:2043] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 10033 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3060, pci bus id: 0000:09:00.0, compute capability: 8.6
+I0000 00:00:1788939831.976839 2050378 cuda_dnn.cc:461] Loaded cuDNN version 92101
+grl
+  drive_level  media 0.446  amplitude 0.006  [0.447 0.444 0.443 0.449]
+  tone_level   media 0.388  amplitude 0.010  [0.382 0.392 0.389 0.387]
+  arm          media 0.252  amplitude 0.008  [0.25  0.257 0.251 0.252]
+  content_id   media 0.201  amplitude 0.003  [0.199 0.202 0.202 0.202]
+full_light_orth
+  drive_level  media 0.504  amplitude 0.009  [0.503 0.507 0.498 0.506]
+  tone_level   media 0.462  amplitude 0.012  [0.455 0.467 0.46  0.465]
+  arm          media 0.303  amplitude 0.009  [0.309 0.3   0.304 0.3  ]
+  content_id   media 0.172  amplitude 0.008  [0.169 0.17  0.177 0.173]
+contrastive_aux
+  drive_level  media 0.444  amplitude 0.014  [0.438 0.452 0.445 0.441]
+  tone_level   media 0.416  amplitude 0.009  [0.412 0.421 0.414 0.417]
+  arm          media 0.264  amplitude 0.005  [0.264 0.266 0.261 0.265]
+  content_id   media 0.205  amplitude 0.005  [0.204 0.202 0.206 0.207]

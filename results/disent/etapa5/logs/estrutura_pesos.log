@@ -1,0 +1,20 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1788936676.110423 2044918 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+I0000 00:00:1788936677.874392 2044918 gpu_device.cc:2043] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 10036 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3060, pci bus id: 0000:09:00.0, compute capability: 8.6
+I0000 00:00:1788936678.791338 2044918 cuda_dnn.cc:461] Loaded cuDNN version 92101
+      technique      factor esperado_em  massa_z_e  massa_nula  dim_z_e  dim_z_c  separacao_por_bloco  completude  informatividade    acaso      mig  desemaranhamento
+     grl_config drive_level         z_e   0.477676    0.333333       32       64             0.001438    0.027131         0.679286 0.125000 0.007567          0.053690
+     grl_config  tone_level         z_e   0.481686    0.333333       32       64             0.000968    0.024609         0.807143 0.200000 0.004280          0.053690
+     grl_config         arm         z_c   0.288111    0.333333       32       64             0.133732    0.005480         0.265714 0.142857 0.006576          0.053690
+     grl_config  content_id         z_c   0.176139    0.333333       32       64             0.328443    0.027612         0.911429 0.050000 0.003898          0.053690
+       grl_orth drive_level         z_e   0.576260    0.333333       32       64             0.016846    0.034133         0.678929 0.125000 0.065824          0.039530
+       grl_orth  tone_level         z_e   0.537125    0.333333       32       64             0.003981    0.029790         0.791429 0.200000 0.001693          0.039530
+       grl_orth         arm         z_c   0.312711    0.333333       32       64             0.103722    0.001759         0.272143 0.142857 0.000413          0.039530
+       grl_orth  content_id         z_c   0.262914    0.333333       32       64             0.168889    0.006995         0.822143 0.050000 0.004835          0.039530
+full_light_orth drive_level         z_e   0.502986    0.333333       32       64             0.000026    0.025826         0.686071 0.125000 0.041598          0.049262
+full_light_orth  tone_level         z_e   0.454767    0.333333       32       64             0.005912    0.019202         0.837857 0.200000 0.034218          0.049262
+full_light_orth         arm         z_c   0.309142    0.333333       32       64             0.107820    0.003787         0.274286 0.142857 0.003060          0.049262
+full_light_orth  content_id         z_c   0.169222    0.333333       32       64             0.344078    0.028722         0.928571 0.050000 0.003075          0.049262
+
+tabela em results/disent/etapa5/pesos/estrutura.csv

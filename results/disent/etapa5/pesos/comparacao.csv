@@ -1,0 +1,8 @@
+technique,kind,drive_exact,mae_db,top_arm_share,drive_exact_sem_bigmuff,mae_db_sem_bigmuff,verdicts,steps
+B0_marginal,baseline,0.21,8.15,0.646,,,,
+B1_poc1_regressor,baseline,0.317,4.36,,,,,
+chance,baseline,0.125,,,,,,
+paired_content_ceiling,baseline,0.696,2.67,,,,,
+full_light_orth,learned,0.4235714285714286,4.112219706308485,0.2034,0.46541666666666665,3.3444493281018235,5/5,4000.0
+grl_config,learned,0.4175,4.051250042885131,0.205,0.45333333333333337,3.416514561888724,5/5,4000.0
+grl_orth,learned,0.4276785714285714,3.911820817397228,0.1998,0.4672916666666666,3.2341033001699735,5/5,4000.0
