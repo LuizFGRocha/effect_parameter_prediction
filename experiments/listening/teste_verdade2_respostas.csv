@@ -1,0 +1,25 @@
+ensaio,resposta,chute,comentario,tipo,arm,conteudo,nivel_referencia,nivel_1,nivel_2,resposta_nominal,resposta_alternativa,distancia,acertou_nominal,escolheu_alternativa
+1,1,False,,hardclip,lsp-hardclip,les_neck_fing18,6,7,6,2,1,1,False,True
+2,1,False,,audibilidade,lsp-tanh,les_bridge_fing07,5,5,4,1,2,1,True,False
+3,2,False,,hardclip,lsp-hardclip,les_bridge_pick04,5,5,6,1,2,1,False,True
+4,2,False,,audibilidade,lsp-tanh,les_bridge_fing07,2,3,2,2,1,1,True,False
+5,1,False,,audibilidade,lsp-tanh,les_neck_pick17,6,6,5,1,2,1,True,False
+6,2,False,,audibilidade,lsp-tanh,les_neck_fing16,4,3,4,2,1,1,True,False
+7,2,False,,hardclip,lsp-hardclip,les_neck_fing16,4,6,4,2,1,2,True,False
+8,2,False,,audibilidade,lsp-tanh,les_bridge_pick04,7,6,7,2,1,1,True,False
+9,2,False,,hardclip,lsp-hardclip,les_bridge_fing16,4,4,6,1,2,2,False,True
+10,1,False,,audibilidade,lsp-tanh,les_bridge_fing23,1,1,2,1,2,1,True,False
+11,1,False,,hardclip,lsp-hardclip,les_neck_pick17,6,6,7,1,2,1,True,False
+12,1,False,,audibilidade,lsp-tanh,les_bridge_fing05,5,5,4,1,2,1,True,False
+13,2,False,,audibilidade,lsp-tanh,les_neck_pick17,6,7,6,2,1,1,True,False
+14,1,False,,hardclip,lsp-hardclip,les_neck_fing18,5,5,6,1,2,1,True,False
+15,1,False,,hardclip,lsp-hardclip,les_neck_fing09,6,6,7,1,2,1,True,False
+16,1,True,chute. não consegui perceber bem as marcas da distorção.,audibilidade,lsp-tanh,les_bridge_pick09,0,0,1,1,2,1,True,False
+17,1,True,chute. não consegui perceber bem as marcas da distorção.,audibilidade,lsp-tanh,les_neck_fing03,1,2,1,2,1,1,False,True
+18,1,True,chute. não consegui perceber bem as marcas da distorção.,audibilidade,lsp-tanh,les_neck_fing04,2,2,3,1,2,1,True,False
+19,2,False,,audibilidade,lsp-tanh,les_bridge_pick12,4,4,5,1,2,1,False,True
+20,2,False,,audibilidade,lsp-tanh,les_neck_pick17,3,4,3,2,1,1,True,False
+21,1,False,,audibilidade,lsp-tanh,les_bridge_fing09,0,1,0,2,1,1,False,True
+22,2,False,,audibilidade,lsp-tanh,les_neck_pick06,7,6,7,2,1,1,True,False
+23,2,False,,audibilidade,lsp-tanh,les_neck_fing09,3,4,3,2,1,1,True,False
+24,2,False,,hardclip,lsp-hardclip,les_bridge_fing02,4,6,4,2,1,2,True,False

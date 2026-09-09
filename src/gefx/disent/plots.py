@@ -695,9 +695,76 @@ def build_etapa5(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path
     plot_hub_by_technique(shares, alvo)
     escritos.append(alvo)
 
+    custo = results_dir / "loo" / "custo_de_transferencia.csv"
+    if custo.exists():
+        alvo = out_dir / "custo_de_transferencia.png"
+        plot_transfer_cost(pd.read_csv(custo), alvo)
+        escritos.append(alvo)
+
     melhor = max(runs, key=lambda nome: runs[nome]["drive_exact"])
     alvo = out_dir / "por_arm_melhor_tecnica.png"
     plot_by_arm_with_and_without_bigmuff(metrics[melhor], melhor, alvo)
     escritos.append(alvo)
 
     return escritos
+
+
+# --- etapa 7: transferencia para implementacao inedita ------------------------
+def plot_transfer_cost(custo: pd.DataFrame, out_path: Path) -> None:
+    """Visto x inedito, arm por arm, agrupado pelo estrato do roster.
+
+    E a figura que sustenta ou derruba a tese do trabalho. Os numeros da etapa 5
+    sao medidos com todas as implementacoes no treino; so esta comparacao diz o
+    que acontece com uma implementacao que a rede nunca ouviu. Agrupar por
+    estrato e o ponto: o custo nao e uniforme, ele segue exatamente o eixo que o
+    desenho do roster previu.
+    """
+    ordem = ordered_arms(custo["arm"])
+    dados = custo.set_index("arm").loc[ordem]
+    posicoes = np.arange(len(ordem))
+    largura = 0.38
+
+    fig, (left, right) = plt.subplots(1, 2, figsize=(13, 5.5),
+                                      gridspec_kw={"width_ratios": [2.2, 1]})
+    left.bar(posicoes - largura / 2, dados["visto"] * 100, largura,
+             color=COLOR_B1, label="implementação vista no treino")
+    left.bar(posicoes + largura / 2, dados["inedito"] * 100, largura,
+             color=COLOR_CEILING, label="implementação inédita")
+    for x, (visto, inedito) in enumerate(zip(dados["visto"], dados["inedito"])):
+        left.annotate(f"{(inedito - visto) * 100:+.1f}",
+                      xy=(x, max(visto, inedito) * 100), xytext=(0, 4),
+                      textcoords="offset points", ha="center", fontsize=9)
+    left.axhline(100 / 8, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
+                 label="acaso (12,5%)")
+    left.set_xticks(posicoes)
+    left.set_xticklabels([f"{_short(a)}\n{dados['estrato'][a]}" for a in ordem], fontsize=8)
+    left.set_ylabel("acerto exato do nível de drive (%)")
+    left.set_ylim(0, 65)
+    left.set_title("Custo de nunca ter ouvido a implementação")
+    left.legend(fontsize=8, loc="upper right")
+
+    por_estrato = dados.groupby("estrato")["custo_pontos"].mean()
+    cores = [COLOR_CEILING if v >= -1 else COLOR_B1 if v > -5 else COLOR_CHANCE
+             for v in por_estrato]
+    right.bar(por_estrato.index, por_estrato.values, color=cores)
+    right.axhline(0, color="k", linewidth=1)
+    for x, valor in enumerate(por_estrato.values):
+        right.annotate(f"{valor:+.1f}", xy=(x, valor),
+                       xytext=(0, 4 if valor >= 0 else -14),
+                       textcoords="offset points", ha="center", fontsize=10)
+    # Folga nas duas pontas: sem ela o rotulo da barra mais negativa cai fora
+    # do eixo, que e justamente a barra que carrega o resultado.
+    right.set_ylim(min(por_estrato.min() * 1.35, -1.0), max(por_estrato.max() * 1.8, 1.0))
+    right.set_ylabel("custo médio (pontos de acerto)")
+    right.set_title("Por estrato do roster")
+    right.set_xticks(range(len(por_estrato)))
+    right.set_xticklabels(
+        [f"{e}\n{d}" for e, d in zip(por_estrato.index,
+                                     ("mesma forma,\nmesma unidade",
+                                      "mesma unidade,\nforma diferente",
+                                      "unidade e topologia\ndiferentes"))],
+        fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
