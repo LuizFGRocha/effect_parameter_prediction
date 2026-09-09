@@ -701,6 +701,26 @@ def build_etapa5(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path
         plot_transfer_cost(pd.read_csv(custo), alvo)
         escritos.append(alvo)
 
+    curva = results_dir / "diversidade" / "resumo.csv"
+    if curva.exists():
+        alvo = out_dir / "curva_de_diversidade.png"
+        referencia = None
+        melhores = results_dir / "contrastive_aux" / "metrics.json"
+        if melhores.exists():
+            por_arm = json.loads(melhores.read_text(encoding="utf-8"))["per_query_arm"]
+            dados = pd.read_csv(curva)
+            arm = str(dados["arm_retirado"].iloc[0])
+            if arm in por_arm:
+                referencia = float(por_arm[arm]["drive_level"]["exact"])
+        plot_diversity_curve(pd.read_csv(curva), alvo, visto=referencia)
+        escritos.append(alvo)
+
+    estrutura = results_dir / "estrutura.csv"
+    if estrutura.exists():
+        alvo = out_dir / "estrutura_por_bloco.png"
+        plot_structure_blocks(pd.read_csv(estrutura), alvo)
+        escritos.append(alvo)
+
     melhor = max(runs, key=lambda nome: runs[nome]["drive_exact"])
     alvo = out_dir / "por_arm_melhor_tecnica.png"
     plot_by_arm_with_and_without_bigmuff(metrics[melhor], melhor, alvo)
@@ -765,6 +785,93 @@ def plot_transfer_cost(custo: pd.DataFrame, out_path: Path) -> None:
                                       "unidade e topologia\ndiferentes"))],
         fontsize=8)
 
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+# --- B2/B3: quantas implementacoes o treino precisa ver -----------------------
+def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
+                         visto: Optional[float] = None) -> None:
+    """Transferencia para o arm retirado contra o numero de arms no treino.
+
+    O catalogo e o mesmo em todos os pontos, entao a unica coisa que muda ao
+    longo do eixo x e quantas implementacoes o encoder ouviu. A anotacao do
+    estrato importa mais que o numero de arms: se a curva subir nos degraus em
+    que um estrato **novo** entra e ficar plana nos outros, o que compra
+    transferencia e variedade, nao quantidade.
+    """
+    transferencia = curva[curva["condicao"] == "transferencia"].sort_values("k")
+    vistos = curva[curva["condicao"] == "vistos"].sort_values("k")
+
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    ax.plot(transferencia["k"], transferencia["drive_exact"] * 100, "o-",
+            color=COLOR_CEILING, linewidth=2, label="implementação inédita (transferência)")
+    if not vistos.empty:
+        ax.plot(vistos["k"], vistos["drive_exact"] * 100, "s--", color=COLOR_B1,
+                linewidth=1.5, alpha=0.8, label="implementações do treino (controle)")
+    ax.axhline(100 / 8, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
+               label="acaso (12,5%)")
+    if visto is not None:
+        ax.axhline(visto * 100, color=COLOR_B0, linestyle="-.", linewidth=1.3,
+                   label="o mesmo arm, visto no treino (etapa 5)")
+
+    for _, linha in transferencia.iterrows():
+        ax.annotate(f"{linha['drive_exact'] * 100:.1f}%",
+                    xy=(linha["k"], linha["drive_exact"] * 100), xytext=(0, 8),
+                    textcoords="offset points", ha="center", fontsize=9)
+    rotulos = [
+        f"{int(linha['k'])}\n{linha['estratos']} estrato"
+        + ("s" if int(linha["estratos"]) > 1 else "")
+        for _, linha in transferencia.iterrows()
+    ]
+    ax.set_xticks(transferencia["k"])
+    ax.set_xticklabels(rotulos, fontsize=8)
+    ax.set_xlabel("implementações no treino (catálogo fixo em todos os pontos)")
+    ax.set_ylabel("acerto exato do nível de drive (%)")
+    ax.set_ylim(0, 60)
+    ax.set_title("Diversidade de implementação no treino compra transferência?")
+    ax.legend(fontsize=8, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+# --- etapa 6: onde cada fator esta escrito ------------------------------------
+def plot_structure_blocks(estrutura: pd.DataFrame, out_path: Path) -> None:
+    """Fracao da importancia de cada fator que cai em `z_e`, por tecnica.
+
+    E a afirmacao do desemaranhamento na forma em que ela foi feita: em blocos.
+    A linha de 50% e a fronteira -- acima dela o fator esta escrito em `z_e`,
+    abaixo em `z_c`. As duas primeiras barras de cada grupo deveriam ficar em
+    cima e as duas ultimas embaixo.
+    """
+    tecnicas = ordered_techniques(estrutura["technique"].unique())
+    fatores = ["drive_level", "tone_level", "arm", "content_id"]
+    nomes = {"drive_level": "drive\n(deve ficar)", "tone_level": "tom\n(deve ficar)",
+             "arm": "implementação\n(deve sair)", "content_id": "conteúdo\n(deve sair)"}
+    tabela = estrutura.pivot_table(index="technique", columns="factor", values="massa_z_e")
+
+    posicoes = np.arange(len(fatores))
+    largura = 0.8 / max(len(tecnicas), 1)
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    for indice, tecnica in enumerate(tecnicas):
+        deslocamento = (indice - (len(tecnicas) - 1) / 2) * largura
+        cor = (COLOR_RANDOM if tecnica == "random_encoder"
+               else COLOR_CONTROL if tecnica == "beta_vae" else COLOR_LEARNED)
+        ax.bar(posicoes + deslocamento,
+               [tabela.loc[tecnica, fator] * 100 for fator in fatores], largura,
+               color=cor, alpha=0.55 + 0.45 * indice / max(len(tecnicas) - 1, 1),
+               label=TECHNIQUE_LABEL.get(tecnica, tecnica).replace("\n", " "))
+    ax.axhline(50, color="k", linestyle="--", linewidth=1.2)
+    ax.annotate("fronteira: metade da importância em cada bloco", xy=(len(fatores) - 0.5, 51),
+                ha="right", fontsize=8)
+    ax.set_xticks(posicoes)
+    ax.set_xticklabels([nomes[f] for f in fatores], fontsize=9)
+    ax.set_ylabel("importância do fator que cai em $z_e$ (%)")
+    ax.set_ylim(0, 100)
+    ax.set_title("Onde cada fator está escrito: $z_e$ (efeito) contra $z_c$ (conteúdo)")
+    ax.legend(fontsize=8, ncol=3, loc="upper right")
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight", dpi=150)
     plt.close(fig)

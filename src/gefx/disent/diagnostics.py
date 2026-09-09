@@ -11,8 +11,10 @@ adversaria.
 E a sonda que decide entre as duas leituras, e por isso ela mora no codigo e nao
 num script: o numero entra no relatorio.
 
-Este modulo e o comeco da etapa 6. DCI e MIG entram aqui depois; a interface
-(`probe_report` sobre um diretorio de execucao) ja e a que eles vao usar.
+Este modulo e a etapa 6 inteira: as sondas, a ablacao da representacao, o
+oraculo como verdade fundamental alternativa, a resolucao da grade e -- na
+ultima secao -- o DCI e o MIG, que perguntam **onde** cada fator esta escrito em
+vez de perguntar se ele esta legivel.
 """
 from __future__ import annotations
 
@@ -425,6 +427,285 @@ def grid_resolution(
                 "acerto": exact, "acaso": chance,
                 "acima_do_acaso": (exact - chance) / (1.0 - chance),
                 "mae_db": float(overall["mae_db"]),
+            })
+    if not rows:
+        raise FileNotFoundError(f"nenhuma execucao com run.json em {results_dir}")
+    return pd.DataFrame(rows)
+
+
+# --- etapa 6: onde cada fator esta escrito ------------------------------------
+#: Fatores das metricas de estrutura. Sao os quatro que a grade cruza -- os dois
+#: que `z_e` deve carregar (`drive_level`, `tone_level`) e os dois que ele deve
+#: largar (`arm`, `content_id`). Medir so os primeiros mediria meia afirmacao.
+STRUCTURE_FACTORS: Tuple[str, ...] = ("drive_level", "tone_level", "arm", "content_id")
+
+#: Caixas por dimensao latente na discretizacao do MIG. E o valor do
+#: `disentanglement_lib`; o MIG e sensivel a ele, entao ele fica declarado e nao
+#: escolhido por execucao.
+MIG_BINS = 20
+
+DEFAULT_TREES = 200
+
+
+def _entropy(weights: np.ndarray, base: int) -> float:
+    """Entropia de uma distribuicao ja normalizada, na base pedida."""
+    weights = np.asarray(weights, dtype=np.float64)
+    total = weights.sum()
+    if total <= 0 or base <= 1:
+        return 0.0
+    p = weights / total
+    p = p[p > 0]
+    return float(-(p * (np.log(p) / np.log(base))).sum())
+
+
+def importance_matrix(
+    codes: np.ndarray,
+    frame: pd.DataFrame,
+    factors: Sequence[str] = STRUCTURE_FACTORS,
+    seed: int = 0,
+    trees: int = DEFAULT_TREES,
+) -> Tuple[np.ndarray, Dict[str, Dict[str, float]]]:
+    """Matriz `R[dimensao, fator]` de importancia, e a informatividade ao lado.
+
+    Floresta aleatoria e nao regressao logistica de proposito, e a escolha muda o
+    que se mede: as sondas de `linear_probes` perguntam se o fator esta
+    **legivel** linearmente; aqui a pergunta e **em que dimensoes** ele mora, e
+    para isso e preciso um modelo que atribua importancia por dimensao. O
+    `disentanglement_lib` usa arvores impulsionadas pela mesma razao; a floresta
+    da a mesma leitura e cabe no orcamento com 20 classes de conteudo.
+
+    A informatividade sai de uma metade retida: importancia se mede no ajuste,
+    acerto nao.
+
+    **Vies conhecido:** a importancia de Gini prefere dimensoes continuas de
+    cardinalidade alta. Num codigo plantado, com um fator por dimensao e uma
+    dimensao de puro ruido, a de ruido recebe mais credito que as dimensoes dos
+    outros fatores (esta medido em `tests/disent/test_diagnostics.py`). Por isso
+    o teto pratico de `D` fica na casa de 0,8, e nao em 1,0 -- ler a diferenca
+    como emaranhamento seria ler o estimador.
+    """
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
+
+    codes = np.asarray(codes, dtype=np.float64)
+    if len(codes) != len(frame):
+        raise ValueError(f"{len(codes)} codigos e {len(frame)} linhas")
+
+    matrix = np.zeros((codes.shape[1], len(factors)), dtype=np.float64)
+    informativeness: Dict[str, Dict[str, float]] = {}
+    for column, factor in enumerate(factors):
+        if factor not in frame.columns:
+            raise KeyError(f"fator ausente no sidecar: {factor!r}")
+        labels = frame[factor].astype("category").cat.codes.to_numpy()
+        x_fit, x_test, y_fit, y_test = train_test_split(
+            codes, labels, test_size=0.5, random_state=seed, stratify=labels
+        )
+        forest = RandomForestClassifier(n_estimators=trees, random_state=seed, n_jobs=-1)
+        forest.fit(x_fit, y_fit)
+        matrix[:, column] = forest.feature_importances_
+        informativeness[factor] = {
+            "accuracy": float(forest.score(x_test, y_test)),
+            "chance": 1.0 / int(len(set(labels))),
+        }
+    return matrix, informativeness
+
+
+def dci_scores(
+    codes: np.ndarray,
+    frame: pd.DataFrame,
+    factors: Sequence[str] = STRUCTURE_FACTORS,
+    blocks: Optional[Mapping[str, Sequence[int]]] = None,
+    seed: int = 0,
+    trees: int = DEFAULT_TREES,
+) -> Dict[str, object]:
+    """DCI de Eastwood & Williams (2018), mais a leitura por bloco.
+
+    **A parte D nao e a afirmacao deste trabalho.** D pergunta se cada dimensao
+    isolada carrega um fator so, e nada na perda pede isso: o contrastivo empurra
+    a configuracao para `z_e` inteiro, nao para uma coordenada. Um D baixo aqui e
+    o esperado, e reporta-lo sem dizer isso seria transformar uma escolha de
+    desenho em fracasso medido.
+
+    O que **e** a afirmacao esta em `block_mass`: a fracao da importancia de cada
+    fator que cai em `z_e` contra `z_c`. E o desemaranhamento em blocos, que e o
+    que a arquitetura promete e o que a fase 2 vai consumir na troca de codigos.
+    """
+    matrix, informativeness = importance_matrix(codes, frame, factors, seed, trees)
+    factors = tuple(factors)
+
+    # D por dimensao: quanto a importancia daquela dimensao se concentra num
+    # fator so, ponderada por quanta importancia total a dimensao carrega.
+    per_latent = np.array([1.0 - _entropy(row, len(factors)) for row in matrix])
+    mass = matrix.sum(axis=1)
+    disentanglement = float((per_latent * mass).sum() / mass.sum()) if mass.sum() else 0.0
+    # C por fator: quanto o fator se concentra em poucas dimensoes.
+    completeness = {
+        factor: 1.0 - _entropy(matrix[:, column], matrix.shape[0])
+        for column, factor in enumerate(factors)
+    }
+
+    out: Dict[str, object] = {
+        "factors": list(factors),
+        "importance": matrix,
+        "disentanglement": disentanglement,
+        "per_latent_disentanglement": per_latent,
+        "completeness": completeness,
+        "informativeness": informativeness,
+    }
+    if blocks:
+        block_mass: Dict[str, Dict[str, float]] = {}
+        block_completeness: Dict[str, float] = {}
+        for column, factor in enumerate(factors):
+            total = matrix[:, column].sum()
+            shares = {
+                name: float(matrix[list(index), column].sum() / total) if total else 0.0
+                for name, index in blocks.items()
+            }
+            block_mass[factor] = shares
+            block_completeness[factor] = 1.0 - _entropy(
+                np.array(list(shares.values())), len(shares)
+            )
+        out["block_mass"] = block_mass
+        out["block_completeness"] = block_completeness
+    return out
+
+
+def mutual_information_gap(
+    codes: np.ndarray,
+    frame: pd.DataFrame,
+    factors: Sequence[str] = STRUCTURE_FACTORS,
+    bins: int = MIG_BINS,
+) -> Dict[str, Dict[str, float]]:
+    """MIG de Chen et al. (2018): a distancia entre as duas dimensoes que mais
+    sabem de cada fator, normalizada pela entropia do fator.
+
+    Nao depende de classificador -- e a diferenca util em relacao ao DCI, que
+    depende. Se os dois discordarem, e a floresta que esta opinando.
+
+    Vale a mesma ressalva do D: o MIG mede alinhamento **por eixo**. Aqui ele
+    entra como descricao, nao como criterio.
+    """
+    from sklearn.metrics import mutual_info_score
+
+    codes = np.asarray(codes, dtype=np.float64)
+    if len(codes) != len(frame):
+        raise ValueError(f"{len(codes)} codigos e {len(frame)} linhas")
+
+    binned = np.empty(codes.shape, dtype=np.int32)
+    for dim in range(codes.shape[1]):
+        column = codes[:, dim]
+        low, high = float(column.min()), float(column.max())
+        if high <= low:  # dimensao morta: uma caixa so, informacao mutua zero
+            binned[:, dim] = 0
+            continue
+        edges = np.linspace(low, high, bins + 1)[1:-1]
+        binned[:, dim] = np.digitize(column, edges)
+
+    out: Dict[str, Dict[str, float]] = {}
+    for factor in factors:
+        if factor not in frame.columns:
+            raise KeyError(f"fator ausente no sidecar: {factor!r}")
+        labels = frame[factor].astype("category").cat.codes.to_numpy()
+        entropy = mutual_info_score(labels, labels)
+        scores = np.array([
+            mutual_info_score(labels, binned[:, dim]) for dim in range(codes.shape[1])
+        ])
+        order = np.argsort(scores)[::-1]
+        gap = float(scores[order[0]] - scores[order[1]]) if len(order) > 1 else 0.0
+        out[factor] = {
+            "mig": gap / entropy if entropy > 0 else 0.0,
+            "top_latent": int(order[0]),
+            "i_top": float(scores[order[0]]),
+            "i_second": float(scores[order[1]]) if len(order) > 1 else 0.0,
+            "entropy": float(entropy),
+        }
+    return out
+
+
+def structure_run(
+    run_dir: Path,
+    dataset_root: Path = Path("datasets/disent"),
+    split: str = "catalog",
+    feature: str = "Spec",
+    factors: Sequence[str] = STRUCTURE_FACTORS,
+    seed: int = 0,
+    trees: int = DEFAULT_TREES,
+    bins: int = MIG_BINS,
+) -> Dict[str, object]:
+    """DCI e MIG sobre `[z_e | z_c]` de uma execucao ja treinada.
+
+    Sobre os **dois** blocos concatenados, e nao so sobre `z_e`: as metricas
+    perguntam onde cada fator esta, e uma pergunta dessas nao se responde olhando
+    metade do codigo. Onde o bloco comeca fica registrado em `blocks`.
+    """
+    from gefx.disent.features import FeatureStore, PixelStandardizer
+    from gefx.disent.model import BetaVAE, DisentModel, EncoderConfig, HeadConfig
+    from gefx.disent.train import embed_blocks, split_frames
+
+    run_dir = Path(run_dir)
+    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    encoder_config = EncoderConfig.from_dict(manifest["config"]["encoder"])
+    if manifest["config"]["technique"] == "beta_vae":
+        model = BetaVAE(encoder_config, beta=manifest["config"].get("beta", 4.0))
+    else:
+        model = DisentModel(encoder_config, HeadConfig(**manifest["heads"]))
+    model.load_weights(run_dir / "weights")
+
+    frame = split_frames(dataset_root, manifest["config"].get("arms"))[split]
+    store = FeatureStore(dataset_root, frame, feature)
+    z_e, z_c = embed_blocks(model, store, PixelStandardizer.load(run_dir / "standardizer.npz"))
+    codes = np.concatenate([z_e, z_c], axis=1)
+    blocks = {
+        "z_e": range(z_e.shape[1]),
+        "z_c": range(z_e.shape[1], codes.shape[1]),
+    }
+
+    dci = dci_scores(codes, frame, factors, blocks=blocks, seed=seed, trees=trees)
+    return {
+        "technique": manifest["config"]["technique"],
+        "split": split,
+        "n": int(len(frame)),
+        "dims": {"z_e": int(z_e.shape[1]), "z_c": int(z_c.shape[1])},
+        "dci": dci,
+        "mig": mutual_information_gap(codes, frame, factors, bins=bins),
+    }
+
+
+def structure_study(
+    results_dir: Path = Path("results/disent/etapa5"),
+    dataset_root: Path = Path("datasets/disent"),
+    techniques: Optional[Sequence[str]] = None,
+    split: str = "catalog",
+    factors: Sequence[str] = STRUCTURE_FACTORS,
+    seed: int = 0,
+    trees: int = DEFAULT_TREES,
+) -> pd.DataFrame:
+    """Uma linha por (tecnica, fator). `disentanglement` e por tecnica e repete."""
+    from gefx.disent.train import STUDY_ORDER
+
+    results_dir = Path(results_dir)
+    wanted = list(techniques) if techniques else list(STUDY_ORDER)
+    rows: List[Dict[str, object]] = []
+    for name in wanted:
+        run_dir = results_dir / name
+        if not (run_dir / "run.json").exists():
+            continue
+        report = structure_run(run_dir, dataset_root, split=split, factors=factors,
+                               seed=seed, trees=trees)
+        dci = report["dci"]  # type: ignore[index]
+        mig = report["mig"]  # type: ignore[index]
+        for factor in factors:
+            rows.append({
+                "technique": name,
+                "factor": factor,
+                "esperado_em": "z_e" if factor in ("drive_level", "tone_level") else "z_c",
+                "massa_z_e": dci["block_mass"][factor]["z_e"],
+                "separacao_por_bloco": dci["block_completeness"][factor],
+                "completude": dci["completeness"][factor],
+                "informatividade": dci["informativeness"][factor]["accuracy"],
+                "acaso": dci["informativeness"][factor]["chance"],
+                "mig": mig[factor]["mig"],
+                "desemaranhamento": dci["disentanglement"],
             })
     if not rows:
         raise FileNotFoundError(f"nenhuma execucao com run.json em {results_dir}")

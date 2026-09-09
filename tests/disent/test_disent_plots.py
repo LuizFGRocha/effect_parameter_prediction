@@ -261,3 +261,57 @@ def test_the_untrained_control_has_no_curve_and_does_not_break_the_figure(tmp_pa
     _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
     escritos = build_etapa5(tmp_path, tmp_path / "figuras")
     assert not any(caminho.name == "curvas_de_treino.png" for caminho in escritos)
+
+
+# --- curva de diversidade e estrutura por bloco -------------------------------
+def _curva():
+    return pd.DataFrame([
+        {"arm_retirado": "byod-mxr", "condicao": condicao, "k": k, "estratos": estratos,
+         "drive_exact": acerto, "mae_db": 4.0, "n": 800}
+        for k, estratos, acerto in [(1, 1, 0.20), (3, 2, 0.28), (6, 3, 0.33)]
+        for condicao, acerto in (("transferencia", acerto), ("vistos", acerto + 0.1))
+    ])
+
+
+def _estrutura():
+    linhas = []
+    for tecnica in ("random_encoder", "contrastive_aux"):
+        for fator, massa in (("drive_level", 0.8), ("tone_level", 0.7),
+                             ("arm", 0.2), ("content_id", 0.1)):
+            linhas.append({"technique": tecnica, "factor": fator, "massa_z_e": massa,
+                           "separacao_por_bloco": 0.5, "completude": 0.4,
+                           "informatividade": 0.6, "acaso": 0.125, "mig": 0.1,
+                           "desemaranhamento": 0.3})
+    return pd.DataFrame(linhas)
+
+
+def test_the_diversity_curve_is_drawn_even_without_the_etapa5_reference(tmp_path):
+    from gefx.disent.plots import plot_diversity_curve
+
+    alvo = tmp_path / "curva.png"
+    plot_diversity_curve(_curva(), alvo)
+    assert alvo.stat().st_size > 0
+
+
+def test_the_structure_figure_orders_the_techniques_by_the_ladder(tmp_path):
+    from gefx.disent.plots import plot_structure_blocks
+
+    alvo = tmp_path / "estrutura.png"
+    plot_structure_blocks(_estrutura(), alvo)
+    assert alvo.stat().st_size > 0
+
+
+def test_build_etapa5_picks_up_the_curve_and_the_structure_when_they_exist(tmp_path):
+    """As duas entram por arquivo presente, e nao por bandeira: quem roda os
+    experimentos e quem roda as figuras sao comandos diferentes, e a figura tem
+    de sair completa com o que ja existe em disco."""
+    from gefx.disent.plots import build_etapa5
+
+    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
+    _etapa5_run(tmp_path, "contrastive_aux", 0.44, 3.8, passos=0)
+    (tmp_path / "diversidade").mkdir()
+    _curva().to_csv(tmp_path / "diversidade" / "resumo.csv", index=False)
+    _estrutura().to_csv(tmp_path / "estrutura.csv", index=False)
+
+    nomes = {caminho.name for caminho in build_etapa5(tmp_path, tmp_path / "figuras")}
+    assert {"curva_de_diversidade.png", "estrutura_por_bloco.png"} <= nomes
