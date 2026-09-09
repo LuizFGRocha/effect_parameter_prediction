@@ -8,6 +8,7 @@ comparacao que um script rapido faria naturalmente.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -80,3 +81,80 @@ def test_leave_one_out_needs_enough_arms(tmp_path):
 
     with pytest.raises(ValueError, match="ao menos 3"):
         leave_one_arm_out(tmp_path, tmp_path, arms=["a", "b"])
+
+
+# --- curva de diversidade (B2 e B3) -------------------------------------------
+def test_the_diversity_order_crosses_the_three_strata_in_order():
+    """A ordem e o que da sentido a cada ponto: os dois primeiros sao S1, os tres
+    seguintes trazem o S2 e o ultimo traz o S3. Sorteada, a curva mediria
+    quantidade e variedade misturadas e sem rotulo."""
+    from gefx.disent.loo import DIVERSITY_HELD_OUT, DIVERSITY_ORDER
+
+    estratos = [STRATA[arm] for arm in DIVERSITY_ORDER]
+    assert estratos == ["S1", "S1", "S2", "S2", "S2", "S3"]
+    assert DIVERSITY_HELD_OUT not in DIVERSITY_ORDER
+    assert STRATA[DIVERSITY_HELD_OUT] == "S3"
+
+
+def test_the_curve_reuses_the_leave_one_out_run_at_its_last_point(tmp_path, monkeypatch):
+    """O ultimo ponto e, por construcao, a execucao do leave-one-out para o mesmo
+    arm. Retreina-lo daria um numero levemente diferente do ja publicado na etapa
+    7, e a curva deixaria de terminar onde a etapa 7 termina."""
+    from gefx.disent import loo as modulo
+
+    reuse = tmp_path / "loo" / "byod-mxr"
+    reuse.mkdir(parents=True)
+    (reuse / "run.json").write_text("{}", encoding="utf-8")
+
+    treinados = []
+    monkeypatch.setattr(modulo, "_evaluate_held_out",
+                        lambda run_dir, *a, **k: [{"condicao": "transferencia",
+                                                   "drive_exact": 0.0, "mae_db": 0.0,
+                                                   "run_dir": str(run_dir)}])
+
+    def _fake_train(config, verbose=True):
+        treinados.append(tuple(config.arms))
+        Path(config.output_dir).mkdir(parents=True, exist_ok=True)
+        (Path(config.output_dir) / "run.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr("gefx.disent.train.train", _fake_train)
+    tabela = modulo.arm_diversity_curve(
+        tmp_path, tmp_path / "curva", order=("a", "b", "c"), held_out="byod-mxr",
+        reuse=tmp_path / "loo", verbose=False,
+    )
+    assert [len(arms) for arms in treinados] == [1, 2]  # o ponto k=3 nao retreinou
+    assert tabela.iloc[-1]["run_dir"] == str(reuse)
+
+
+def test_the_curve_keeps_the_catalog_fixed_while_the_training_set_grows(tmp_path, monkeypatch):
+    """Se o catalogo crescesse junto, cada ponto responderia a uma pergunta
+    diferente e a curva nao mediria diversidade de treino."""
+    from gefx.disent import loo as modulo
+
+    vistos = []
+    monkeypatch.setattr(
+        modulo, "_evaluate_held_out",
+        lambda run_dir, root, held_out, seen, catalog_arms=None, batch=64, extra=None:
+            vistos.append((tuple(seen), tuple(catalog_arms or seen))) or [],
+    )
+    monkeypatch.setattr("gefx.disent.train.train",
+                        lambda config, verbose=True: (
+                            Path(config.output_dir).mkdir(parents=True, exist_ok=True),
+                            (Path(config.output_dir) / "run.json").write_text("{}"),
+                        ))
+    modulo.arm_diversity_curve(tmp_path, tmp_path / "curva", order=("a", "b", "c"),
+                               held_out="z", reuse=None, verbose=False)
+    assert [treino for treino, _ in vistos] == [("a",), ("a", "b"), ("a", "b", "c")]
+    assert {catalogo for _, catalogo in vistos} == {("a", "b", "c")}
+
+
+def test_the_transfer_cost_averages_the_seeds_and_shows_the_spread(tmp_path):
+    resumo = _resumo()
+    resumo["seed"] = 1
+    outra = _resumo()
+    outra["seed"] = 2
+    outra.loc[outra["condicao"] == "transferencia", "drive_exact"] = [0.551, 0.159]
+    custo = transfer_cost(pd.concat([resumo, outra]), _metrics(tmp_path)).set_index("arm")
+    assert custo.loc["lsp-tanh", "sementes"] == 2
+    assert custo.loc["lsp-tanh", "inedito"] == pytest.approx(0.541)
+    assert custo.loc["lsp-tanh", "amplitude_pontos"] == pytest.approx(2.0, abs=0.05)

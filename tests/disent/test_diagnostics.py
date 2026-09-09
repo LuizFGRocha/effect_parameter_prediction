@@ -163,3 +163,151 @@ def test_there_are_two_subsets_of_the_same_size_shifted_by_one_level():
         b - a for a, b in zip(impares, impares[1:])
     ]
     assert all(i - p == 1 for p, i in zip(pares, impares))
+
+
+# --- DCI e MIG ----------------------------------------------------------------
+def _structured_frame(repeats=8):
+    """Grade cruzada com os quatro fatores das metricas de estrutura."""
+    rows = []
+    for arm, content, drive, tone, _ in itertools.product(
+        range(3), range(4), range(4), range(2), range(repeats)
+    ):
+        rows.append({"arm": f"a{arm}", "content_id": f"c{content}",
+                     "drive_level": drive, "tone_level": tone})
+    return pd.DataFrame(rows)
+
+
+def _planted(frame, seed=0):
+    """Codigo com um fator por dimensao e ruido no resto: o caso em que as
+    metricas de estrutura devem sair no teto."""
+    rng = np.random.default_rng(seed)
+    return np.stack([
+        frame["drive_level"].to_numpy(dtype=float),
+        frame["tone_level"].to_numpy(dtype=float),
+        frame["arm"].astype("category").cat.codes.to_numpy(dtype=float),
+        frame["content_id"].astype("category").cat.codes.to_numpy(dtype=float),
+        rng.normal(size=len(frame)),
+    ], axis=1)
+
+
+def test_one_factor_per_dimension_reads_as_disentangled():
+    from gefx.disent.diagnostics import dci_scores
+
+    frame = _structured_frame()
+    scores = dci_scores(_planted(frame), frame, trees=40)
+    # Nao 1,0: a importancia de Gini vaza para a dimensao de ruido, que e
+    # continua e de cardinalidade alta e por isso oferece muitos cortes. O teto
+    # pratico com um codigo plantado perfeito fica na casa de 0,8 -- e o que
+    # torna a leitura possivel e a distancia ate o codigo misturado, abaixo.
+    assert scores["disentanglement"] > 0.75
+    for factor, value in scores["completeness"].items():
+        assert value > 0.6, factor
+    for factor, numbers in scores["informativeness"].items():
+        assert numbers["accuracy"] > 0.95, factor
+
+
+def test_a_code_that_repeats_every_factor_everywhere_reads_as_entangled():
+    """O contraste que da sentido ao numero anterior: mesma informacao, espalhada
+    por todas as dimensoes. A informatividade continua no teto -- e por isso que
+    ela sozinha nao mede desemaranhamento."""
+    from gefx.disent.diagnostics import dci_scores
+
+    frame = _structured_frame()
+    planted = _planted(frame)
+    rng = np.random.default_rng(1)
+    mistura = planted @ rng.normal(size=(planted.shape[1], planted.shape[1]))
+    scores = dci_scores(mistura, frame, trees=40)
+    assert scores["disentanglement"] < 0.2
+    assert scores["informativeness"]["drive_level"]["accuracy"] > 0.9
+
+
+def test_the_block_mass_finds_the_block_that_carries_the_factor():
+    """E esta a afirmacao do trabalho: nao que cada dimensao carregue um fator,
+    e sim que os fatores de configuracao estejam em `z_e` e o resto em `z_c`."""
+    from gefx.disent.diagnostics import dci_scores
+
+    frame = _structured_frame()
+    codes = _planted(frame)
+    # Duas primeiras dimensoes = z_e (configuracao), o resto = z_c.
+    blocks = {"z_e": range(2), "z_c": range(2, codes.shape[1])}
+    scores = dci_scores(codes, frame, blocks=blocks, trees=40)
+    assert scores["block_mass"]["drive_level"]["z_e"] > 0.85
+    assert scores["block_mass"]["tone_level"]["z_e"] > 0.85
+    assert scores["block_mass"]["arm"]["z_c"] > 0.9
+    assert scores["block_mass"]["content_id"]["z_c"] > 0.9
+    assert min(scores["block_completeness"].values()) > 0.4
+
+
+def test_the_block_mass_of_each_factor_is_a_partition():
+    from gefx.disent.diagnostics import dci_scores
+
+    frame = _structured_frame()
+    codes = _planted(frame)
+    scores = dci_scores(codes, frame, blocks={"z_e": range(2), "z_c": range(2, 5)},
+                        trees=40)
+    for factor, shares in scores["block_mass"].items():
+        assert sum(shares.values()) == pytest.approx(1.0), factor
+
+
+def test_the_mig_points_at_the_dimension_that_holds_the_factor():
+    from gefx.disent.diagnostics import mutual_information_gap
+
+    frame = _structured_frame()
+    gaps = mutual_information_gap(_planted(frame), frame)
+    assert gaps["drive_level"]["top_latent"] == 0
+    assert gaps["tone_level"]["top_latent"] == 1
+    assert gaps["arm"]["top_latent"] == 2
+    assert gaps["drive_level"]["mig"] > 0.5
+
+
+def test_the_mig_collapses_when_the_factor_is_duplicated_across_dimensions():
+    """MIG mede a **distancia** entre as duas melhores dimensoes: duplicar o
+    fator zera o numero sem tirar informacao nenhuma do codigo. E a razao de ele
+    entrar como descricao e nao como criterio."""
+    from gefx.disent.diagnostics import mutual_information_gap
+
+    frame = _structured_frame()
+    codes = _planted(frame)
+    duplicado = np.concatenate([codes, codes[:, :1]], axis=1)
+    gaps = mutual_information_gap(duplicado, frame)
+    assert gaps["drive_level"]["mig"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_a_dead_dimension_does_not_break_the_binning():
+    from gefx.disent.diagnostics import mutual_information_gap
+
+    frame = _structured_frame()
+    codes = np.concatenate([_planted(frame), np.zeros((len(frame), 1))], axis=1)
+    gaps = mutual_information_gap(codes, frame)
+    assert gaps["arm"]["top_latent"] == 2
+
+
+def test_the_structure_metrics_refuse_a_mismatched_number_of_rows():
+    from gefx.disent.diagnostics import dci_scores, mutual_information_gap
+
+    frame = _structured_frame(repeats=1)
+    codes = np.zeros((len(frame) + 1, 3))
+    with pytest.raises(ValueError, match="codigos"):
+        dci_scores(codes, frame, trees=10)
+    with pytest.raises(ValueError, match="codigos"):
+        mutual_information_gap(codes, frame)
+
+
+def test_the_structure_factors_cover_what_each_block_should_hold():
+    from gefx.disent.diagnostics import STRUCTURE_FACTORS
+
+    assert set(STRUCTURE_FACTORS) == {"drive_level", "tone_level", "arm", "content_id"}
+
+
+def test_the_forest_credits_the_noise_dimension_more_than_the_wrong_factor():
+    """Uma ressalva a registrar, nao um defeito a esconder: a importancia de Gini
+    prefere dimensoes continuas de cardinalidade alta, entao a dimensao de ruido
+    recebe mais credito do que as dimensoes que carregam os outros fatores. Ler
+    um `D` de 0,8 como "20% emaranhado" seria ler o vies do estimador."""
+    from gefx.disent.diagnostics import dci_scores
+
+    frame = _structured_frame()
+    scores = dci_scores(_planted(frame), frame, trees=40)
+    importancia = scores["importance"]
+    coluna = list(scores["factors"]).index("drive_level")
+    assert importancia[-1, coluna] > importancia[1, coluna]

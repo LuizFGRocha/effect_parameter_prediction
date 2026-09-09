@@ -73,6 +73,43 @@ TECHNIQUES: Dict[str, Dict[str, float]] = {
     "random_encoder": {},
 }
 
+#: Decomposicao do unico resultado que sobreviveu ao IC agrupado por conteudo:
+#: `full` e pior que `grl` por 4,1 pontos. Nao sao tecnicas do estudo -- ficam
+#: fora de `TECHNIQUES` de proposito, para nao diluir a escada pre-declarada nem
+#: entrar nas figuras da etapa 5. Existem porque `full` acrescenta **dois**
+#: termos de uma vez, e a escada so atribui um efeito a uma ideia quando as
+#: linhas vizinhas diferem por uma. Sem isto, "a ortogonalidade piora" e uma
+#: conclusao que os dados nao sustentam -- pode ser o adversario de configuracao,
+#: e pode ser o peso e nao o termo.
+WEIGHT_VARIANTS: Dict[str, Dict[str, float]] = {
+    # `grl` + o terceiro adversario, sozinho.
+    "grl_config": {
+        "contrastive": 1.0, "aux_regression": 1.0,
+        "adversary_arm": 0.3, "adversary_content": 0.3, "adversary_config": 0.3,
+    },
+    # `grl` + a ortogonalidade, sozinha.
+    "grl_orth": {
+        "contrastive": 1.0, "aux_regression": 1.0,
+        "adversary_arm": 0.3, "adversary_content": 0.3, "orthogonality": 1.0,
+    },
+    # `full` com a ortogonalidade dez vezes mais leve: separa "o termo atrapalha"
+    # de "este peso atrapalha". O peso 1,0 nunca foi ajustado.
+    "full_light_orth": {
+        "contrastive": 1.0, "aux_regression": 1.0,
+        "adversary_arm": 0.3, "adversary_content": 0.3, "adversary_config": 0.3,
+        "orthogonality": 0.1,
+    },
+}
+
+
+def technique_weights(name: str) -> Dict[str, float]:
+    """Pesos de uma tecnica do estudo ou de uma variante de peso."""
+    known = {**TECHNIQUES, **WEIGHT_VARIANTS}
+    if name not in known:
+        raise KeyError(f"tecnica desconhecida: {name!r}. Ha {sorted(known)}")
+    return dict(known[name])
+
+
 #: Tecnicas que nao executam passo de otimizacao.
 UNTRAINED: Tuple[str, ...] = ("random_encoder",)
 
@@ -157,11 +194,7 @@ class TrainConfig:
     def resolved_weights(self) -> Dict[str, float]:
         if self.weights is not None:
             return dict(self.weights)
-        if self.technique not in TECHNIQUES:
-            raise KeyError(
-                f"tecnica desconhecida: {self.technique!r}. Ha {sorted(TECHNIQUES)}"
-            )
-        return dict(TECHNIQUES[self.technique])
+        return technique_weights(self.technique)
 
     def resolved_output(self) -> Path:
         nome = f"{self.technique}_permutado" if self.permute_labels else self.technique
@@ -263,6 +296,28 @@ def make_vae_step(model: BetaVAE, optimizer):
 
 
 # --- avaliacao ----------------------------------------------------------------
+def embed_blocks(model, store: FeatureStore, standardizer: PixelStandardizer,
+                 batch: int = 128) -> Tuple[np.ndarray, np.ndarray]:
+    """`(z_e, z_c)` de todas as linhas do `store`, na ordem do `frame`.
+
+    A busca so usa `z_e` (ver `embed`), mas as metricas de estrutura da etapa 6
+    precisam dos dois blocos: a afirmacao do desemaranhamento e sobre **onde**
+    cada fator esta legivel, e um bloco so nao responde isso.
+    """
+    rows = np.arange(len(store))
+    out: Optional[Tuple[np.ndarray, np.ndarray]] = None
+    for block, features in store.stream(rows, chunk=batch):
+        z_e, z_c = model.encode(standardizer.transform(features), training=False)
+        z_e, z_c = np.asarray(z_e), np.asarray(z_c)
+        if out is None:
+            out = (np.empty((len(store), z_e.shape[1]), dtype=np.float32),
+                   np.empty((len(store), z_c.shape[1]), dtype=np.float32))
+        out[0][block], out[1][block] = z_e, z_c
+    if out is None:
+        raise ValueError("store vazio")
+    return out
+
+
 def embed(model, store: FeatureStore, standardizer: PixelStandardizer,
           batch: int = 128) -> np.ndarray:
     """`z_e` de todas as linhas do `store`, na ordem do `frame`.
@@ -271,17 +326,7 @@ def embed(model, store: FeatureStore, standardizer: PixelStandardizer,
     a busca voltaria a responder por conteudo, que e exatamente o que a etapa 4
     mostrou ser o gargalo.
     """
-    rows = np.arange(len(store))
-    out: Optional[np.ndarray] = None
-    for block, features in store.stream(rows, chunk=batch):
-        z_e, _ = model.encode(standardizer.transform(features), training=False)
-        z_e = np.asarray(z_e)
-        if out is None:
-            out = np.empty((len(store), z_e.shape[1]), dtype=np.float32)
-        out[block] = z_e
-    if out is None:
-        raise ValueError("store vazio")
-    return out
+    return embed_blocks(model, store, standardizer, batch)[0]
 
 
 def evaluate(

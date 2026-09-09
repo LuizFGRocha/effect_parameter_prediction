@@ -395,3 +395,65 @@ def test_the_permutation_control_trains_on_scrambled_configurations(tmp_path):
     )
     assert manifest["config"]["permute_labels"] is True
     assert (tmp_path / "perm" / "metrics.json").exists()
+
+
+# --- variantes de peso (decomposicao do `full`) -------------------------------
+def test_the_weight_variants_stay_out_of_the_declared_study():
+    """Elas respondem uma pergunta aberta pela etapa 5, e nao fazem parte da
+    escada pre-declarada. Dentro de `TECHNIQUES` entrariam nas figuras e na
+    tabela do estudo, e o estudo passaria a ter tecnicas escolhidas depois de
+    ver o resultado."""
+    from gefx.disent.train import WEIGHT_VARIANTS
+
+    assert set(WEIGHT_VARIANTS).isdisjoint(TECHNIQUES)
+
+
+def test_each_weight_variant_differs_from_its_base_by_one_thing():
+    """E o ponto inteiro: `full` acrescenta dois termos a `grl` de uma vez, entao
+    a diferenca de -4,1 pontos entre os dois nao e atribuivel a nenhum deles."""
+    from gefx.disent.train import WEIGHT_VARIANTS
+
+    assert set(WEIGHT_VARIANTS["grl_config"]) - set(TECHNIQUES["grl"]) == {"adversary_config"}
+    assert set(WEIGHT_VARIANTS["grl_orth"]) - set(TECHNIQUES["grl"]) == {"orthogonality"}
+    # A terceira separa "o termo atrapalha" de "este peso atrapalha".
+    assert set(WEIGHT_VARIANTS["full_light_orth"]) == set(TECHNIQUES["full"])
+    diferentes = {
+        nome for nome, peso in WEIGHT_VARIANTS["full_light_orth"].items()
+        if TECHNIQUES["full"][nome] != peso
+    }
+    assert diferentes == {"orthogonality"}
+
+
+def test_every_weight_variant_only_asks_for_registered_losses():
+    from gefx.disent.losses import LOSS_REGISTRY
+    from gefx.disent.train import WEIGHT_VARIANTS
+
+    for name, weights in WEIGHT_VARIANTS.items():
+        assert set(weights) <= set(LOSS_REGISTRY), name
+
+
+def test_a_weight_variant_is_a_valid_technique_for_a_run():
+    from gefx.disent.train import WEIGHT_VARIANTS
+
+    config = TrainConfig(technique="grl_orth")
+    assert config.resolved_weights() == WEIGHT_VARIANTS["grl_orth"]
+
+
+def test_the_two_blocks_come_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):
+    """`embed` devolve so `z_e` porque e so isso que entra no catalogo; as
+    metricas de estrutura precisam dos dois, e os dois tem de sair da mesma
+    passagem para descreverem a mesma linha."""
+    from gefx.disent.features import FeatureStore, PixelStandardizer
+    from gefx.disent.model import DisentModel, HeadConfig
+    from gefx.disent.train import embed, embed_blocks, split_frames
+
+    config = _config(tmp_path)
+    frame = split_frames(config.dataset_root)["catalog"]
+    store = FeatureStore(config.dataset_root, frame, "Spec")
+    standardizer = PixelStandardizer.fit(store)
+    model = DisentModel(config.encoder, HeadConfig(n_arms=2, n_contents=4, n_configs=4))
+
+    z_e, z_c = embed_blocks(model, store, standardizer, batch=8)
+    assert z_e.shape == (len(frame), config.encoder.effect_dim)
+    assert z_c.shape == (len(frame), config.encoder.content_dim)
+    assert np.allclose(embed(model, store, standardizer, batch=8), z_e)

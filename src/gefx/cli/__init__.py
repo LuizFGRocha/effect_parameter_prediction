@@ -195,7 +195,11 @@ def _cmd_disent_plots(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
-    from gefx.disent.train import STUDY_ORDER, TECHNIQUES, TrainConfig, compare, train
+    from gefx.disent.train import (
+        STUDY_ORDER, TECHNIQUES, WEIGHT_VARIANTS, TrainConfig, compare, train,
+    )
+
+    conhecidas = {**TECHNIQUES, **WEIGHT_VARIANTS}
 
     escolhidas = args.technique or ["full"]
     # A ordem de execucao decide quais criterios podem ser avaliados, entao ela e
@@ -207,8 +211,8 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
     # duro do estudo fica de fora.
     referencias: dict = {}
     for nome in escolhidas:
-        if nome not in TECHNIQUES:
-            raise SystemExit(f"tecnica desconhecida: {nome}. Ha {sorted(TECHNIQUES)}")
+        if nome not in conhecidas:
+            raise SystemExit(f"tecnica desconhecida: {nome}. Ha {sorted(conhecidas)}")
         print(f"[{nome}]")
         config = TrainConfig(
             dataset_root=Path(args.output_root),
@@ -232,7 +236,8 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             print(f"    {'PASSA' if veredito else 'FALHA'}  {criterio}")
 
     raiz = saida_base or Path("results/disent/etapa5")
-    tabela = compare(raiz)
+    # As variantes de peso nao estao em `TECHNIQUES`, que e o padrao do `compare`.
+    tabela = compare(raiz, techniques=sorted(set(TECHNIQUES) | set(escolhidas)))
     print()
     print(tabela.to_string(index=False))
     destino = raiz / "comparacao.csv"
@@ -254,11 +259,40 @@ def _cmd_disent_probe(args: argparse.Namespace) -> None:
     print(f"\ntabela em {destino}")
 
 
+def _cmd_disent_structure(args: argparse.Namespace) -> None:
+    from gefx.disent.diagnostics import structure_study
+
+    tabela = structure_study(
+        Path(args.results_dir), Path(args.output_root),
+        techniques=args.technique, split=args.split, seed=args.seed, trees=args.trees,
+    )
+    print(tabela.to_string(index=False))
+    destino = Path(args.results_dir) / "estrutura.csv"
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
+
+
+def _cmd_disent_diversity(args: argparse.Namespace) -> None:
+    from gefx.disent.loo import arm_diversity_curve
+
+    tabela = arm_diversity_curve(
+        Path(args.output_root), Path(args.results_dir), held_out=args.held_out,
+        technique=args.technique, steps=args.steps, seed=args.seed,
+        reuse=Path(args.reuse) if args.reuse else None,
+    )
+    print()
+    print(tabela.to_string(index=False))
+    print(f"\ntabela em {Path(args.results_dir) / 'resumo.csv'}")
+
+
 def _cmd_disent_loo(args: argparse.Namespace) -> None:
     from gefx.disent.loo import leave_one_arm_out, transfer_cost
 
-    tabela = leave_one_arm_out(Path(args.output_root), Path(args.results_dir),
-                               technique=args.technique, steps=args.steps, seed=args.seed)
+    tabela = leave_one_arm_out(
+        Path(args.output_root), Path(args.results_dir), technique=args.technique,
+        steps=args.steps, seed=args.seed,
+        seeds=[args.seed] + [s for s in (args.extra_seed or []) if s != args.seed],
+    )
     custo = transfer_cost(tabela)
     print()
     print(custo.to_string(index=False))
@@ -534,7 +568,40 @@ def build_parser() -> argparse.ArgumentParser:
     disent_loo.add_argument("--technique", default="contrastive_aux")
     disent_loo.add_argument("--steps", type=int, default=4000)
     disent_loo.add_argument("--seed", type=int, default=20260908)
+    disent_loo.add_argument("--extra-seed", type=int, action="append", default=None,
+                            help="Repetivel. Repete o leave-one-out inteiro com outra "
+                                 "semente; e o unico jeito de por barra no custo por "
+                                 "arm, que tem so 800 consultas.")
     disent_loo.set_defaults(func=_cmd_disent_loo)
+
+    disent_structure = disent_sub.add_parser(
+        "structure",
+        help="Etapa 6: DCI e MIG sobre [z_e | z_c], e a massa de cada fator por bloco.",
+    )
+    disent_structure.add_argument("--results-dir", default="results/disent/etapa5")
+    disent_structure.add_argument("--output-root", default="datasets/disent")
+    disent_structure.add_argument("--technique", action="append", default=None)
+    disent_structure.add_argument("--split", default="catalog")
+    disent_structure.add_argument("--trees", type=int, default=200,
+                                  help="Arvores da floresta que mede a importancia.")
+    disent_structure.add_argument("--seed", type=int, default=0)
+    disent_structure.set_defaults(func=_cmd_disent_structure)
+
+    disent_diversity = disent_sub.add_parser(
+        "diversity",
+        help="B2 e B3: treina com 1, 2, ... N-1 implementacoes e mede a transferencia.",
+    )
+    disent_diversity.add_argument("--output-root", default="datasets/disent")
+    disent_diversity.add_argument("--results-dir",
+                                  default="results/disent/etapa5/diversidade")
+    disent_diversity.add_argument("--held-out", default="byod-mxr")
+    disent_diversity.add_argument("--technique", default="contrastive_aux")
+    disent_diversity.add_argument("--steps", type=int, default=4000)
+    disent_diversity.add_argument("--seed", type=int, default=20260908)
+    disent_diversity.add_argument("--reuse", default="results/disent/etapa5/loo",
+                                  help="Diretorio do leave-one-out: o ultimo ponto da "
+                                       "curva e a mesma execucao e nao e retreinado.")
+    disent_diversity.set_defaults(func=_cmd_disent_diversity)
 
     disent_ablate = disent_sub.add_parser(
         "ablate",
