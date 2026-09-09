@@ -183,6 +183,10 @@ class TrainConfig:
     eval_every: int = 500
     embed_batch: int = 128
     seed: int = 20260908
+    #: Avaliacao final. Desligar so faz sentido quando quem mede e outra coisa:
+    #: na curva de diversidade o ponto de um arm so nao tem tarefa entre
+    #: implementacoes para medir por dentro, e quem pontua e o arm retirado.
+    evaluate_at_end: bool = True
     #: Controle de permutacao: embaralha a configuracao dentro de cada
     #: (conteudo, implementacao). Nao e uma tecnica -- e a checagem de que o
     #: ganho vem do rotulo e nao do procedimento de treino.
@@ -342,6 +346,17 @@ def evaluate(
     arm do catalogo, mesmo alfabeto, mesmo denominador de sorvedouro. E a metrica
     e cosseno, que e onde o contrastivo trabalha.
     """
+    arms = set(frames["catalog"]["arm"].unique())
+    if len(arms) < 2:
+        # Com uma implementacao so no recorte, "excluir o proprio arm do
+        # catalogo" nao deixa candidato nenhum, e a tarefa entre implementacoes
+        # simplesmente nao existe. E o caso do B2 na curva de diversidade, onde
+        # quem mede e o arm retirado -- ver `TrainConfig.evaluate_at_end`.
+        raise ValueError(
+            f"a tarefa entre implementacoes precisa de ao menos 2 arms no "
+            f"catalogo, ha {sorted(arms)}. Use evaluate_at_end=False e meca "
+            f"por fora."
+        )
     z_query = embed(model, stores["query"], standardizer, batch)
     z_catalog = embed(model, stores["catalog"], standardizer, batch)
 
@@ -452,7 +467,7 @@ def rescore(results_dir: Path = Path("results/disent/etapa5")) -> Dict[str, Dict
     references: Dict[str, Mapping[str, float]] = {}
     out: Dict[str, Dict[str, object]] = {}
     for name in STUDY_ORDER:
-        if not (results_dir / name / "run.json").exists():
+        if not (results_dir / name / "metrics.json").exists():
             continue
         pasta = results_dir / name
         metrics = json.loads((pasta / "metrics.json").read_text(encoding="utf-8"))
@@ -574,16 +589,22 @@ def train(
                 print(f"  [avaliacao no passo {number}] drive_exact={drive:.4f} "
                       f"mae_db={partial['overall']['mae_db']:.2f}", flush=True)
 
-    predictions, metrics = evaluate(model, frames, stores, standardizer, config.embed_batch)
+    if config.evaluate_at_end:
+        predictions, metrics = evaluate(model, frames, stores, standardizer,
+                                        config.embed_batch)
+    else:
+        predictions, metrics = None, None
     elapsed = time.time() - started
 
     out_dir = config.resolved_output()
     out_dir.mkdir(parents=True, exist_ok=True)
     model.save_weights(out_dir / "weights")
     standardizer.save(out_dir / "standardizer.npz")
-    predictions.to_csv(out_dir / "predictions.csv", index=False)
     (out_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
-    (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    if metrics is not None:
+        predictions.to_csv(out_dir / "predictions.csv", index=False)
+        (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2),
+                                              encoding="utf-8")
 
     manifest = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -594,7 +615,8 @@ def train(
         "splits": {name: int(len(frame)) for name, frame in frames.items()},
         "steps_executed": steps,
         "checkpoints": checkpoints,
-        "decision": decide(metrics, references, technique=config.technique),
+        "decision": (decide(metrics, references, technique=config.technique)
+                     if metrics is not None else None),
     }
     (out_dir / "run.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if verbose:
@@ -622,6 +644,10 @@ def compare(
         if not manifest_path.exists():
             continue
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # Uma execucao sem avaliacao final (`evaluate_at_end=False`) nao tem
+        # veredito para comparar; ela e medida por fora.
+        if not manifest.get("decision"):
+            continue
         measured = dict(manifest["decision"]["measured"])
         sem = measured.pop("sem_bigmuff", None)
         rows.append(

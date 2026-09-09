@@ -272,6 +272,31 @@ def _cmd_disent_structure(args: argparse.Namespace) -> None:
     print(f"\ntabela em {destino}")
 
 
+def _cmd_disent_bootstrap(args: argparse.Namespace) -> None:
+    from gefx.disent.diagnostics import bootstrap_study, find_runs
+
+    execucoes = find_runs(Path(args.results_dir))
+    pares = []
+    for texto in args.pair or []:
+        if texto.count(":") != 1:
+            raise SystemExit(f"par mal formado: {texto!r}. Use a:b")
+        esquerda, direita = texto.split(":")
+        for nome in (esquerda, direita):
+            if nome not in execucoes:
+                raise SystemExit(
+                    f"execucao sem predictions.csv: {nome}. Ha {sorted(execucoes)}"
+                )
+        pares.append((esquerda, direita))
+    if not pares:
+        raise SystemExit("nenhum par: use --pair a:b (repetivel)")
+
+    tabela = bootstrap_study(execucoes, pares, reps=args.reps, seed=args.seed)
+    print(tabela.to_string(index=False))
+    destino = Path(args.results_dir) / "bootstrap.csv"
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
+
+
 def _cmd_disent_diversity(args: argparse.Namespace) -> None:
     from gefx.disent.loo import arm_diversity_curve
 
@@ -586,6 +611,19 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="Arvores da floresta que mede a importancia.")
     disent_structure.add_argument("--seed", type=int, default=0)
     disent_structure.set_defaults(func=_cmd_disent_structure)
+
+    disent_bootstrap = disent_sub.add_parser(
+        "bootstrap",
+        help="IC 95% agrupado por conteudo para a diferenca entre duas execucoes.",
+    )
+    disent_bootstrap.add_argument("--results-dir", default="results/disent/etapa5")
+    disent_bootstrap.add_argument("--pair", action="append", default=None,
+                                  help="Repetivel, no formato a:b. As 5.600 consultas "
+                                       "sao 20 conteudos x 40 config x 7 arms: um IC "
+                                       "por linha sai 3,5x estreito demais.")
+    disent_bootstrap.add_argument("--reps", type=int, default=4000)
+    disent_bootstrap.add_argument("--seed", type=int, default=0)
+    disent_bootstrap.set_defaults(func=_cmd_disent_bootstrap)
 
     disent_diversity = disent_sub.add_parser(
         "diversity",

@@ -189,8 +189,14 @@ def arm_diversity_curve(
         if verbose:
             print(f"[k={k}] {', '.join(treinados)}", flush=True)
         if not (run_dir / "run.json").exists():
+            # `evaluate_at_end=False`: com uma implementacao so no recorte a
+            # tarefa entre implementacoes nao existe por dentro da execucao, e
+            # nos outros pontos a avaliacao interna seria sobre um catalogo que
+            # muda de tamanho -- incomparavel entre pontos. Quem pontua e o arm
+            # retirado, contra o catalogo fixo, logo abaixo.
             train(TrainConfig(technique=technique, arms=tuple(treinados), steps=steps,
-                              seed=seed, eval_every=0, output_dir=run_dir), verbose=False)
+                              seed=seed, eval_every=0, evaluate_at_end=False,
+                              output_dir=run_dir), verbose=False)
         novas = _evaluate_held_out(
             run_dir, root, held_out, treinados, catalog_arms=pool,
             extra={"k": k, "arms_treinados": "|".join(treinados),

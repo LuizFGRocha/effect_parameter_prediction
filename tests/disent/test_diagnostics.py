@@ -311,3 +311,76 @@ def test_the_forest_credits_the_noise_dimension_more_than_the_wrong_factor():
     importancia = scores["importance"]
     coluna = list(scores["factors"]).index("drive_level")
     assert importancia[-1, coluna] > importancia[1, coluna]
+
+
+# --- IC agrupado --------------------------------------------------------------
+def _predictions(tmp_path, nome, acertos, arms=("a", "b"), contents=("c0", "c1")):
+    """Uma execucao falsa com `acertos` linhas certas, na grade conteudo x arm."""
+    linhas = []
+    for content in contents:
+        for arm in arms:
+            for indice in range(10):
+                linhas.append({
+                    "file_name": f"{content}__{indice}.wav", "query_arm": arm,
+                    "query_content": content, "true_drive_level": 3,
+                    "pred_drive_level": 3 if len(linhas) < acertos else 5,
+                })
+    pasta = tmp_path / nome
+    pasta.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(linhas).to_csv(pasta / "predictions.csv", index=False)
+    return pasta
+
+
+def test_the_query_key_is_the_pair_because_the_file_name_repeats_across_arms(tmp_path):
+    """A armadilha concreta: o mesmo conteudo e a mesma configuracao sao
+    renderizados por cada implementacao, entao `file_name` sozinho junta 7 linhas
+    com 7 e devolve 49. O IC sairia de uma tabela sete vezes maior."""
+    from gefx.disent.diagnostics import read_predictions
+
+    quadro = read_predictions(_predictions(tmp_path, "x", 20))
+    assert quadro.index.names == ["file_name", "query_arm"]
+    assert quadro.index.is_unique
+
+
+def test_two_identical_runs_have_a_zero_difference_and_an_interval_on_zero(tmp_path):
+    from gefx.disent.diagnostics import clustered_bootstrap, read_predictions
+
+    a = read_predictions(_predictions(tmp_path, "a", 20))
+    numbers = clustered_bootstrap(a, a, reps=200)
+    assert numbers["diferenca_pontos"] == pytest.approx(0.0)
+    assert numbers["ic_baixo"] == pytest.approx(0.0)
+    assert numbers["ic_alto"] == pytest.approx(0.0)
+    assert numbers["distinguivel"] is False
+
+
+def test_the_bootstrap_resamples_contents_and_not_rows(tmp_path):
+    """Com 2 conteudos ha 2 grupos, nao 40 linhas: e a contagem de grupos que
+    determina a largura do intervalo."""
+    from gefx.disent.diagnostics import clustered_bootstrap, read_predictions
+
+    a = read_predictions(_predictions(tmp_path, "a", 40))
+    b = read_predictions(_predictions(tmp_path, "b", 0))
+    numbers = clustered_bootstrap(a, b, reps=200)
+    assert numbers["grupos"] == 2
+    assert numbers["n"] == 40
+    assert numbers["diferenca_pontos"] == pytest.approx(100.0)
+
+
+def test_two_runs_that_answered_different_queries_are_refused(tmp_path):
+    from gefx.disent.diagnostics import clustered_bootstrap, read_predictions
+
+    a = read_predictions(_predictions(tmp_path, "a", 20))
+    b = read_predictions(_predictions(tmp_path, "b", 20, contents=("c0", "c2")))
+    with pytest.raises(ValueError, match="mesmas consultas"):
+        clustered_bootstrap(a, b, reps=10)
+
+
+def test_find_runs_reaches_the_weight_variants_in_their_subfolder(tmp_path):
+    from gefx.disent.diagnostics import find_runs
+
+    _predictions(tmp_path, "grl", 20)
+    _predictions(tmp_path / "pesos", "grl_orth", 20)
+    (tmp_path / "figuras").mkdir()
+    encontradas = find_runs(tmp_path)
+    assert set(encontradas) == {"grl", "grl_orth"}
+    assert encontradas["grl_orth"] == tmp_path / "pesos" / "grl_orth"

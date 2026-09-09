@@ -719,3 +719,103 @@ def structure_study(
     if not rows:
         raise FileNotFoundError(f"nenhuma execucao com run.json em {results_dir}")
     return pd.DataFrame(rows)
+
+
+# --- a barra que decide se duas tecnicas sao diferentes ------------------------
+#: As 5.600 consultas do split nao sao 5.600 amostras independentes: sao 20
+#: conteudos x 40 configuracoes x 7 implementacoes, e o conteudo e o fator que
+#: domina a dificuldade (etapa 4: e ele que derruba o B0, nao a implementacao).
+#: Um IC por linha assume independencia que nao existe e sai **3,5x estreito** --
+#: foi o que transformou "+1,25 ponto" numa diferenca aparente entre tecnicas que
+#: o IC agrupado nao sustenta. Reamostrar **conteudos inteiros** e o conserto.
+BOOTSTRAP_REPS = 4000
+
+#: Chave de uma consulta. O nome do arquivo **se repete entre implementacoes** --
+#: e o mesmo conteudo e a mesma configuracao renderizados por cada arm -- entao
+#: juntar duas execucoes so por `file_name` multiplica as linhas por 7 em
+#: silencio. O par e a chave.
+QUERY_KEY = ("file_name", "query_arm")
+
+
+def read_predictions(run_dir: Path) -> pd.DataFrame:
+    """`predictions.csv` de uma execucao, com a coluna de acerto ja derivada."""
+    frame = pd.read_csv(Path(run_dir) / "predictions.csv")
+    frame["acerto"] = (
+        frame["pred_drive_level"] == frame["true_drive_level"]
+    ).astype(float)
+    return frame.set_index(list(QUERY_KEY))
+
+
+def clustered_bootstrap(
+    a: pd.DataFrame,
+    b: pd.DataFrame,
+    reps: int = BOOTSTRAP_REPS,
+    seed: int = 0,
+    cluster: str = "query_content",
+) -> Dict[str, float]:
+    """Diferenca de acerto entre duas execucoes, em pontos, com IC 95% agrupado.
+
+    Pareada linha a linha (as duas execucoes respondem exatamente as mesmas
+    consultas) e reamostrada por `cluster`, nao por linha.
+    """
+    junto = a.join(b["acerto"].rename("acerto_b"), how="inner")
+    if len(junto) != len(a) or len(junto) != len(b):
+        raise ValueError(
+            f"as duas execucoes nao respondem as mesmas consultas: "
+            f"{len(a)} e {len(b)} linhas dao {len(junto)} pareadas"
+        )
+    grupos = [grupo for _, grupo in junto.groupby(cluster)]
+    rng = np.random.default_rng(seed)
+    observado = float(junto["acerto"].mean() - junto["acerto_b"].mean()) * 100
+    amostras = np.empty(reps)
+    for indice in range(reps):
+        escolha = rng.integers(0, len(grupos), len(grupos))
+        bloco = pd.concat([grupos[posicao] for posicao in escolha])
+        amostras[indice] = (bloco["acerto"].mean() - bloco["acerto_b"].mean()) * 100
+    baixo, alto = (float(valor) for valor in np.percentile(amostras, [2.5, 97.5]))
+    return {
+        "diferenca_pontos": observado,
+        "ic_baixo": baixo,
+        "ic_alto": alto,
+        "grupos": len(grupos),
+        "n": int(len(junto)),
+        # A leitura que interessa: um IC que cruza zero nao sustenta um ranking.
+        "distinguivel": bool(baixo > 0 or alto < 0),
+    }
+
+
+def bootstrap_study(
+    runs: Mapping[str, Path],
+    pairs: Sequence[Tuple[str, str]],
+    reps: int = BOOTSTRAP_REPS,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Uma linha por par comparado. `runs` mapeia nome -> diretorio de execucao."""
+    carregadas = {nome: read_predictions(caminho) for nome, caminho in runs.items()}
+    rows: List[Dict[str, object]] = []
+    for esquerda, direita in pairs:
+        numbers = clustered_bootstrap(carregadas[esquerda], carregadas[direita],
+                                      reps=reps, seed=seed)
+        rows.append({"a": esquerda, "b": direita, **numbers})
+    return pd.DataFrame(rows)
+
+
+def find_runs(
+    results_dir: Path = Path("results/disent/etapa5"),
+    extra: Sequence[str] = ("pesos",),
+) -> Dict[str, Path]:
+    """Execucoes com `predictions.csv` sob o diretorio, um nivel de subpasta.
+
+    As variantes de peso moram numa subpasta justamente para nao entrarem no
+    estudo pre-declarado; esta funcao e o unico lugar que as junta de volta, e
+    so para efeito de comparacao.
+    """
+    results_dir = Path(results_dir)
+    encontradas: Dict[str, Path] = {}
+    for base in [results_dir, *(results_dir / nome for nome in extra)]:
+        if not base.is_dir():
+            continue
+        for pasta in sorted(base.iterdir()):
+            if (pasta / "predictions.csv").exists() and pasta.name not in encontradas:
+                encontradas[pasta.name] = pasta
+    return encontradas

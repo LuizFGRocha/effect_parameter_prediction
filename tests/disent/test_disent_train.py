@@ -457,3 +457,35 @@ def test_the_two_blocks_come_out_of_the_encoder_in_the_row_order_of_the_frame(tm
     assert z_e.shape == (len(frame), config.encoder.effect_dim)
     assert z_c.shape == (len(frame), config.encoder.content_dim)
     assert np.allclose(embed(model, store, standardizer, batch=8), z_e)
+
+
+# --- o recorte de uma implementacao so (B2) -----------------------------------
+def test_a_single_arm_slice_refuses_the_cross_implementation_evaluation(tmp_path):
+    """Excluir o proprio arm de um catalogo de um arm so deixa catalogo vazio, e
+    a busca morre com `argmax of an empty sequence`. O erro tem de dizer o que
+    aconteceu e apontar a saida -- foi assim que o ponto B2 da curva de
+    diversidade quebrou depois de treinar 13 minutos."""
+    with pytest.raises(ValueError, match="ao menos 2 arms"):
+        train_module.train(_config(tmp_path, arms=(ARMS[0],)), verbose=False)
+
+
+def test_a_run_without_the_final_evaluation_still_saves_what_reloads_it(tmp_path):
+    """Sem avaliacao interna a execucao continua reproduzivel: pesos,
+    padronizador e o `run.json` com a configuracao e as cabecas. E disso que a
+    curva de diversidade precisa -- quem pontua e o arm retirado, por fora."""
+    config = _config(tmp_path, arms=(ARMS[0],), evaluate_at_end=False)
+    manifest = train_module.train(config, verbose=False)
+    saida = config.resolved_output()
+    assert manifest["decision"] is None
+    assert not (saida / "metrics.json").exists()
+    assert not (saida / "predictions.csv").exists()
+    assert (saida / "standardizer.npz").exists()
+    assert json.loads((saida / "run.json").read_text())["config"]["arms"] == [ARMS[0]]
+
+
+def test_compare_skips_a_run_that_has_no_verdict(tmp_path):
+    pasta = tmp_path / "sem_veredito"
+    pasta.mkdir(parents=True)
+    (pasta / "run.json").write_text(json.dumps({"decision": None, "config": {"steps": 1}}))
+    tabela = compare(tmp_path, techniques=["sem_veredito"])
+    assert "sem_veredito" not in set(tabela["technique"])
