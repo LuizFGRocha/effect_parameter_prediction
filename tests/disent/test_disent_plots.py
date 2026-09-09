@@ -279,6 +279,7 @@ def _estrutura():
         for fator, massa in (("drive_level", 0.8), ("tone_level", 0.7),
                              ("arm", 0.2), ("content_id", 0.1)):
             linhas.append({"technique": tecnica, "factor": fator, "massa_z_e": massa,
+                           "massa_nula": 1 / 3, "dim_z_e": 32, "dim_z_c": 64,
                            "separacao_por_bloco": 0.5, "completude": 0.4,
                            "informatividade": 0.6, "acaso": 0.125, "mig": 0.1,
                            "desemaranhamento": 0.3})
@@ -315,3 +316,26 @@ def test_build_etapa5_picks_up_the_curve_and_the_structure_when_they_exist(tmp_p
 
     nomes = {caminho.name for caminho in build_etapa5(tmp_path, tmp_path / "figuras")}
     assert {"curva_de_diversidade.png", "estrutura_por_bloco.png"} <= nomes
+
+
+def test_the_structure_reference_line_is_the_dimension_share_not_a_half(tmp_path):
+    """Os blocos tem 32 e 64 dimensoes. Um codigo que nao separa nada espalha a
+    importancia em 33%, e nao em 50% -- e o encoder nao treinado cai exatamente
+    ai. Uma linha em 50% faria os quatro fatores parecerem viver em `z_c`."""
+    import matplotlib.pyplot as plt
+
+    from gefx.disent.plots import plot_structure_blocks
+
+    capturadas = []
+    original = plt.Axes.axhline
+
+    def _espia(self, y=0, *args, **kwargs):
+        capturadas.append(y)
+        return original(self, y, *args, **kwargs)
+
+    plt.Axes.axhline = _espia
+    try:
+        plot_structure_blocks(_estrutura(), tmp_path / "estrutura.png")
+    finally:
+        plt.Axes.axhline = original
+    assert capturadas == [pytest.approx(100 / 3)]

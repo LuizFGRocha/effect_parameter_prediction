@@ -842,9 +842,11 @@ def plot_structure_blocks(estrutura: pd.DataFrame, out_path: Path) -> None:
     """Fracao da importancia de cada fator que cai em `z_e`, por tecnica.
 
     E a afirmacao do desemaranhamento na forma em que ela foi feita: em blocos.
-    A linha de 50% e a fronteira -- acima dela o fator esta escrito em `z_e`,
-    abaixo em `z_c`. As duas primeiras barras de cada grupo deveriam ficar em
-    cima e as duas ultimas embaixo.
+    A linha de referencia **nao e 50%**: os blocos tem tamanhos diferentes (32
+    contra 64 dimensoes), entao um codigo que nao separa nada espalha a
+    importancia na proporcao das dimensoes, em 33%. Medido, e onde os quatro
+    fatores caem no encoder nao treinado. Acima dela o fator esta em `z_e` mais
+    do que por acaso; abaixo, menos.
     """
     tecnicas = ordered_techniques(estrutura["technique"].unique())
     fatores = ["drive_level", "tone_level", "arm", "content_id"]
@@ -863,9 +865,10 @@ def plot_structure_blocks(estrutura: pd.DataFrame, out_path: Path) -> None:
                [tabela.loc[tecnica, fator] * 100 for fator in fatores], largura,
                color=cor, alpha=0.55 + 0.45 * indice / max(len(tecnicas) - 1, 1),
                label=TECHNIQUE_LABEL.get(tecnica, tecnica).replace("\n", " "))
-    ax.axhline(50, color="k", linestyle="--", linewidth=1.2)
-    ax.annotate("fronteira: metade da importância em cada bloco", xy=(len(fatores) - 0.5, 51),
-                ha="right", fontsize=8)
+    nula = float(estrutura["massa_nula"].iloc[0]) * 100 if "massa_nula" in estrutura else 50.0
+    ax.axhline(nula, color="k", linestyle="--", linewidth=1.2)
+    ax.annotate(f"importância espalhada na proporção das dimensões ({nula:.0f}%)",
+                xy=(len(fatores) - 0.5, nula + 1), ha="right", fontsize=8)
     ax.set_xticks(posicoes)
     ax.set_xticklabels([nomes[f] for f in fatores], fontsize=9)
     ax.set_ylabel("importância do fator que cai em $z_e$ (%)")

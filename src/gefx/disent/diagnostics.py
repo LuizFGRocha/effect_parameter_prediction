@@ -694,12 +694,21 @@ def structure_study(
                                seed=seed, trees=trees)
         dci = report["dci"]  # type: ignore[index]
         mig = report["mig"]  # type: ignore[index]
+        dims = report["dims"]  # type: ignore[index]
+        # A referencia da massa nao e 50%: os blocos tem tamanhos diferentes (32
+        # contra 64), entao um codigo que nao separa nada espalha a importancia
+        # na proporcao das dimensoes. Medido no encoder nao treinado, a massa em
+        # `z_e` fica entre 0,33 e 0,42 -- exatamente em cima desta linha.
+        nula = dims["z_e"] / (dims["z_e"] + dims["z_c"])
         for factor in factors:
             rows.append({
                 "technique": name,
                 "factor": factor,
                 "esperado_em": "z_e" if factor in ("drive_level", "tone_level") else "z_c",
                 "massa_z_e": dci["block_mass"][factor]["z_e"],
+                "massa_nula": nula,
+                "dim_z_e": dims["z_e"],
+                "dim_z_c": dims["z_c"],
                 "separacao_por_bloco": dci["block_completeness"][factor],
                 "completude": dci["completeness"][factor],
                 "informatividade": dci["informativeness"][factor]["accuracy"],
