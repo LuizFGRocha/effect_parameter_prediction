@@ -1,0 +1,44 @@
+[k=1] pedalboard-tanh
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1788936699.072398 2045693 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+I0000 00:00:1788936701.213391 2045693 gpu_device.cc:2043] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 10036 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3060, pci bus id: 0000:09:00.0, compute capability: 8.6
+E0000 00:00:1788936703.659732 2045693 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+I0000 00:00:1788936704.092643 2045752 cuda_dnn.cc:461] Loaded cuDNN version 92101
+  transferencia   36.4%   3.99 dB
+  vistos          57.4%   2.77 dB
+[k=2] pedalboard-tanh, lsp-tanh
+E0000 00:00:1788937320.897111 2045693 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+  transferencia   39.6%   4.00 dB
+  vistos          57.0%   2.64 dB
+[k=3] pedalboard-tanh, lsp-tanh, lsp-hardclip
+E0000 00:00:1788937931.130010 2045693 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+  transferencia   43.1%   3.58 dB
+  vistos          47.6%   3.29 dB
+[k=4] pedalboard-tanh, lsp-tanh, lsp-hardclip, lsp-arctan
+E0000 00:00:1788938545.361738 2045693 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+  transferencia   42.6%   3.72 dB
+  vistos          51.7%   3.25 dB
+[k=5] pedalboard-tanh, lsp-tanh, lsp-hardclip, lsp-arctan, lsp-sine
+E0000 00:00:1788939158.940141 2045693 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+  transferencia   37.0%   4.14 dB
+  vistos          49.0%   3.27 dB
+[k=6] pedalboard-tanh, lsp-tanh, lsp-hardclip, lsp-arctan, lsp-sine, byod-bigmuff
+  transferencia   33.0%   4.70 dB
+  vistos          43.4%   3.68 dB
+
+arm_retirado estrato      condicao  k                                                         arms_treinados  estratos                              run_dir  drive_exact  within_one   mae_db    n
+    byod-mxr      S3 transferencia  1                                                        pedalboard-tanh         1 results/disent/etapa5/diversidade/k1     0.363750    0.828750 3.990744  800
+    byod-mxr      S3        vistos  1                                                        pedalboard-tanh         1 results/disent/etapa5/diversidade/k1     0.573750    0.870000 2.772599  800
+    byod-mxr      S3 transferencia  2                                               pedalboard-tanh|lsp-tanh         1 results/disent/etapa5/diversidade/k2     0.396250    0.822500 4.004356  800
+    byod-mxr      S3        vistos  2                                               pedalboard-tanh|lsp-tanh         1 results/disent/etapa5/diversidade/k2     0.570000    0.890000 2.640431 1600
+    byod-mxr      S3 transferencia  3                                  pedalboard-tanh|lsp-tanh|lsp-hardclip         2 results/disent/etapa5/diversidade/k3     0.431250    0.838750 3.576202  800
+    byod-mxr      S3        vistos  3                                  pedalboard-tanh|lsp-tanh|lsp-hardclip         2 results/disent/etapa5/diversidade/k3     0.475833    0.840000 3.286142 2400
+    byod-mxr      S3 transferencia  4                       pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan         2 results/disent/etapa5/diversidade/k4     0.426250    0.838750 3.724396  800
+    byod-mxr      S3        vistos  4                       pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan         2 results/disent/etapa5/diversidade/k4     0.517188    0.832812 3.254194 3200
+    byod-mxr      S3 transferencia  5              pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine         2 results/disent/etapa5/diversidade/k5     0.370000    0.803750 4.143346  800
+    byod-mxr      S3        vistos  5              pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine         2 results/disent/etapa5/diversidade/k5     0.490500    0.842750 3.267940 4000
+    byod-mxr      S3 transferencia  6 pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine|byod-bigmuff         3   results/disent/etapa5/loo/byod-mxr     0.330000    0.732500 4.701559  800
+    byod-mxr      S3        vistos  6 pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine|byod-bigmuff         3   results/disent/etapa5/loo/byod-mxr     0.433542    0.802500 3.678456 4800
+
+tabela em results/disent/etapa5/diversidade/resumo.csv

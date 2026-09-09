@@ -701,18 +701,20 @@ def build_etapa5(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path
         plot_transfer_cost(pd.read_csv(custo), alvo)
         escritos.append(alvo)
 
-    curva = results_dir / "diversidade" / "resumo.csv"
-    if curva.exists():
+    # Uma pasta por semente (`diversidade`, `diversidade_s2`, ...): a figura junta
+    # todas, porque a dispersao entre sementes e o que ela precisa mostrar.
+    curvas = sorted(results_dir.glob("diversidade*/resumo.csv"))
+    if curvas:
         alvo = out_dir / "curva_de_diversidade.png"
+        dados = pd.concat([pd.read_csv(caminho) for caminho in curvas], ignore_index=True)
         referencia = None
         melhores = results_dir / "contrastive_aux" / "metrics.json"
         if melhores.exists():
             por_arm = json.loads(melhores.read_text(encoding="utf-8"))["per_query_arm"]
-            dados = pd.read_csv(curva)
             arm = str(dados["arm_retirado"].iloc[0])
             if arm in por_arm:
                 referencia = float(por_arm[arm]["drive_level"]["exact"])
-        plot_diversity_curve(pd.read_csv(curva), alvo, visto=referencia)
+        plot_diversity_curve(dados, alvo, visto=referencia)
         escritos.append(alvo)
 
     estrutura = results_dir / "estrutura.csv"
@@ -801,10 +803,20 @@ def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
     que um estrato **novo** entra e ficar plana nos outros, o que compra
     transferencia e variedade, nao quantidade.
     """
-    transferencia = curva[curva["condicao"] == "transferencia"].sort_values("k")
-    vistos = curva[curva["condicao"] == "vistos"].sort_values("k")
+    pontos = curva[curva["condicao"] == "transferencia"]
+    transferencia = pontos.groupby(["k", "estratos"], as_index=False)["drive_exact"].mean()
+    transferencia = transferencia.sort_values("k")
+    vistos = curva[curva["condicao"] == "vistos"].groupby("k", as_index=False)[
+        "drive_exact"].mean().sort_values("k")
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
+    # As sementes individuais entram como pontos: a dispersao entre elas e da
+    # ordem da excursao da curva, e uma linha sozinha esconderia exatamente isso.
+    sementes = pontos.groupby("k")["drive_exact"].nunique().max()
+    if sementes and sementes > 1:
+        ax.plot(pontos["k"], pontos["drive_exact"] * 100, "o", color=COLOR_CEILING,
+                alpha=0.35, markersize=5,
+                label=f"sementes individuais ({int(sementes)} por ponto)")
     ax.plot(transferencia["k"], transferencia["drive_exact"] * 100, "o-",
             color=COLOR_CEILING, linewidth=2, label="implementação inédita (transferência)")
     if not vistos.empty:
@@ -821,7 +833,7 @@ def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
                     xy=(linha["k"], linha["drive_exact"] * 100), xytext=(0, 8),
                     textcoords="offset points", ha="center", fontsize=9)
     rotulos = [
-        f"{int(linha['k'])}\n{linha['estratos']} estrato"
+        f"{int(linha['k'])}\n{int(linha['estratos'])} estrato"
         + ("s" if int(linha["estratos"]) > 1 else "")
         for _, linha in transferencia.iterrows()
     ]
@@ -831,7 +843,9 @@ def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
     ax.set_ylabel("acerto exato do nível de drive (%)")
     ax.set_ylim(0, 60)
     ax.set_title("Diversidade de implementação no treino compra transferência?")
-    ax.legend(fontsize=8, loc="upper left")
+    # Embaixo: a metade inferior do eixo esta vazia por construcao (o acaso e
+    # 12,5%) e a legenda em cima taparia justamente os primeiros pontos.
+    ax.legend(fontsize=8, loc="lower left")
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight", dpi=150)
     plt.close(fig)

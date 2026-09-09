@@ -1,0 +1,67 @@
+{
+  "timestamp": "2026-09-09T07:42:43+00:00",
+  "git_revision": "5b8e4d41f94847b67ae3b18a2a12690b8519bed3",
+  "elapsed_seconds": 605.7,
+  "config": {
+    "dataset_root": "datasets/disent",
+    "feature": "Spec",
+    "technique": "contrastive_aux",
+    "arms": [
+      "pedalboard-tanh",
+      "lsp-tanh",
+      "lsp-hardclip",
+      "lsp-arctan",
+      "lsp-sine"
+    ],
+    "steps": 4000,
+    "configs_per_batch": 8,
+    "views_per_config": 8,
+    "learning_rate": 0.001,
+    "temperature": 0.07,
+    "ramp_gamma": 10.0,
+    "beta": 4.0,
+    "eval_every": 0,
+    "embed_batch": 128,
+    "seed": 20260908,
+    "evaluate_at_end": false,
+    "permute_labels": false,
+    "output_dir": "results/disent/etapa5/diversidade/k5",
+    "encoder": {
+      "input_shape": [
+        256,
+        173,
+        1
+      ],
+      "filters": [
+        32,
+        64,
+        96,
+        128
+      ],
+      "kernel_size": 3,
+      "trunk_units": 256,
+      "dropout": 0.2,
+      "effect_dim": 32,
+      "content_dim": 64,
+      "adversary_units": 128
+    },
+    "weights": {
+      "contrastive": 1.0,
+      "aux_regression": 1.0
+    }
+  },
+  "heads": {
+    "n_arms": 5,
+    "n_contents": 60,
+    "n_configs": 40,
+    "n_aux": 2
+  },
+  "splits": {
+    "train": 12000,
+    "catalog": 4000,
+    "query": 4000
+  },
+  "steps_executed": 4000,
+  "checkpoints": [],
+  "decision": null
+}

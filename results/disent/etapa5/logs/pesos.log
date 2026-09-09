@@ -1,0 +1,184 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1788929896.019777 2028857 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+I0000 00:00:1788929909.498913 2028857 gpu_device.cc:2043] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 9724 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3060, pci bus id: 0000:09:00.0, compute capability: 8.6
+E0000 00:00:1788929912.979921 2028857 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+I0000 00:00:1788929913.508486 2028992 cuda_dnn.cc:461] Loaded cuDNN version 92101
+[grl_config]
+  passo     1/4000  total=9.1107  lambda=0.001  adversary_arm=1.9439 adversary_config=4.0715 adversary_content=4.1104 aux_regression=0.1067 contrastive=5.9662
+  passo   100/4000  total=8.7370  lambda=0.124  adversary_arm=1.9020 adversary_config=4.7302 adversary_content=4.0764 aux_regression=0.0861 contrastive=5.4383
+  passo   200/4000  total=6.3363  lambda=0.245  adversary_arm=1.8908 adversary_config=3.5435 adversary_content=4.0746 aux_regression=0.0616 contrastive=3.4221
+  passo   300/4000  total=6.0551  lambda=0.358  adversary_arm=1.9029 adversary_config=4.3911 adversary_content=4.0672 aux_regression=0.0350 contrastive=2.9118
+  passo   400/4000  total=6.0738  lambda=0.462  adversary_arm=1.8902 adversary_config=4.1707 adversary_content=4.1027 aux_regression=0.0517 contrastive=2.9729
+  passo   500/4000  total=6.4921  lambda=0.555  adversary_arm=1.7996 adversary_config=4.3352 adversary_content=4.0907 aux_regression=0.0321 contrastive=3.3923
+  [avaliacao no passo 500] drive_exact=0.3534 mae_db=4.56
+  passo   600/4000  total=5.9562  lambda=0.635  adversary_arm=1.9207 adversary_config=4.0309 adversary_content=4.0825 aux_regression=0.0645 contrastive=2.8814
+  passo   700/4000  total=6.0385  lambda=0.704  adversary_arm=1.9378 adversary_config=4.2474 adversary_content=4.0929 aux_regression=0.0310 contrastive=2.9241
+  passo   800/4000  total=5.9257  lambda=0.762  adversary_arm=1.9427 adversary_config=4.0854 adversary_content=4.0984 aux_regression=0.0550 contrastive=2.8327
+  passo   900/4000  total=6.0733  lambda=0.809  adversary_arm=1.8851 adversary_config=4.2660 adversary_content=4.0822 aux_regression=0.0636 contrastive=2.9398
+  passo  1000/4000  total=5.9539  lambda=0.848  adversary_arm=1.9316 adversary_config=4.2653 adversary_content=4.0838 aux_regression=0.0269 contrastive=2.8428
+  [avaliacao no passo 1000] drive_exact=0.3957 mae_db=4.42
+  passo  1100/4000  total=5.6848  lambda=0.880  adversary_arm=1.8480 adversary_config=3.8759 adversary_content=4.0878 aux_regression=0.0347 contrastive=2.7066
+  passo  1200/4000  total=5.9754  lambda=0.905  adversary_arm=2.0285 adversary_config=4.1731 adversary_content=4.0774 aux_regression=0.0439 contrastive=2.8478
+  passo  1300/4000  total=5.8947  lambda=0.925  adversary_arm=1.9528 adversary_config=4.4312 adversary_content=4.1058 aux_regression=0.0270 contrastive=2.7208
+  passo  1400/4000  total=6.9075  lambda=0.941  adversary_arm=1.9570 adversary_config=7.2895 adversary_content=4.0851 aux_regression=0.0346 contrastive=2.8734
+  passo  1500/4000  total=7.9666  lambda=0.954  adversary_arm=1.9432 adversary_config=8.6326 adversary_content=4.1033 aux_regression=0.0572 contrastive=3.5056
+  [avaliacao no passo 1500] drive_exact=0.3277 mae_db=5.14
+  passo  1600/4000  total=6.1310  lambda=0.964  adversary_arm=1.9558 adversary_config=4.3910 adversary_content=4.0838 aux_regression=0.0563 contrastive=2.9455
+  passo  1700/4000  total=6.0985  lambda=0.972  adversary_arm=1.9585 adversary_config=3.9518 adversary_content=4.0702 aux_regression=0.0505 contrastive=3.0539
+  passo  1800/4000  total=5.9002  lambda=0.978  adversary_arm=1.9456 adversary_config=3.9545 adversary_content=4.0735 aux_regression=0.0377 contrastive=2.8704
+  passo  1900/4000  total=5.5223  lambda=0.983  adversary_arm=1.9879 adversary_config=3.3328 adversary_content=4.0881 aux_regression=0.0219 contrastive=2.6778
+  passo  2000/4000  total=5.6811  lambda=0.987  adversary_arm=1.9502 adversary_config=3.8314 adversary_content=4.0742 aux_regression=0.0171 contrastive=2.7073
+  [avaliacao no passo 2000] drive_exact=0.3989 mae_db=4.03
+  passo  2100/4000  total=5.8948  lambda=0.990  adversary_arm=1.9050 adversary_config=4.3557 adversary_content=4.0511 aux_regression=0.0229 contrastive=2.7783
+  passo  2200/4000  total=5.8204  lambda=0.992  adversary_arm=1.9678 adversary_config=3.5201 adversary_content=4.0849 aux_regression=0.0450 contrastive=2.9036
+  passo  2300/4000  total=5.7343  lambda=0.994  adversary_arm=1.9471 adversary_config=4.4186 adversary_content=4.0549 aux_regression=0.0256 contrastive=2.5826
+  passo  2400/4000  total=5.7945  lambda=0.995  adversary_arm=1.9217 adversary_config=3.6748 adversary_content=4.0909 aux_regression=0.0388 contrastive=2.8494
+  passo  2500/4000  total=5.7917  lambda=0.996  adversary_arm=1.9033 adversary_config=3.6993 adversary_content=4.0743 aux_regression=0.0317 contrastive=2.8569
+  [avaliacao no passo 2500] drive_exact=0.4057 mae_db=4.02
+  passo  2600/4000  total=5.5637  lambda=0.997  adversary_arm=1.9206 adversary_config=3.3205 adversary_content=4.0751 aux_regression=0.0215 contrastive=2.7474
+  passo  2700/4000  total=5.5999  lambda=0.998  adversary_arm=1.9745 adversary_config=2.9710 adversary_content=4.0814 aux_regression=0.0251 contrastive=2.8667
+  passo  2800/4000  total=5.9259  lambda=0.998  adversary_arm=1.9150 adversary_config=4.6370 adversary_content=4.1025 aux_regression=0.0595 contrastive=2.6700
+  passo  2900/4000  total=5.4410  lambda=0.999  adversary_arm=1.9246 adversary_config=3.5146 adversary_content=4.0811 aux_regression=0.0200 contrastive=2.5650
+  passo  3000/4000  total=5.5071  lambda=0.999  adversary_arm=1.9550 adversary_config=3.7553 adversary_content=4.0862 aux_regression=0.0195 contrastive=2.5487
+  [avaliacao no passo 3000] drive_exact=0.4057 mae_db=4.15
+  passo  3100/4000  total=5.6152  lambda=0.999  adversary_arm=1.9356 adversary_config=3.4382 adversary_content=4.0811 aux_regression=0.0251 contrastive=2.7536
+  passo  3200/4000  total=5.5742  lambda=0.999  adversary_arm=1.9427 adversary_config=3.3993 adversary_content=4.0896 aux_regression=0.0186 contrastive=2.7261
+  passo  3300/4000  total=5.1341  lambda=0.999  adversary_arm=1.9367 adversary_config=3.3426 adversary_content=4.0881 aux_regression=0.0149 contrastive=2.3089
+  passo  3400/4000  total=5.2687  lambda=1.000  adversary_arm=1.9468 adversary_config=3.3309 adversary_content=4.0926 aux_regression=0.0226 contrastive=2.4350
+  passo  3500/4000  total=5.4323  lambda=1.000  adversary_arm=1.9323 adversary_config=3.9697 adversary_content=4.0925 aux_regression=0.0173 contrastive=2.4166
+  [avaliacao no passo 3500] drive_exact=0.3696 mae_db=4.42
+  passo  3600/4000  total=5.6460  lambda=1.000  adversary_arm=1.9231 adversary_config=4.0183 adversary_content=4.0846 aux_regression=0.0179 contrastive=2.6204
+  passo  3700/4000  total=5.7292  lambda=1.000  adversary_arm=1.9220 adversary_config=3.9805 adversary_content=4.1013 aux_regression=0.0405 contrastive=2.6876
+  passo  3800/4000  total=5.6216  lambda=1.000  adversary_arm=1.9607 adversary_config=3.9522 adversary_content=4.0634 aux_regression=0.0171 contrastive=2.6116
+  passo  3900/4000  total=5.3845  lambda=1.000  adversary_arm=1.9545 adversary_config=3.5822 adversary_content=4.1054 aux_regression=0.0234 contrastive=2.4685
+  passo  4000/4000  total=5.2348  lambda=1.000  adversary_arm=1.9363 adversary_config=3.3062 adversary_content=4.0949 aux_regression=0.0222 contrastive=2.4113
+E0000 00:00:1788930607.136808 2028857 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+  gravado em results/disent/etapa5/pesos/grl_config
+    PASSA  supera_b1_acerto
+    PASSA  supera_b1_erro
+    PASSA  supera_b0_acerto
+    PASSA  reduz_sorvedouro
+    PASSA  abaixo_do_teto
+[grl_orth]
+  passo     1/4000  total=7.9299  lambda=0.001  adversary_arm=1.9439 adversary_content=4.1104 aux_regression=0.1067 contrastive=5.9662 orthogonality=0.0407
+  passo   100/4000  total=7.3112  lambda=0.124  adversary_arm=1.9061 adversary_content=4.0689 aux_regression=0.0866 contrastive=5.3874 orthogonality=0.0447
+  passo   200/4000  total=5.1463  lambda=0.245  adversary_arm=1.8868 adversary_content=4.0772 aux_regression=0.0582 contrastive=3.2628 orthogonality=0.0361
+  passo   300/4000  total=4.6831  lambda=0.358  adversary_arm=1.8874 adversary_content=4.0735 aux_regression=0.0297 contrastive=2.8313 orthogonality=0.0338
+  passo   400/4000  total=4.8342  lambda=0.462  adversary_arm=1.9120 adversary_content=4.1030 aux_regression=0.0390 contrastive=2.9552 orthogonality=0.0354
+  passo   500/4000  total=5.1149  lambda=0.555  adversary_arm=1.8179 adversary_content=4.0936 aux_regression=0.0319 contrastive=3.2811 orthogonality=0.0285
+  [avaliacao no passo 500] drive_exact=0.3591 mae_db=4.72
+  passo   600/4000  total=4.6763  lambda=0.635  adversary_arm=1.9244 adversary_content=4.0880 aux_regression=0.0450 contrastive=2.8001 orthogonality=0.0276
+  passo   700/4000  total=4.6327  lambda=0.704  adversary_arm=1.9157 adversary_content=4.0769 aux_regression=0.0302 contrastive=2.7859 orthogonality=0.0189
+  passo   800/4000  total=4.6462  lambda=0.762  adversary_arm=1.9067 adversary_content=4.0897 aux_regression=0.0430 contrastive=2.7798 orthogonality=0.0245
+  passo   900/4000  total=4.8021  lambda=0.809  adversary_arm=1.9353 adversary_content=4.0700 aux_regression=0.0605 contrastive=2.9177 orthogonality=0.0222
+  passo  1000/4000  total=4.5978  lambda=0.848  adversary_arm=1.9145 adversary_content=4.0783 aux_regression=0.0273 contrastive=2.7549 orthogonality=0.0178
+  [avaliacao no passo 1000] drive_exact=0.4061 mae_db=4.37
+  passo  1100/4000  total=4.5165  lambda=0.880  adversary_arm=1.8434 adversary_content=4.0872 aux_regression=0.0290 contrastive=2.6910 orthogonality=0.0172
+  passo  1200/4000  total=4.6498  lambda=0.905  adversary_arm=1.9849 adversary_content=4.0840 aux_regression=0.0296 contrastive=2.7856 orthogonality=0.0138
+  passo  1300/4000  total=4.2202  lambda=0.925  adversary_arm=1.9432 adversary_content=4.0916 aux_regression=0.0131 contrastive=2.3848 orthogonality=0.0119
+  passo  1400/4000  total=4.4557  lambda=0.941  adversary_arm=1.9347 adversary_content=4.0886 aux_regression=0.0221 contrastive=2.6158 orthogonality=0.0107
+  passo  1500/4000  total=4.4936  lambda=0.954  adversary_arm=1.9701 adversary_content=4.0840 aux_regression=0.0451 contrastive=2.6196 orthogonality=0.0127
+  [avaliacao no passo 1500] drive_exact=0.4111 mae_db=4.17
+  passo  1600/4000  total=4.7903  lambda=0.964  adversary_arm=1.9581 adversary_content=4.0910 aux_regression=0.0368 contrastive=2.9030 orthogonality=0.0358
+  passo  1700/4000  total=4.5500  lambda=0.972  adversary_arm=1.9943 adversary_content=4.0754 aux_regression=0.0294 contrastive=2.6832 orthogonality=0.0165
+  passo  1800/4000  total=4.4710  lambda=0.978  adversary_arm=1.9394 adversary_content=4.0801 aux_regression=0.0336 contrastive=2.6189 orthogonality=0.0127
+  passo  1900/4000  total=4.2027  lambda=0.983  adversary_arm=1.9511 adversary_content=4.0995 aux_regression=0.0133 contrastive=2.3535 orthogonality=0.0208
+  passo  2000/4000  total=4.2796  lambda=0.987  adversary_arm=1.9890 adversary_content=4.0814 aux_regression=0.0126 contrastive=2.4382 orthogonality=0.0077
+  [avaliacao no passo 2000] drive_exact=0.4045 mae_db=4.10
+  passo  2100/4000  total=4.5196  lambda=0.990  adversary_arm=1.9409 adversary_content=4.0629 aux_regression=0.0154 contrastive=2.6936 orthogonality=0.0095
+  passo  2200/4000  total=4.2471  lambda=0.992  adversary_arm=1.9656 adversary_content=4.1089 aux_regression=0.0320 contrastive=2.3743 orthogonality=0.0184
+  passo  2300/4000  total=4.3092  lambda=0.994  adversary_arm=1.9509 adversary_content=4.0732 aux_regression=0.0234 contrastive=2.4643 orthogonality=0.0142
+  passo  2400/4000  total=4.5107  lambda=0.995  adversary_arm=1.9343 adversary_content=4.1031 aux_regression=0.0290 contrastive=2.6556 orthogonality=0.0148
+  passo  2500/4000  total=4.3809  lambda=0.996  adversary_arm=1.9390 adversary_content=4.0834 aux_regression=0.0170 contrastive=2.5503 orthogonality=0.0069
+  [avaliacao no passo 2500] drive_exact=0.4320 mae_db=3.76
+  passo  2600/4000  total=4.2583  lambda=0.997  adversary_arm=1.9496 adversary_content=4.0809 aux_regression=0.0132 contrastive=2.4257 orthogonality=0.0103
+  passo  2700/4000  total=4.3330  lambda=0.998  adversary_arm=1.9595 adversary_content=4.0918 aux_regression=0.0117 contrastive=2.4875 orthogonality=0.0184
+  passo  2800/4000  total=4.1803  lambda=0.998  adversary_arm=1.9172 adversary_content=4.0957 aux_regression=0.0303 contrastive=2.3311 orthogonality=0.0150
+  passo  2900/4000  total=4.2568  lambda=0.999  adversary_arm=1.8999 adversary_content=4.0793 aux_regression=0.0185 contrastive=2.4309 orthogonality=0.0136
+  passo  3000/4000  total=4.1261  lambda=0.999  adversary_arm=1.9414 adversary_content=4.0675 aux_regression=0.0109 contrastive=2.3078 orthogonality=0.0047
+  [avaliacao no passo 3000] drive_exact=0.4077 mae_db=4.21
+  passo  3100/4000  total=4.4144  lambda=0.999  adversary_arm=1.9308 adversary_content=4.0895 aux_regression=0.0176 contrastive=2.5858 orthogonality=0.0048
+  passo  3200/4000  total=4.4225  lambda=0.999  adversary_arm=1.9272 adversary_content=4.0894 aux_regression=0.0121 contrastive=2.6002 orthogonality=0.0052
+  passo  3300/4000  total=4.0789  lambda=0.999  adversary_arm=1.9453 adversary_content=4.0863 aux_regression=0.0143 contrastive=2.2496 orthogonality=0.0055
+  passo  3400/4000  total=4.1294  lambda=1.000  adversary_arm=1.9422 adversary_content=4.0999 aux_regression=0.0180 contrastive=2.2907 orthogonality=0.0081
+  passo  3500/4000  total=4.0428  lambda=1.000  adversary_arm=1.9512 adversary_content=4.0902 aux_regression=0.0118 contrastive=2.2155 orthogonality=0.0031
+  [avaliacao no passo 3500] drive_exact=0.4321 mae_db=3.89
+  passo  3600/4000  total=4.2068  lambda=1.000  adversary_arm=1.9267 adversary_content=4.1067 aux_regression=0.0135 contrastive=2.3790 orthogonality=0.0042
+  passo  3700/4000  total=4.1795  lambda=1.000  adversary_arm=1.9238 adversary_content=4.0940 aux_regression=0.0226 contrastive=2.3467 orthogonality=0.0049
+  passo  3800/4000  total=4.2099  lambda=1.000  adversary_arm=1.9628 adversary_content=4.0815 aux_regression=0.0122 contrastive=2.3818 orthogonality=0.0027
+  passo  3900/4000  total=4.2448  lambda=1.000  adversary_arm=1.9561 adversary_content=4.0811 aux_regression=0.0178 contrastive=2.4068 orthogonality=0.0091
+  passo  4000/4000  total=4.0287  lambda=1.000  adversary_arm=1.9572 adversary_content=4.0841 aux_regression=0.0140 contrastive=2.1986 orthogonality=0.0037
+E0000 00:00:1788931291.373288 2028857 meta_optimizer.cc:967] layout failed: INVALID_ARGUMENT: Size of values 0 does not match size of permutation 4 @ fanin shape inencoder_1/drop1_1/stateless_dropout/SelectV2-2-TransposeNHWCToNCHW-LayoutOptimizer
+  gravado em results/disent/etapa5/pesos/grl_orth
+    PASSA  supera_b1_acerto
+    PASSA  supera_b1_erro
+    PASSA  supera_b0_acerto
+    PASSA  reduz_sorvedouro
+    PASSA  abaixo_do_teto
+[full_light_orth]
+  passo     1/4000  total=9.1147  lambda=0.001  adversary_arm=1.9439 adversary_config=4.0715 adversary_content=4.1104 aux_regression=0.1067 contrastive=5.9662 orthogonality=0.0407
+  passo   100/4000  total=8.5221  lambda=0.124  adversary_arm=1.9015 adversary_config=4.6448 adversary_content=4.0807 aux_regression=0.0914 contrastive=5.2214 orthogonality=0.2114
+  passo   200/4000  total=6.2537  lambda=0.245  adversary_arm=1.8668 adversary_config=3.3319 adversary_content=4.0756 aux_regression=0.0628 contrastive=3.3805 orthogonality=0.2807
+  passo   300/4000  total=6.0889  lambda=0.358  adversary_arm=1.8926 adversary_config=4.1098 adversary_content=4.0690 aux_regression=0.0368 contrastive=3.0083 orthogonality=0.2242
+  passo   400/4000  total=5.8919  lambda=0.462  adversary_arm=1.8926 adversary_config=3.3566 adversary_content=4.0966 aux_regression=0.0430 contrastive=3.0204 orthogonality=0.2470
+  passo   500/4000  total=6.6156  lambda=0.555  adversary_arm=1.8407 adversary_config=4.4169 adversary_content=4.0918 aux_regression=0.0276 contrastive=3.4646 orthogonality=0.1866
+  [avaliacao no passo 500] drive_exact=0.3455 mae_db=4.76
+  passo   600/4000  total=6.2789  lambda=0.635  adversary_arm=1.9894 adversary_config=4.8440 adversary_content=4.0853 aux_regression=0.0593 contrastive=2.9256 orthogonality=0.1839
+  passo   700/4000  total=6.6246  lambda=0.704  adversary_arm=1.9017 adversary_config=5.4619 adversary_content=4.0894 aux_regression=0.0304 contrastive=3.1342 orthogonality=0.2406
+  passo   800/4000  total=6.2833  lambda=0.762  adversary_arm=1.9125 adversary_config=4.7994 adversary_content=4.0919 aux_regression=0.0543 contrastive=2.9633 orthogonality=0.2448
+  passo   900/4000  total=6.5126  lambda=0.809  adversary_arm=1.9249 adversary_config=5.0893 adversary_content=4.0799 aux_regression=0.0633 contrastive=3.1059 orthogonality=0.1520
+  passo  1000/4000  total=7.3113  lambda=0.848  adversary_arm=1.8863 adversary_config=6.2920 adversary_content=4.0917 aux_regression=0.0345 contrastive=3.5758 orthogonality=0.1992
+  [avaliacao no passo 1000] drive_exact=0.3764 mae_db=4.48
+  passo  1100/4000  total=6.6124  lambda=0.880  adversary_arm=1.8975 adversary_config=5.4164 adversary_content=4.0912 aux_regression=0.0339 contrastive=3.1366 orthogonality=0.2039
+  passo  1200/4000  total=6.4506  lambda=0.905  adversary_arm=1.9594 adversary_config=5.1899 adversary_content=4.0858 aux_regression=0.0566 contrastive=3.0073 orthogonality=0.1621
+  passo  1300/4000  total=5.5488  lambda=0.925  adversary_arm=1.9188 adversary_config=3.6196 adversary_content=4.0948 aux_regression=0.0244 contrastive=2.6182 orthogonality=0.1616
+  passo  1400/4000  total=5.7316  lambda=0.941  adversary_arm=1.9521 adversary_config=3.5855 adversary_content=4.0673 aux_regression=0.0334 contrastive=2.7973 orthogonality=0.1944
+  passo  1500/4000  total=6.1460  lambda=0.954  adversary_arm=1.9382 adversary_config=4.4386 adversary_content=4.0986 aux_regression=0.0509 contrastive=2.9358 orthogonality=0.1668
+  [avaliacao no passo 1500] drive_exact=0.3896 mae_db=4.38
+  passo  1600/4000  total=5.8683  lambda=0.964  adversary_arm=1.9734 adversary_config=3.5188 adversary_content=4.0828 aux_regression=0.0500 contrastive=2.9301 orthogonality=0.1567
+  passo  1700/4000  total=5.8522  lambda=0.972  adversary_arm=1.9744 adversary_config=3.6766 adversary_content=4.0798 aux_regression=0.0318 contrastive=2.8870 orthogonality=0.1417
+  passo  1800/4000  total=6.1292  lambda=0.978  adversary_arm=1.9306 adversary_config=5.0315 adversary_content=4.0819 aux_regression=0.0373 contrastive=2.7558 orthogonality=0.2283
+  passo  1900/4000  total=5.6040  lambda=0.983  adversary_arm=1.9499 adversary_config=3.4547 adversary_content=4.0831 aux_regression=0.0240 contrastive=2.7149 orthogonality=0.1882
+  passo  2000/4000  total=5.6525  lambda=0.987  adversary_arm=2.0052 adversary_config=3.5976 adversary_content=4.0684 aux_regression=0.0173 contrastive=2.7252 orthogonality=0.0861
+  [avaliacao no passo 2000] drive_exact=0.4030 mae_db=4.18
+  passo  2100/4000  total=5.5370  lambda=0.990  adversary_arm=1.9407 adversary_config=3.0947 adversary_content=4.0768 aux_regression=0.0193 contrastive=2.7672 orthogonality=0.1678
+  passo  2200/4000  total=5.7142  lambda=0.992  adversary_arm=1.9491 adversary_config=3.5022 adversary_content=4.0849 aux_regression=0.0553 contrastive=2.7771 orthogonality=0.2082
+  passo  2300/4000  total=6.1056  lambda=0.994  adversary_arm=1.9641 adversary_config=5.2876 adversary_content=4.0860 aux_regression=0.0296 contrastive=2.6616 orthogonality=0.1309
+  passo  2400/4000  total=5.9210  lambda=0.995  adversary_arm=1.9185 adversary_config=3.9650 adversary_content=4.0863 aux_regression=0.0359 contrastive=2.8765 orthogonality=0.1758
+  passo  2500/4000  total=5.7061  lambda=0.996  adversary_arm=1.9132 adversary_config=3.8273 adversary_content=4.1016 aux_regression=0.0237 contrastive=2.7211 orthogonality=0.0869
+  [avaliacao no passo 2500] drive_exact=0.4068 mae_db=3.93
+  passo  2600/4000  total=5.6672  lambda=0.997  adversary_arm=1.9129 adversary_config=3.5616 adversary_content=4.0685 aux_regression=0.0233 contrastive=2.7658 orthogonality=0.1523
+  passo  2700/4000  total=6.2169  lambda=0.998  adversary_arm=1.9644 adversary_config=4.8290 adversary_content=4.0765 aux_regression=0.0206 contrastive=2.9178 orthogonality=0.1753
+  passo  2800/4000  total=5.5635  lambda=0.998  adversary_arm=1.9305 adversary_config=3.5684 adversary_content=4.1067 aux_regression=0.0463 contrastive=2.6254 orthogonality=0.1009
+  passo  2900/4000  total=5.7141  lambda=0.999  adversary_arm=1.9153 adversary_config=3.1023 adversary_content=4.0886 aux_regression=0.0292 contrastive=2.9355 orthogonality=0.1758
+  passo  3000/4000  total=5.7560  lambda=0.999  adversary_arm=1.9600 adversary_config=4.3884 adversary_content=4.0722 aux_regression=0.0263 contrastive=2.5954 orthogonality=0.0817
+  [avaliacao no passo 3000] drive_exact=0.3752 mae_db=4.42
+  passo  3100/4000  total=5.6502  lambda=0.999  adversary_arm=1.9292 adversary_config=3.6567 adversary_content=4.0927 aux_regression=0.0225 contrastive=2.7147 orthogonality=0.0945
+  passo  3200/4000  total=5.9066  lambda=0.999  adversary_arm=1.9765 adversary_config=4.8062 adversary_content=4.0747 aux_regression=0.0153 contrastive=2.6215 orthogonality=0.1252
+  passo  3300/4000  total=5.4181  lambda=0.999  adversary_arm=1.9641 adversary_config=3.5620 adversary_content=4.0892 aux_regression=0.0197 contrastive=2.4986 orthogonality=0.1526
+  passo  3400/4000  total=5.4654  lambda=1.000  adversary_arm=1.9354 adversary_config=3.5805 adversary_content=4.0965 aux_regression=0.0265 contrastive=2.5412 orthogonality=0.1392
+  passo  3500/4000  total=5.2376  lambda=1.000  adversary_arm=1.9283 adversary_config=3.2421 adversary_content=4.0881 aux_regression=0.0171 contrastive=2.4270 orthogonality=0.1599
+  [avaliacao no passo 3500] drive_exact=0.3804 mae_db=4.33
+  passo  3600/4000  total=5.5161  lambda=1.000  adversary_arm=1.9262 adversary_config=3.5195 adversary_content=4.0730 aux_regression=0.0160 contrastive=2.6323 orthogonality=0.1221
+  passo  3700/4000  total=5.2370  lambda=1.000  adversary_arm=1.9161 adversary_config=3.0493 adversary_content=4.0794 aux_regression=0.0320 contrastive=2.4819 orthogonality=0.0970
+  passo  3800/4000  total=5.7156  lambda=1.000  adversary_arm=1.9577 adversary_config=4.0534 adversary_content=4.0584 aux_regression=0.0208 contrastive=2.6652 orthogonality=0.0877
+  passo  3900/4000  total=5.3392  lambda=1.000  adversary_arm=1.9478 adversary_config=3.4243 adversary_content=4.0998 aux_regression=0.0218 contrastive=2.4610 orthogonality=0.1472
+  passo  4000/4000  total=5.2861  lambda=1.000  adversary_arm=1.9427 adversary_config=3.5143 adversary_content=4.0921 aux_regression=0.0235 contrastive=2.3888 orthogonality=0.0908
+  gravado em results/disent/etapa5/pesos/full_light_orth
+    PASSA  supera_b1_acerto
+    PASSA  supera_b1_erro
+    PASSA  supera_b0_acerto
+    PASSA  reduz_sorvedouro
+    PASSA  abaixo_do_teto
+
+             technique     kind  drive_exact   mae_db  top_arm_share  drive_exact_sem_bigmuff  mae_db_sem_bigmuff verdicts  steps
+           B0_marginal baseline     0.210000 8.150000         0.6460                      NaN                 NaN      NaN    NaN
+     B1_poc1_regressor baseline     0.317000 4.360000            NaN                      NaN                 NaN      NaN    NaN
+                chance baseline     0.125000      NaN            NaN                      NaN                 NaN      NaN    NaN
+paired_content_ceiling baseline     0.696000 2.670000            NaN                      NaN                 NaN      NaN    NaN
+       full_light_orth  learned     0.423571 4.112220         0.2034                 0.465417            3.344449      5/5 4000.0
+            grl_config  learned     0.417500 4.051250         0.2050                 0.453333            3.416515      5/5 4000.0
+              grl_orth  learned     0.427679 3.911821         0.1998                 0.467292            3.234103      5/5 4000.0
+
+tabela em results/disent/etapa5/pesos/comparacao.csv

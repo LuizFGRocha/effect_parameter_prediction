@@ -1,0 +1,13 @@
+arm_retirado,estrato,condicao,k,arms_treinados,estratos,run_dir,drive_exact,within_one,mae_db,n
+byod-mxr,S3,transferencia,1,pedalboard-tanh,1,results/disent/etapa5/diversidade_s2/k1,0.41,0.805,4.03157796186733,800
+byod-mxr,S3,vistos,1,pedalboard-tanh,1,results/disent/etapa5/diversidade_s2/k1,0.5775,0.87125,2.7814064034491763,800
+byod-mxr,S3,transferencia,2,pedalboard-tanh|lsp-tanh,1,results/disent/etapa5/diversidade_s2/k2,0.40625,0.83375,3.819836413466727,800
+byod-mxr,S3,vistos,2,pedalboard-tanh|lsp-tanh,1,results/disent/etapa5/diversidade_s2/k2,0.54375,0.875625,2.8448418900995716,1600
+byod-mxr,S3,transferencia,3,pedalboard-tanh|lsp-tanh|lsp-hardclip,2,results/disent/etapa5/diversidade_s2/k3,0.395,0.81,4.014076960611694,800
+byod-mxr,S3,vistos,3,pedalboard-tanh|lsp-tanh|lsp-hardclip,2,results/disent/etapa5/diversidade_s2/k3,0.49291666666666667,0.8408333333333333,3.269361656487798,2400
+byod-mxr,S3,transferencia,4,pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan,2,results/disent/etapa5/diversidade_s2/k4,0.41,0.8325,3.742158046111143,800
+byod-mxr,S3,vistos,4,pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan,2,results/disent/etapa5/diversidade_s2/k4,0.47,0.83375,3.3964161241237103,3200
+byod-mxr,S3,transferencia,5,pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine,2,results/disent/etapa5/diversidade_s2/k5,0.37625,0.785,4.118842712963001,800
+byod-mxr,S3,vistos,5,pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine,2,results/disent/etapa5/diversidade_s2/k5,0.4575,0.82775,3.489566220691432,4000
+byod-mxr,S3,transferencia,6,pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine|byod-bigmuff,3,results/disent/etapa5/diversidade_s2/k6,0.3825,0.765,4.309964738582171,800
+byod-mxr,S3,vistos,6,pedalboard-tanh|lsp-tanh|lsp-hardclip|lsp-arctan|lsp-sine|byod-bigmuff,3,results/disent/etapa5/diversidade_s2/k6,0.4558333333333333,0.8029166666666666,3.6877970872176364,4800
