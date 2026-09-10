@@ -58,10 +58,12 @@ def test_above_chance_makes_factors_with_different_class_counts_comparable():
         assert numbers["above_chance"] == pytest.approx(esperado)
 
 
-def test_the_three_factors_cover_both_halves_of_the_claim():
+def test_the_factors_cover_both_halves_of_the_claim_and_both_config_axes():
     """Sondar so o que deve sair mediria metade da afirmacao: um codigo
-    constante zera implementacao e conteudo e nao serve para nada."""
-    assert set(PROBE_FACTORS) == {"arm", "content_id", "drive_level"}
+    constante zera implementacao e conteudo e nao serve para nada. E sondar so o
+    `drive_level` deixaria de fora o eixo que a etapa 5 mostrou para tras --
+    45% de tom contra 87% de teto -- que e justamente o que se quer diagnosticar."""
+    assert set(PROBE_FACTORS) == {"arm", "content_id", "drive_level", "tone_level"}
 
 
 def test_a_factor_missing_from_the_sidecar_is_refused():
@@ -94,14 +96,26 @@ def test_probe_study_skips_techniques_that_were_not_run(tmp_path, monkeypatch):
     (tmp_path / "contrastive" / "run.json").write_text(
         json.dumps({"config": {"technique": "contrastive"}}), encoding="utf-8"
     )
+    numeros = {"accuracy": 0.3, "chance": 0.14, "classes": 7, "above_chance": 0.2}
     monkeypatch.setattr(
         diagnostics, "probe_run",
-        lambda *args, **kwargs: {"probes": {"arm": {"accuracy": 0.3, "chance": 0.14,
-                                                    "classes": 7, "above_chance": 0.2}}},
+        lambda *args, **kwargs: {"probes": {"z_e": {"arm": numeros},
+                                            "z_c": {"arm": numeros}}},
     )
     table = probe_study(tmp_path, tmp_path)
-    assert list(table["technique"]) == ["contrastive"]
-    assert list(table["factor"]) == ["arm"]
+    assert list(table["technique"]) == ["contrastive", "contrastive"]
+    assert list(table["factor"]) == ["arm", "arm"]
+    assert list(table["bloco"]) == ["z_e", "z_c"]
+
+
+def test_the_probe_reads_both_blocks_because_one_block_answers_half(tmp_path, monkeypatch):
+    """O `z_c` nao entra na busca. Um fator legivel nele e invisivel para a
+    recuperacao, e sem sondar os dois blocos "o codigo nao tem" e "esta no bloco
+    errado" ficam indistinguiveis -- e os consertos sao opostos."""
+    from gefx.disent import diagnostics
+
+    assert diagnostics.PROBE_BLOCKS == ("z_e", "z_c")
+    assert "tone_level" in diagnostics.PROBE_FACTORS
 
 
 # --- ablacao da representacao -------------------------------------------------
@@ -384,3 +398,45 @@ def test_find_runs_reaches_the_weight_variants_in_their_subfolder(tmp_path):
     encontradas = find_runs(tmp_path)
     assert set(encontradas) == {"grl", "grl_orth"}
     assert encontradas["grl_orth"] == tmp_path / "pesos" / "grl_orth"
+
+
+# --- de que subespaco a busca vive --------------------------------------------
+def test_each_factor_gets_the_maximum_rank_of_its_lda():
+    """4 e 7 nao sao hiperparametro: sao (classes - 1), o posto maximo de uma
+    LDA. Escolher menos jogaria fora direcoes discriminantes e o recorte deixaria
+    de ser "o subespaco do fator" para virar "as k primeiras direcoes"."""
+    from gefx.disent.diagnostics import SUBSPACE_FACTORS
+
+    assert SUBSPACE_FACTORS == {"tone_level": 4, "drive_level": 7}
+
+
+def test_the_discriminant_basis_is_orthonormal_and_finds_the_planted_axis():
+    """A base sai de um QR: sem ortonormalidade o complemento `I - B Bt` deixaria
+    de ser projecao e o recorte "sem o subespaco" mediria outra coisa."""
+    import numpy as np
+    from gefx.disent.diagnostics import _discriminant_basis
+
+    rng = np.random.default_rng(0)
+    rotulos = np.repeat(np.arange(3), 40)
+    codigo = rng.normal(scale=0.05, size=(120, 6))
+    codigo[:, 2] += rotulos  # o fator vive so na terceira dimensao
+    base = _discriminant_basis(codigo, rotulos, 2)
+    assert np.allclose(base.T @ base, np.eye(2), atol=1e-5)
+    assert abs(base[2]).max() > abs(np.delete(base, 2, axis=0)).max()
+
+
+def test_removing_a_subspace_keeps_the_width_and_drops_the_rank():
+    """O complemento nao encolhe o vetor -- ele zera direcoes. Confundir as duas
+    coisas faria a comparacao com o codigo inteiro medir dimensao, nao conteudo."""
+    import numpy as np
+    from gefx.disent.diagnostics import _discriminant_basis
+
+    rng = np.random.default_rng(1)
+    rotulos = np.repeat(np.arange(4), 30)
+    codigo = rng.normal(size=(120, 8))
+    codigo[:, 0] += rotulos
+    base = _discriminant_basis(codigo, rotulos, 3)
+    resto = np.eye(8, dtype=np.float32) - base @ base.T
+    projetado = codigo @ resto
+    assert projetado.shape == codigo.shape
+    assert np.linalg.matrix_rank(projetado, tol=1e-4) == 5
