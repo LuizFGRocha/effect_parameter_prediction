@@ -840,12 +840,15 @@ BOOTSTRAP_REPS = 4000
 QUERY_KEY = ("file_name", "query_arm")
 
 
-def read_predictions(run_dir: Path) -> pd.DataFrame:
-    """`predictions.csv` de uma execucao, com a coluna de acerto ja derivada."""
+def read_predictions(run_dir: Path, axis: str = "drive_level") -> pd.DataFrame:
+    """`predictions.csv` de uma execucao, com a coluna de acerto ja derivada.
+
+    O eixo e um parametro porque os dois nao se comportam igual: a dispersao
+    entre execucoes e de ~1 ponto no drive e de ~5 no tom, entao uma diferenca
+    lida no drive nao autoriza a mesma leitura no tom.
+    """
     frame = pd.read_csv(Path(run_dir) / "predictions.csv")
-    frame["acerto"] = (
-        frame["pred_drive_level"] == frame["true_drive_level"]
-    ).astype(float)
+    frame["acerto"] = (frame[f"pred_{axis}"] == frame[f"true_{axis}"]).astype(float)
     return frame.set_index(list(QUERY_KEY))
 
 
@@ -892,20 +895,22 @@ def bootstrap_study(
     pairs: Sequence[Tuple[str, str]],
     reps: int = BOOTSTRAP_REPS,
     seed: int = 0,
+    axis: str = "drive_level",
 ) -> pd.DataFrame:
     """Uma linha por par comparado. `runs` mapeia nome -> diretorio de execucao."""
-    carregadas = {nome: read_predictions(caminho) for nome, caminho in runs.items()}
+    carregadas = {nome: read_predictions(caminho, axis=axis)
+                  for nome, caminho in runs.items()}
     rows: List[Dict[str, object]] = []
     for esquerda, direita in pairs:
         numbers = clustered_bootstrap(carregadas[esquerda], carregadas[direita],
                                       reps=reps, seed=seed)
-        rows.append({"a": esquerda, "b": direita, **numbers})
+        rows.append({"a": esquerda, "b": direita, "eixo": axis, **numbers})
     return pd.DataFrame(rows)
 
 
 def find_runs(
     results_dir: Path = Path("results/disent/etapa5"),
-    extra: Sequence[str] = ("pesos",),
+    extra: Sequence[str] = ("pesos", "largura"),
 ) -> Dict[str, Path]:
     """Execucoes com `predictions.csv` sob o diretorio, um nivel de subpasta.
 
@@ -919,6 +924,19 @@ def find_runs(
         if not base.is_dir():
             continue
         for pasta in sorted(base.iterdir()):
-            if (pasta / "predictions.csv").exists() and pasta.name not in encontradas:
+            # As pastas de `extra` sao varridas como base, nunca como execucao:
+            # sem isto a descida de um nivel abaixo transformaria a propria
+            # `pesos/` numa "execucao" quando ela tivesse uma variante so.
+            if not pasta.is_dir() or pasta.name in encontradas or pasta.name in extra:
+                continue
+            if (pasta / "predictions.csv").exists():
                 encontradas[pasta.name] = pasta
+                continue
+            # Uma varredura escreve `<recorte>/<tecnica>/`, porque `--output-dir`
+            # e a base e a tecnica vira subpasta. O nome util e o do recorte -- a
+            # tecnica e a mesma nas quatro execucoes e nomearia todas igual.
+            dentro = [filho for filho in sorted(pasta.iterdir())
+                      if filho.is_dir() and (filho / "predictions.csv").exists()]
+            if len(dentro) == 1:
+                encontradas[pasta.name] = dentro[0]
     return encontradas

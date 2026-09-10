@@ -1,0 +1,197 @@
+{
+  "overall": {
+    "n": 5600,
+    "drive_level": {
+      "exact": 0.4330357142857143,
+      "chance": 0.125,
+      "mae_levels": 0.9341071428571428,
+      "within_one": 0.7894642857142857
+    },
+    "tone_level": {
+      "exact": 0.39571428571428574,
+      "chance": 0.2,
+      "mae_levels": 0.8898214285714285,
+      "within_one": 0.80125
+    },
+    "config_exact": 0.21017857142857144,
+    "config_chance": 0.025,
+    "mae_db": 3.8908289563609575,
+    "cross_implementation": true
+  },
+  "per_query_arm": {
+    "byod-bigmuff": {
+      "n": 800,
+      "drive_level": {
+        "exact": 0.22,
+        "chance": 0.125,
+        "mae_levels": 1.78625,
+        "within_one": 0.51125
+      },
+      "tone_level": {
+        "exact": 0.42375,
+        "chance": 0.2,
+        "mae_levels": 0.79125,
+        "within_one": 0.83125
+      },
+      "config_exact": 0.1175,
+      "config_chance": 0.025,
+      "mae_db": 7.430754907332723,
+      "cross_implementation": true
+    },
+    "byod-mxr": {
+      "n": 800,
+      "drive_level": {
+        "exact": 0.3975,
+        "chance": 0.125,
+        "mae_levels": 0.95625,
+        "within_one": 0.8
+      },
+      "tone_level": {
+        "exact": 0.365,
+        "chance": 0.2,
+        "mae_levels": 0.9575,
+        "within_one": 0.77875
+      },
+      "config_exact": 0.17375,
+      "config_chance": 0.025,
+      "mae_db": 3.982683088350683,
+      "cross_implementation": true
+    },
+    "lsp-arctan": {
+      "n": 800,
+      "drive_level": {
+        "exact": 0.52375,
+        "chance": 0.125,
+        "mae_levels": 0.6775,
+        "within_one": 0.86875
+      },
+      "tone_level": {
+        "exact": 0.395,
+        "chance": 0.2,
+        "mae_levels": 0.89375,
+        "within_one": 0.80125
+      },
+      "config_exact": 0.25375,
+      "config_chance": 0.025,
+      "mae_db": 2.8235944489929214,
+      "cross_implementation": true
+    },
+    "lsp-hardclip": {
+      "n": 800,
+      "drive_level": {
+        "exact": 0.33375,
+        "chance": 0.125,
+        "mae_levels": 1.06375,
+        "within_one": 0.73875
+      },
+      "tone_level": {
+        "exact": 0.38625,
+        "chance": 0.2,
+        "mae_levels": 0.94,
+        "within_one": 0.7725
+      },
+      "config_exact": 0.17,
+      "config_chance": 0.025,
+      "mae_db": 4.43445633589098,
+      "cross_implementation": true
+    },
+    "lsp-sine": {
+      "n": 800,
+      "drive_level": {
+        "exact": 0.52,
+        "chance": 0.125,
+        "mae_levels": 0.67875,
+        "within_one": 0.8725
+      },
+      "tone_level": {
+        "exact": 0.39375,
+        "chance": 0.2,
+        "mae_levels": 0.885,
+        "within_one": 0.8125
+      },
+      "config_exact": 0.25125,
+      "config_chance": 0.025,
+      "mae_db": 2.8319240605562555,
+      "cross_implementation": true
+    },
+    "lsp-tanh": {
+      "n": 800,
+      "drive_level": {
+        "exact": 0.50875,
+        "chance": 0.125,
+        "mae_levels": 0.69,
+        "within_one": 0.8725
+      },
+      "tone_level": {
+        "exact": 0.4025,
+        "chance": 0.2,
+        "mae_levels": 0.8875,
+        "within_one": 0.80125
+      },
+      "config_exact": 0.24875,
+      "config_chance": 0.025,
+      "mae_db": 2.874228114522497,
+      "cross_implementation": true
+    },
+    "pedalboard-tanh": {
+      "n": 800,
+      "drive_level": {
+        "exact": 0.5275,
+        "chance": 0.125,
+        "mae_levels": 0.68625,
+        "within_one": 0.8625
+      },
+      "tone_level": {
+        "exact": 0.40375,
+        "chance": 0.2,
+        "mae_levels": 0.87375,
+        "within_one": 0.81125
+      },
+      "config_exact": 0.25625,
+      "config_chance": 0.025,
+      "mae_db": 2.8581617388806433,
+      "cross_implementation": true
+    }
+  },
+  "same_arm": false,
+  "metric": "cosine",
+  "alphabet": {
+    "drive_level": 8,
+    "tone_level": 5
+  },
+  "catalog_size": 4800,
+  "hubness": {
+    "expected_per_item": 1.1666666666666667,
+    "max_occurrence": 64,
+    "skewness": 4.762897523513834,
+    "share_of_top_1pct": 0.19589285714285715,
+    "by_retrieved_arm": {
+      "byod-mxr": 0.2,
+      "lsp-arctan": 0.1589,
+      "lsp-sine": 0.1588,
+      "lsp-hardclip": 0.1425,
+      "pedalboard-tanh": 0.1409,
+      "lsp-tanh": 0.1204,
+      "byod-bigmuff": 0.0786
+    }
+  },
+  "same_arm_control": {
+    "n": 5600,
+    "drive_level": {
+      "exact": 0.4521428571428571,
+      "chance": 0.125,
+      "mae_levels": 0.8567857142857143,
+      "within_one": 0.8101785714285714
+    },
+    "tone_level": {
+      "exact": 0.405,
+      "chance": 0.2,
+      "mae_levels": 0.8616071428571429,
+      "within_one": 0.8126785714285715
+    },
+    "config_exact": 0.22857142857142856,
+    "config_chance": 0.025,
+    "mae_db": 3.564758370487295,
+    "cross_implementation": false
+  }
+}

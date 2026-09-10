@@ -316,9 +316,11 @@ def _cmd_disent_bootstrap(args: argparse.Namespace) -> None:
     if not pares:
         raise SystemExit("nenhum par: use --pair a:b (repetivel)")
 
-    tabela = bootstrap_study(execucoes, pares, reps=args.reps, seed=args.seed)
+    tabela = bootstrap_study(execucoes, pares, reps=args.reps, seed=args.seed,
+                             axis=args.axis)
     print(tabela.to_string(index=False))
-    destino = Path(args.results_dir) / "bootstrap.csv"
+    sufixo = "" if args.axis == "drive_level" else f"_{args.axis}"
+    destino = Path(args.results_dir) / f"bootstrap{sufixo}.csv"
     tabela.to_csv(destino, index=False)
     print(f"\ntabela em {destino}")
 
@@ -668,6 +670,10 @@ def build_parser() -> argparse.ArgumentParser:
                                        "por linha sai 3,5x estreito demais.")
     disent_bootstrap.add_argument("--reps", type=int, default=4000)
     disent_bootstrap.add_argument("--seed", type=int, default=0)
+    disent_bootstrap.add_argument("--axis", default="drive_level",
+                                  choices=("drive_level", "tone_level"),
+                                  help="Eixo comparado. A dispersao entre execucoes "
+                                       "e ~4x maior no tom que no drive.")
     disent_bootstrap.set_defaults(func=_cmd_disent_bootstrap)
 
     disent_diversity = disent_sub.add_parser(
