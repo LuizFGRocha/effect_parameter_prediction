@@ -440,3 +440,47 @@ def test_removing_a_subspace_keeps_the_width_and_drops_the_rank():
     projetado = codigo @ resto
     assert projetado.shape == codigo.shape
     assert np.linalg.matrix_rank(projetado, tol=1e-4) == 5
+
+
+def test_find_runs_descends_into_a_sweep_folder_and_keeps_the_slice_name(tmp_path):
+    """Uma varredura escreve `<recorte>/<tecnica>/` porque `--output-dir` e a base
+    e a tecnica vira subpasta. Nomear pela tecnica daria o mesmo nome as quatro
+    execucoes; nomear pelo recorte e o unico jeito de compara-las."""
+    from gefx.disent.diagnostics import find_runs
+
+    for recorte in ("d32_s1", "d96_s1"):
+        pasta = tmp_path / "largura" / recorte / "contrastive_aux"
+        pasta.mkdir(parents=True)
+        (pasta / "predictions.csv").write_text("file_name\n", encoding="utf-8")
+    encontradas = find_runs(tmp_path, extra=("largura",))
+    assert set(encontradas) == {"d32_s1", "d96_s1"}
+    assert encontradas["d32_s1"].name == "contrastive_aux"
+
+
+def test_find_runs_never_returns_the_container_itself(tmp_path):
+    """Regressao: com um filho so, a descida de um nivel transformava a propria
+    pasta de `extra` numa execucao."""
+    from gefx.disent.diagnostics import find_runs
+
+    pasta = tmp_path / "pesos" / "grl_orth"
+    pasta.mkdir(parents=True)
+    (pasta / "predictions.csv").write_text("file_name\n", encoding="utf-8")
+    assert set(find_runs(tmp_path, extra=("pesos",))) == {"grl_orth"}
+
+
+def test_the_bootstrap_can_read_either_axis(tmp_path):
+    """A dispersao entre execucoes e ~4x maior no tom que no drive, entao os dois
+    eixos precisam ser comparaveis pelo mesmo caminho -- e o eixo tem de aparecer
+    na tabela, ou duas linhas viram indistinguiveis no arquivo."""
+    import pandas as pd
+    from gefx.disent.diagnostics import read_predictions
+
+    linhas = pd.DataFrame({
+        "file_name": ["a.wav", "b.wav"], "query_arm": ["x", "x"],
+        "query_content": ["c1", "c2"],
+        "true_drive_level": [1, 2], "pred_drive_level": [1, 5],
+        "true_tone_level": [0, 3], "pred_tone_level": [4, 3],
+    })
+    linhas.to_csv(tmp_path / "predictions.csv", index=False)
+    assert list(read_predictions(tmp_path, axis="drive_level")["acerto"]) == [1.0, 0.0]
+    assert list(read_predictions(tmp_path, axis="tone_level")["acerto"]) == [0.0, 1.0]
