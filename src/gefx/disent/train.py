@@ -183,6 +183,15 @@ class TrainConfig:
     eval_every: int = 500
     embed_batch: int = 128
     seed: int = 20260908
+    #: Nucleos deterministicos do TensorFlow. Sem isto **a semente nao reproduz a
+    #: execucao**: ela fixa a inicializacao bit a bit e nada alem -- duas
+    #: execucoes identicas divergem em dezenas de passos, na GPU e tambem na CPU,
+    #: e 4.000 passos depois sao dois modelos que diferem em ate 7 pontos numa
+    #: metrica de 800 consultas. Medido, e medido tambem o conserto: com a
+    #: bandeira ligada, 34 de 34 tensores identicos e perda igual bit a bit.
+    #: Custa ~20% de velocidade. O padrao e desligado so porque as execucoes ja
+    #: publicadas rodaram assim; para qualquer medida nova, ligar.
+    deterministic: bool = False
     #: Avaliacao final. Desligar so faz sentido quando quem mede e outra coisa:
     #: na curva de diversidade o ponto de um arm so nao tem tarefa entre
     #: implementacoes para medir por dentro, e quem pontua e o arm retirado.
@@ -489,6 +498,8 @@ def train(
     import keras
     import tensorflow as tf
 
+    if config.deterministic:
+        tf.config.experimental.enable_op_determinism()
     keras.utils.set_random_seed(config.seed)
 
     root = Path(config.dataset_root)

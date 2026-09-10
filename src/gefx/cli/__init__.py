@@ -227,6 +227,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             beta=args.beta,
             eval_every=args.eval_every,
             seed=args.seed,
+            deterministic=args.deterministic,
             permute_labels=args.permute_labels,
             output_dir=(saida_base / nome) if saida_base else None,
         )
@@ -564,6 +565,11 @@ def build_parser() -> argparse.ArgumentParser:
     disent_train.add_argument("--eval-every", type=int, default=500,
                               help="0 desliga a avaliacao intermediaria.")
     disent_train.add_argument("--seed", type=int, default=20260908)
+    disent_train.add_argument("--deterministic", action="store_true",
+                              help="Nucleos deterministicos do TensorFlow. Sem isto a "
+                                   "semente fixa so a inicializacao e duas execucoes "
+                                   "identicas divergem (medido: ate 7 pontos numa "
+                                   "metrica de 800 consultas). Custa ~20%% de velocidade.")
     disent_train.add_argument("--permute-labels", action="store_true",
                               help="Controle de permutacao: embaralha a configuracao "
                                    "dentro de cada (conteudo, implementacao). Testa se "

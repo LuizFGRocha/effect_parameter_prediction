@@ -489,3 +489,31 @@ def test_compare_skips_a_run_that_has_no_verdict(tmp_path):
     (pasta / "run.json").write_text(json.dumps({"decision": None, "config": {"steps": 1}}))
     tabela = compare(tmp_path, techniques=["sem_veredito"])
     assert "sem_veredito" not in set(tabela["technique"])
+
+
+# --- determinismo -------------------------------------------------------------
+def test_the_deterministic_flag_turns_on_the_tensorflow_kernels(tmp_path, monkeypatch):
+    """Sem isto a semente fixa so a inicializacao: a perda do passo 1 e bit a bit
+    igual entre duas execucoes e no passo 60 ja divergem, na GPU e na CPU. Com a
+    bandeira ligada, 34 de 34 tensores saem identicos -- medido fora da suite,
+    porque exige duas execucoes de verdade. Aqui se cobra que a bandeira chegue
+    ao TensorFlow e ao manifesto, que e o que a suite pode garantir."""
+    import tensorflow as tf
+
+    chamadas = []
+    monkeypatch.setattr(tf.config.experimental, "enable_op_determinism",
+                        lambda: chamadas.append(True))
+    config = _config(tmp_path, deterministic=True, evaluate_at_end=False)
+    manifest = train_module.train(config, verbose=False)
+    assert chamadas == [True]
+    assert manifest["config"]["deterministic"] is True
+
+
+def test_without_the_flag_nothing_is_turned_on(tmp_path, monkeypatch):
+    import tensorflow as tf
+
+    chamadas = []
+    monkeypatch.setattr(tf.config.experimental, "enable_op_determinism",
+                        lambda: chamadas.append(True))
+    train_module.train(_config(tmp_path, evaluate_at_end=False), verbose=False)
+    assert chamadas == []
