@@ -517,3 +517,15 @@ def test_without_the_flag_nothing_is_turned_on(tmp_path, monkeypatch):
                         lambda: chamadas.append(True))
     train_module.train(_config(tmp_path, evaluate_at_end=False), verbose=False)
     assert chamadas == []
+
+
+def test_the_encoder_width_reaches_the_run_through_the_config(monkeypatch):
+    """`--effect-dim` so vale se chegar ao `run.json`: e de la que todo
+    diagnostico reconstroi o encoder, e um manifesto com a largura errada carrega
+    pesos que nao existem."""
+    from gefx.disent.model import EncoderConfig
+    from gefx.disent.train import TrainConfig
+
+    config = TrainConfig(encoder=EncoderConfig(effect_dim=96))
+    assert config.encoder.as_dict()["effect_dim"] == 96
+    assert EncoderConfig.from_dict(config.encoder.as_dict()).effect_dim == 96

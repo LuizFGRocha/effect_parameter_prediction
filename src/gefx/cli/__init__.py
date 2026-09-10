@@ -195,9 +195,13 @@ def _cmd_disent_plots(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
+    from gefx.disent.model import EncoderConfig
     from gefx.disent.train import (
         STUDY_ORDER, TECHNIQUES, WEIGHT_VARIANTS, TrainConfig, compare, train,
     )
+
+    encoder = (EncoderConfig(effect_dim=args.effect_dim)
+               if args.effect_dim else EncoderConfig())
 
     conhecidas = {**TECHNIQUES, **WEIGHT_VARIANTS}
 
@@ -229,6 +233,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             seed=args.seed,
             deterministic=args.deterministic,
             permute_labels=args.permute_labels,
+            encoder=encoder,
             output_dir=(saida_base / nome) if saida_base else None,
         )
         manifesto = train(config, references=referencias)
@@ -256,6 +261,26 @@ def _cmd_disent_probe(args: argparse.Namespace) -> None:
     )
     print(tabela.to_string(index=False))
     destino = Path(args.results_dir) / "sondas.csv"
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
+
+
+def _cmd_disent_subspaces(args: argparse.Namespace) -> None:
+    from gefx.disent.diagnostics import retrieval_subspaces
+
+    import pandas as pd
+
+    run_dir = Path(args.run_dir)
+    tabela = retrieval_subspaces(run_dir, Path(args.output_root), feature=args.feature)
+    print(tabela.to_string(index=False))
+    tabela.insert(0, "technique", run_dir.name)
+    destino = run_dir.parent / "subespacos.csv"
+    # Acumula por tecnica: uma execucao por chamada, e a tabela do estudo e a
+    # juncao delas. Sobrescrever daria sempre a ultima e apagaria a comparacao.
+    if destino.exists():
+        antiga = pd.read_csv(destino)
+        antiga = antiga[antiga["technique"] != run_dir.name]
+        tabela = pd.concat([antiga, tabela], ignore_index=True)
     tabela.to_csv(destino, index=False)
     print(f"\ntabela em {destino}")
 
@@ -574,6 +599,10 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Controle de permutacao: embaralha a configuracao "
                                    "dentro de cada (conteudo, implementacao). Testa se "
                                    "o ganho vem do rotulo ou do procedimento de treino.")
+    disent_train.add_argument("--effect-dim", type=int, default=None,
+                              help="Largura de z_e. O padrao (32) e o das execucoes "
+                                   "publicadas; aumentar testa se o eixo do tom esta "
+                                   "limitado por capacidade.")
     disent_train.add_argument("--output-dir", default=None,
                               help="Padrao: results/disent/etapa5/<tecnica>.")
     disent_train.set_defaults(func=_cmd_disent_train)
@@ -591,6 +620,16 @@ def build_parser() -> argparse.ArgumentParser:
     disent_probe.add_argument("--folds", type=int, default=3)
     disent_probe.add_argument("--seed", type=int, default=0)
     disent_probe.set_defaults(func=_cmd_disent_probe)
+
+    disent_subspaces = disent_sub.add_parser(
+        "subspaces",
+        help="A mesma busca sobre recortes do codigo: onde cada eixo vive.",
+    )
+    disent_subspaces.add_argument("--run-dir",
+                                  default="results/disent/etapa5/contrastive_aux")
+    disent_subspaces.add_argument("--output-root", default="datasets/disent")
+    disent_subspaces.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
+    disent_subspaces.set_defaults(func=_cmd_disent_subspaces)
 
     disent_loo = disent_sub.add_parser(
         "loo", help="Etapa 7: leave-one-arm-out, a transferencia para implementacao inedita.")

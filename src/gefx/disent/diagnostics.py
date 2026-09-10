@@ -32,9 +32,21 @@ PROBE_FACTORS: Dict[str, str] = {
     "arm": "implementacao (deve sair de z_e)",
     "content_id": "conteudo (deve sair de z_e)",
     "drive_level": "configuracao (deve ficar em z_e)",
+    "tone_level": "configuracao (deve ficar em z_e)",
 }
 
+#: Os dois blocos do codigo, sondados separadamente. Sondar so o `z_e` responde
+#: metade da pergunta: um fator que devia estar nele pode estar **legivel** e
+#: ainda assim estar escrito sobretudo no `z_c` -- e o `z_c` nao entra na busca,
+#: entao a recuperacao nao alcanca o que esta la. E a diferenca entre "o codigo
+#: nao tem a informacao" e "a informacao esta no bloco errado", que sao
+#: diagnosticos com consertos opostos.
+PROBE_BLOCKS: Tuple[str, ...] = ("z_e", "z_c")
+
 DEFAULT_FOLDS = 3
+
+#: Piso da norma, para nao dividir por zero num codigo degenerado.
+EPSILON = 1e-8
 
 
 def linear_probes(
@@ -83,6 +95,26 @@ def linear_probes(
     return out
 
 
+def load_run(run_dir: Path):
+    """`(modelo, manifesto)` de uma execucao gravada.
+
+    O `beta_vae` tem outro encoder (a posterior sai com o dobro da largura) e
+    precisa ser reconstruido pela classe dele. Carregar os dois pelo mesmo lugar e
+    o que garante que todo diagnostico veja o mesmo `z_e` que a busca vE.
+    """
+    from gefx.disent.model import BetaVAE, DisentModel, EncoderConfig, HeadConfig
+
+    run_dir = Path(run_dir)
+    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    encoder_config = EncoderConfig.from_dict(manifest["config"]["encoder"])
+    if manifest["config"]["technique"] == "beta_vae":
+        model = BetaVAE(encoder_config, beta=manifest["config"].get("beta", 4.0))
+    else:
+        model = DisentModel(encoder_config, HeadConfig(**manifest["heads"]))
+    model.load_weights(run_dir / "weights")
+    return model, manifest
+
+
 def probe_run(
     run_dir: Path,
     dataset_root: Path = Path("datasets/disent"),
@@ -91,31 +123,22 @@ def probe_run(
     folds: int = DEFAULT_FOLDS,
     seed: int = 0,
 ) -> Dict[str, object]:
-    """Sonda o `z_e` de uma execucao ja treinada, a partir do que ela gravou."""
+    """Sonda os dois blocos de uma execucao ja treinada, do que ela gravou."""
     from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.model import BetaVAE, DisentModel, EncoderConfig, HeadConfig
-    from gefx.disent.train import embed, split_frames
+    from gefx.disent.train import embed_blocks, split_frames
 
     run_dir = Path(run_dir)
-    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    encoder_config = EncoderConfig.from_dict(manifest["config"]["encoder"])
-    # O controle beta-VAE tem outro encoder (a posterior sai com o dobro da
-    # largura). Sondar os dois pelo mesmo caminho e o ponto: o que se compara e
-    # o `z_e` que cada um oferece a busca, e nao a arquitetura que o produziu.
-    if manifest["config"]["technique"] == "beta_vae":
-        model = BetaVAE(encoder_config, beta=manifest["config"].get("beta", 4.0))
-    else:
-        model = DisentModel(encoder_config, HeadConfig(**manifest["heads"]))
-    model.load_weights(run_dir / "weights")
-
+    model, manifest = load_run(run_dir)
     frame = split_frames(dataset_root, manifest["config"].get("arms"))[split]
     store = FeatureStore(dataset_root, frame, feature)
-    codes = embed(model, store, PixelStandardizer.load(run_dir / "standardizer.npz"))
+    z_e, z_c = embed_blocks(model, store, PixelStandardizer.load(run_dir / "standardizer.npz"))
+    blocos = dict(zip(PROBE_BLOCKS, (z_e, z_c)))
     return {
         "technique": manifest["config"]["technique"],
         "split": split,
         "n": int(len(frame)),
-        "probes": linear_probes(codes, frame, folds=folds, seed=seed),
+        "probes": {nome: linear_probes(codigo, frame, folds=folds, seed=seed)
+                   for nome, codigo in blocos.items()},
     }
 
 
@@ -127,7 +150,7 @@ def probe_study(
     folds: int = DEFAULT_FOLDS,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Uma linha por (tecnica, fator). Escreve nada; quem grava e quem chama."""
+    """Uma linha por (tecnica, bloco, fator). Escreve nada; grava quem chama."""
     from gefx.disent.train import STUDY_ORDER
 
     results_dir = Path(results_dir)
@@ -138,9 +161,10 @@ def probe_study(
         if not (run_dir / "run.json").exists():
             continue
         report = probe_run(run_dir, dataset_root, split=split, folds=folds, seed=seed)
-        for factor, numbers in report["probes"].items():  # type: ignore[union-attr]
-            rows.append({"technique": name, "factor": factor,
-                         "meaning": PROBE_FACTORS.get(factor, ""), **numbers})
+        for bloco, probes in report["probes"].items():  # type: ignore[union-attr]
+            for factor, numbers in probes.items():
+                rows.append({"technique": name, "bloco": bloco, "factor": factor,
+                             "meaning": PROBE_FACTORS.get(factor, ""), **numbers})
     if not rows:
         raise FileNotFoundError(f"nenhuma execucao com run.json em {results_dir}")
     return pd.DataFrame(rows)
@@ -236,6 +260,93 @@ def ablate_representation(
         rows.append({"step": f"Spec padronizado, projetado em {size}-d (cosseno)",
                      **_score(frames, flat["query"] @ matrix, flat["catalog"] @ matrix)})
 
+    return pd.DataFrame(rows)
+
+
+# --- de que subespaco a busca vive --------------------------------------------
+#: Quantas direcoes discriminantes cada fator recebe. E o posto maximo de uma
+#: LDA: numero de classes menos uma. Nao e escolha de hiperparametro.
+SUBSPACE_FACTORS: Dict[str, int] = {"tone_level": 4, "drive_level": 7}
+
+
+def _discriminant_basis(codes: np.ndarray, labels, components: int) -> np.ndarray:
+    """Base ortonormal do subespaco que melhor separa as classes do fator.
+
+    Ajustada **no catalogo**, cujos rotulos sao conhecidos por construcao -- e
+    portanto uma operacao legitima de tempo de inferencia, e nao um vazamento:
+    nenhuma linha do recorte de consulta entra no ajuste.
+    """
+    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+
+    lda = LinearDiscriminantAnalysis(n_components=components).fit(codes, labels)
+    base, _ = np.linalg.qr(lda.scalings_[:, :components])
+    return base.astype(np.float32)
+
+
+def _unit(vectors: np.ndarray) -> np.ndarray:
+    return vectors / (np.linalg.norm(vectors, axis=1, keepdims=True) + EPSILON)
+
+
+def _retrieval_row(frames, query, catalog, label: str) -> Dict[str, object]:
+    from gefx.disent.retrieval import retrieve_by_arm
+
+    overall = retrieve_by_arm(
+        frames["query"], frames["catalog"], query, catalog,
+        same_arm=False, metric="cosine",
+    ).metrics["overall"]
+    return {"metrica": label, "dim": int(query.shape[1]),
+            "drive_exact": float(overall["drive_level"]["exact"]),
+            "tone_exact": float(overall["tone_level"]["exact"]),
+            "mae_db": float(overall["mae_db"])}
+
+
+def retrieval_subspaces(
+    run_dir: Path,
+    dataset_root: Path = Path("datasets/disent"),
+    feature: str = "Spec",
+    factors: Mapping[str, int] = SUBSPACE_FACTORS,
+) -> pd.DataFrame:
+    """A mesma busca, sobre recortes do mesmo codigo ja treinado.
+
+    Responde uma pergunta que a sonda linear nao responde: a sonda diz que o
+    fator esta **legivel** no bloco, e a busca pode ainda assim nao alcanca-lo --
+    porque o cosseno soma todas as direcoes de uma vez e o eixo em disputa pode
+    abafar o outro. Cada linha e uma metrica diferente sobre os mesmos vetores;
+    nada aqui retreina coisa alguma.
+
+    Os dois recortes que carregam o resultado sao o par por fator: o subespaco
+    discriminante **sozinho**, e o codigo **sem** ele. Se o eixo estivesse
+    abafado, o primeiro subiria; se o eixo estivesse concentrado, o segundo
+    desabaria.
+    """
+    from gefx.disent.features import FeatureStore, PixelStandardizer
+    from gefx.disent.train import embed_blocks, split_frames
+
+    run_dir = Path(run_dir)
+    model, manifest = load_run(run_dir)
+    standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
+    frames = split_frames(dataset_root, manifest["config"].get("arms"))
+    blocks = {
+        name: embed_blocks(model, FeatureStore(dataset_root, frames[name], feature),
+                           standardizer)
+        for name in ("query", "catalog")
+    }
+    (q_e, q_c), (c_e, c_c) = blocks["query"], blocks["catalog"]
+
+    rows = [
+        _retrieval_row(frames, q_e, c_e, "z_e (a busca do trabalho)"),
+        _retrieval_row(frames, q_c, c_c, "z_c sozinho"),
+        _retrieval_row(frames, _unit(np.hstack([q_e, q_c])),
+                       _unit(np.hstack([c_e, c_c])), "z_e + z_c"),
+    ]
+    identity = np.eye(c_e.shape[1], dtype=np.float32)
+    for factor, components in factors.items():
+        base = _discriminant_basis(c_e, frames["catalog"][factor].to_numpy(), components)
+        rows.append(_retrieval_row(frames, _unit(q_e @ base), _unit(c_e @ base),
+                                   f"z_e no subespaco de {factor} ({components}-d)"))
+        rest = identity - base @ base.T
+        rows.append(_retrieval_row(frames, _unit(q_e @ rest), _unit(c_e @ rest),
+                                   f"z_e SEM o subespaco de {factor}"))
     return pd.DataFrame(rows)
 
 
@@ -639,18 +750,10 @@ def structure_run(
     metade do codigo. Onde o bloco comeca fica registrado em `blocks`.
     """
     from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.model import BetaVAE, DisentModel, EncoderConfig, HeadConfig
     from gefx.disent.train import embed_blocks, split_frames
 
     run_dir = Path(run_dir)
-    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    encoder_config = EncoderConfig.from_dict(manifest["config"]["encoder"])
-    if manifest["config"]["technique"] == "beta_vae":
-        model = BetaVAE(encoder_config, beta=manifest["config"].get("beta", 4.0))
-    else:
-        model = DisentModel(encoder_config, HeadConfig(**manifest["heads"]))
-    model.load_weights(run_dir / "weights")
-
+    model, manifest = load_run(run_dir)
     frame = split_frames(dataset_root, manifest["config"].get("arms"))[split]
     store = FeatureStore(dataset_root, frame, feature)
     z_e, z_c = embed_blocks(model, store, PixelStandardizer.load(run_dir / "standardizer.npz"))
