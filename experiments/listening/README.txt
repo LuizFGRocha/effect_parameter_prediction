@@ -62,3 +62,55 @@ controle caem -- o julgamento e menos confiavel com pouco ganho.
 
 O vies esta gravado em `PERCEPTUAL_BIAS`, em src/gefx/disent/arms.py, e vai para
 o JSON de calibracao. NAO foi aplicado como correcao dos knobs.
+
+================================================================================
+TESTE 3 -- z_e CONTRA z_c (2026-09-10, 24 ensaios, duas perguntas cada)
+
+O primeiro a julgar a REPRESENTACAO e nao o placar. Cada ensaio: uma referencia
+e dois candidatos, um escolhido pelo bloco z_e e outro pelo z_c, ambos do MESMO
+arm (diferente do da referencia) para cancelar a diferenca de especie de
+clipping que limitou as rodadas 3 e 4. Nao usa rotulo nenhum na formulacao.
+
+  P1 distorcao  qual candidato esta mais perto na quantidade de distorcao
+  P2 frase      qual candidato esta mais perto na frase tocada
+
+Previsao do desemaranhamento: P1 -> candidato do z_e, P2 -> candidato do z_c, e
+portanto respostas DIFERENTES no mesmo ensaio (cruzamento).
+
+RESULTADO
+  P2 frase      16/24 = 67% no candidato do z_c, p = 0,152. NAO e vies de
+                posicao (71% com o previsto em 1, 60% com o previsto em 2).
+                No subconjunto em que z_c recuperou literalmente a mesma frase
+                (10 ensaios, condicao gravada no gabarito antes das respostas):
+                8/10. Nos outros 14, em que nenhum candidato e a mesma frase e
+                nao ha o que acertar: 8/14.
+  P1 distorcao  15/24 bruto, mas 50% / 71% conforme a posicao -- o agregado e em
+                boa parte preferencia por "2".
+  cruzamento    11/24, no acaso.
+
+POR QUE P1 NAO E INTERPRETAVEL
+Tres arbitros discordam entre si: ouvido x rotulo nominal 10/20; ouvido x
+oraculo 11/22; z_e x oraculo 7/22. Sem verdade fundamental estavel, o nulo nao
+distingue "o z_e falhou" de "a pergunta nao tinha resposta".
+
+A CAUSA E UM ERRO DE DESENHO, E ELE E CORRIGIVEL
+Os ensaios foram filtrados exigindo >= 2 niveis NOMINAIS de separacao entre os
+candidatos -- exatamente a grandeza que este trabalho ja mostrou nao atravessar
+implementacoes. O oraculo move o nivel em 22 dos 24 ensaios, em media 1,67
+niveis e ate 4. A separacao audivel que o filtro pretendia garantir foi comida
+pelo descasamento de rotulo entre arms.
+
+  CONSERTO PARA UMA VERSAO 2: filtrar por separacao em niveis EQUIVALENTES do
+  oraculo (diagnostics.oracle_alignment), nao em niveis nominais. Alternativa
+  mais limpa para isolar so a afirmacao "z_e carrega quantidade de distorcao":
+  referencia e candidatos no MESMO arm, onde o nivel nominal e comparavel.
+
+O QUE O TESTE ENTREGA
+O ouvido ordenou as duas metades da afirmacao na MESMA ordem que o estimador de
+massa por bloco: o conteudo sai de z_e de forma clara (0,204 contra nula ~0,42)
+e a configuracao entra em z_e com pouca folga (0,438 contra 0,363). Dois
+instrumentos independentes concordando sobre qual metade e forte -- nao e
+confirmacao da tese, e concordancia sobre onde ela e fraca.
+
+LIMITACOES
+Um unico avaliador, 24 ensaios, nenhum resultado significativo a 5%.
