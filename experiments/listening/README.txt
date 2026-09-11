@@ -114,3 +114,71 @@ confirmacao da tese, e concordancia sobre onde ela e fraca.
 
 LIMITACOES
 Um unico avaliador, 24 ensaios, nenhum resultado significativo a 5%.
+
+================================================================================
+TESTE 4 -- A TROCA DE CODIGOS DA FASE 2 E AUDIVEL?          (montado 2026-09-11)
+================================================================================
+
+AFIRMACAO TESTADA, e so ela: a troca de codigos moveu o efeito NA DIRECAO DO
+DOADOR E PARA LONGE DA ANCORA. E a metade da afirmacao da fase 2 que o erro
+quadratico nao verifica, e a que tem os numeros mais fortes (le a configuracao
+do doador a 4,2x o acaso; le a da ancora NO acaso).
+
+O ENSAIO
+  referencia  = a gravacao DOADORA        (frase B, config Y, arm_d)
+  candidato S = o que a troca recuperou   (frase A, config Y_hat, arm_a)
+  candidato N = a propria ancora          (frase A, config X,     arm_a)
+  pergunta: qual candidato tem a distorcao mais proxima da referencia?
+  acaso: 50%.
+
+POR QUE ESTE DESENHO E MAIS LIMPO QUE OS TRES ANTERIORES
+Os dois candidatos sao, por construcao, a MESMA FRASE no MESMO PLUGIN -- ambos
+sao x[conteudo(a), *, arm(a)]. Entao (i) o conteudo deixa de ser pista e (ii) o
+nivel nominal entre eles e comparavel, e a armadilha que invalidou metade do
+teste 3 nao alcanca a comparacao que importa.
+
+FILTROS PRE-DECLARADOS (859 elegiveis de 24.000 pares)
+  F1  Y_hat != X: os candidatos tem de ser arquivos diferentes.       7793/8000
+  F2  |drive(Y_hat) - drive(X)| >= 2, no mesmo arm (nominal vale).    4914/8000
+  F3  doador mapeado para arm_a PELO ORACULO a >= 2 de drive(X).      5389/8000
+  F4  tone(Y_hat) == tone(X): candidatos diferem so em drive.         1649/8000
+  F5  ambos na metade suja (drive >= 3), onde um degrau e audivel.    3902/8000
+Nenhum pergunta se o modelo acertou -- so se o ensaio e respondivel.
+
+O VIES QUE OS FILTROS TINHAM, E O CONSERTO
+A primeira montagem saiu com o oraculo dando razao a troca em 24 de 24. Nao era
+sorte: o eixo e limitado (0-7), o F2 poe a recuperada longe da ancora, o F3 poe o
+doador longe da ancora, e numa escala limitada "os dois longe" quase sempre quer
+dizer "os dois do mesmo lado" -- logo perto um do outro. Os filtros escritos para
+garantir boa-postura estavam selecionando os casos em que o MODELO ACERTOU, e o
+teste teria deixado de medir o modelo: um nulo nao distinguiria "o transplante
+nao e audivel" de "o ouvido discorda do modelo".
+
+  CONSERTO: estratificar. 12 ensaios em que o oraculo da razao a troca e 12 em
+  que da razao a ancora (entre 859 elegiveis, so ~6% sao discordantes, dai os
+  24.000 pares). No estrato discordante o ouvido PRECISA discordar do candidato
+  da troca se estiver seguindo o som.
+
+  E o mesmo tipo de erro do teste 3 -- um filtro que parecia garantir boa-postura
+  e que selecionava o desfecho -- mas pego ANTES de gastar o tempo do avaliador.
+
+O QUE CADA RESPOSTA VAI RESPONDER
+  primaria    o ouvido concorda com o oraculo? Se sim nos DOIS estratos, o
+              transplante espectral tem correspondente perceptual e o
+              instrumento e valido.
+  secundaria  o ouvido segue o som ou o modelo? Escolher a troca nos 24 NAO
+              seria confirmacao da fase 2 -- seria sinal de pista que nao e som.
+
+CHECAGENS DE MONTAGEM
+  estratos            12 / 12
+  posicao x estrato   6/6 e 5/7 -- a posicao sorteada nao se correlaciona com o
+                      estrato, entao nao ha pista ai
+  LUFS                -26,00 nos 72 arquivos, desvio 0,0001
+  referencia no mesmo arm dos candidatos: 3 de 24 (gravado no gabarito)
+
+ARQUIVOS
+  datasets/teste_troca/ensaioNN/{referencia,1,2}.wav + LEIA.txt + respostas.csv
+  experiments/listening/teste_troca_gabarito.csv
+  experiments/listening/build_teste_troca.py   (montagem reproduzivel)
+
+RESPOSTAS: pendentes.
