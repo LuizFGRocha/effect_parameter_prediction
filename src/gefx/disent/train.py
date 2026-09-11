@@ -102,9 +102,38 @@ WEIGHT_VARIANTS: Dict[str, Dict[str, float]] = {
 }
 
 
+#: Fase 2: reconstrucao com troca de codigos. Fora de `TECHNIQUES` pela mesma
+#: razao que as variantes de peso: a escada da etapa 5 foi pre-declarada e as
+#: figuras dela nao podem ser diluidas por uma tecnica que responde outra
+#: pergunta. `swap` parte da melhor configuracao medida (contrastivo + auxiliar)
+#: e acrescenta os dois termos do decoder.
+PHASE2_TECHNIQUES: Dict[str, Dict[str, float]] = {
+    # So o autoencoder, sem troca: controle. Mede quanto do espectro o decoder
+    # acerta sem nunca ter sido cobrado a separar os blocos.
+    "recon_only": {"contrastive": 1.0, "aux_regression": 1.0, "recon": 1.0},
+    # A fase 2 propriamente dita.
+    "swap": {
+        "contrastive": 1.0, "aux_regression": 1.0,
+        "recon": 1.0, "swap_recon": 1.0,
+    },
+}
+
+#: Termos que exigem decoder. Quem define se ha decoder e a PERDA, nao a linha de
+#: comando: uma tecnica com `swap_recon` precisa de decoder por definicao, e
+#: deixar isso para uma bandeira convidaria a execucao silenciosamente sem ele.
+DECODER_TERMS: Tuple[str, ...] = ("recon", "swap_recon")
+
+#: Larguras do decoder quando a tecnica precisa de um e nada foi pedido.
+DEFAULT_DECODER_UNITS: Tuple[int, ...] = (256, 256)
+
+
+def needs_decoder(weights: Mapping[str, float]) -> bool:
+    return any(weights.get(term) for term in DECODER_TERMS)
+
+
 def technique_weights(name: str) -> Dict[str, float]:
-    """Pesos de uma tecnica do estudo ou de uma variante de peso."""
-    known = {**TECHNIQUES, **WEIGHT_VARIANTS}
+    """Pesos de uma tecnica do estudo, de uma variante de peso ou da fase 2."""
+    known = {**TECHNIQUES, **WEIGHT_VARIANTS, **PHASE2_TECHNIQUES}
     if name not in known:
         raise KeyError(f"tecnica desconhecida: {name!r}. Ha {sorted(known)}")
     return dict(known[name])
@@ -258,15 +287,47 @@ def aux_targets(frame: pd.DataFrame) -> np.ndarray:
 
 
 # --- passo de treino ----------------------------------------------------------
+def _mean_spectra(store: FeatureStore, standardizer: PixelStandardizer,
+                  batch: int = 128) -> np.ndarray:
+    """Espectro medio padronizado de todas as linhas do `store`, na ordem delas."""
+    rows = np.arange(len(store))
+    out: Optional[np.ndarray] = None
+    for block, features in store.stream(rows, chunk=batch):
+        media = mean_spectrum(standardizer.transform(features))
+        if out is None:
+            out = np.empty((len(store), media.shape[1]), dtype=np.float32)
+        out[block] = media
+    if out is None:
+        raise ValueError("store vazio")
+    return out
+
+
+def mean_spectrum(features):
+    """(batch, frequencia, tempo, canal) -> (batch, frequencia).
+
+    E o alvo do decoder da fase 2, e e o que o codigo pode conter: o tronco ja
+    faz esta mesma media antes do gargalo (`model._mean_over_time`).
+    """
+    return features[..., 0].mean(axis=2)
+
+
 def make_step(model: DisentModel, optimizer, weights: Mapping[str, float],
-              temperature: float):
-    """Fecha o passo sobre os pesos: eles sao estaticos dentro do `tf.function`."""
+              temperature: float, n_arms: int = 0):
+    """Fecha o passo sobre os pesos: eles sao estaticos dentro do `tf.function`.
+
+    `n_arms` so e usado quando a tecnica tem decoder: a implementacao entra nele
+    como one-hot. Com decoder, `donor_x` e `swap_spec` carregam o doador de efeito
+    e o espectro do alvo da troca; sem decoder o laco passa a propria ancora nos
+    dois e nada os consome -- a bifurcacao e em Python, resolvida no tracamento.
+    """
     import tensorflow as tf
 
     variables = model.trainable_variables
+    decode = needs_decoder(weights)
 
     @tf.function(reduce_retracing=True)
-    def step(x, config_label, content_label, arm_label, aux_target, lam):
+    def step(x, config_label, content_label, arm_label, aux_target, lam,
+             donor_x, swap_spec):
         with tf.GradientTape() as tape:
             context = model(x, lam=lam, training=True)
             context = dict(context)
@@ -279,6 +340,21 @@ def make_step(model: DisentModel, optimizer, weights: Mapping[str, float],
                     "temperature": temperature,
                 }
             )
+            if decode:
+                arm_onehot = tf.one_hot(arm_label, n_arms)
+                z_e_donor, _ = model.encode(donor_x, training=True)
+                context.update({
+                    # A reconstrucao da ancora sai do proprio `x`: a media no
+                    # tempo e de graca e nao custa uma leitura de disco.
+                    "recon_target": tf.reduce_mean(x[..., 0], axis=2),
+                    "recon_prediction": model.decode(
+                        context["z_e"], context["z_c"], arm_onehot, training=True),
+                    "swap_target_spec": swap_spec,
+                    # A troca: efeito do doador, conteudo da ancora, implementacao
+                    # da ancora. E esta linha que a fase 2 inteira afirma.
+                    "swap_prediction": model.decode(
+                        z_e_donor, context["z_c"], arm_onehot, training=True),
+                })
             parts = total_loss(context, weights)
         gradients = tape.gradient(parts["total"], variables)
         # Pesos de cabecas fora da tecnica escolhida nao recebem gradiente. Passar
@@ -533,11 +609,13 @@ def train(
     encoder_config = replace(
         config.encoder, input_shape=(*stores["train"].feature_shape, 1)
     )
+    weights = config.resolved_weights()
+    if needs_decoder(weights) and not encoder_config.decoder_units:
+        encoder_config = replace(encoder_config, decoder_units=DEFAULT_DECODER_UNITS)
     heads = HeadConfig(
         n_arms=len(index.arms), n_contents=len(index.contents), n_configs=len(index.configs)
     )
 
-    weights = config.resolved_weights()
     is_vae = config.technique == "beta_vae"
     steps = 0 if config.technique in UNTRAINED else config.steps
     model = (
@@ -549,8 +627,17 @@ def train(
     step = (
         make_vae_step(model, optimizer)
         if is_vae
-        else make_step(model, optimizer, weights, config.temperature)
+        else make_step(model, optimizer, weights, config.temperature,
+                       n_arms=len(index.arms))
     ) if steps else None
+
+    # O alvo da troca e o espectro MEDIO do alvo, e ele nao depende do treino:
+    # calcula-lo uma vez troca uma leitura de disco por passo por 17 MB de RAM.
+    # Sem isto cada passo leria tres vezes mais espectrogramas do que a fase 1.
+    espectros = (
+        _mean_spectra(stores["train"], standardizer, config.embed_batch)
+        if steps and not is_vae and needs_decoder(weights) else None
+    )
 
     rng = np.random.default_rng(config.seed)
     history: List[Dict[str, float]] = []
@@ -567,6 +654,14 @@ def train(
         if is_vae:
             parts = step(tf.constant(features))
         else:
+            if espectros is None:
+                # Sem decoder nada consome estes dois; passar a propria ancora
+                # mantem uma assinatura so e nao le disco a mais.
+                doador, alvo = features, mean_spectrum(features)
+            else:
+                doador = standardizer.transform(
+                    stores["train"].take(batch.effect_donor))
+                alvo = espectros[batch.swap_target]
             parts = step(
                 tf.constant(features),
                 tf.constant(batch.config, dtype=tf.int32),
@@ -574,6 +669,8 @@ def train(
                 tf.constant(batch.arm, dtype=tf.int32),
                 tf.constant(aux[batch.rows], dtype=tf.float32),
                 tf.constant(lam, dtype=tf.float32),
+                tf.constant(doador),
+                tf.constant(alvo, dtype=tf.float32),
             )
         record = {name: float(value) for name, value in parts.items()}
         record.update({"step": number, "lambda": float(lam)})
