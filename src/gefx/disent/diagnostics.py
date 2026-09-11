@@ -62,9 +62,21 @@ def linear_probes(
     uma sonda nao-linear responderia outra coisa (se o fator e recuperavel por
     algum modelo, o que quase sempre e verdade). Validacao cruzada porque o
     numero de amostras por classe e pequeno -- 20 conteudos de catalogo.
+
+    **A padronizacao nao e cosmetica, e sem ela a sonda mede a escala do bloco.**
+    A `LogisticRegression` tem penalidade L2 com `C=1` fixo, entao um bloco de
+    norma grande recebe muito menos regularizacao efetiva que um de norma
+    pequena. Os dois blocos deste trabalho vivem em escalas incomparaveis por
+    construcao: o `z_e` e L2-normalizado (norma 1) e o `z_c` nao e -- norma media
+    10,4 na tecnica `contrastive_aux` e **233,7** na `full`. Sem padronizar, a
+    comparacao entre blocos media sobretudo isso, e o `lbfgs` nem convergia em
+    2.000 iteracoes. O escalonador entra **dentro** da validacao cruzada, ajustado
+    so na dobra de treino.
     """
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
 
     codes = np.asarray(codes, dtype=np.float64)
     if len(codes) != len(frame):
@@ -80,8 +92,8 @@ def linear_probes(
         partition = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
         accuracy = float(
             cross_val_score(
-                LogisticRegression(max_iter=2000), codes, labels,
-                cv=partition, n_jobs=folds,
+                make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000)),
+                codes, labels, cv=partition, n_jobs=folds,
             ).mean()
         )
         out[factor] = {
@@ -268,6 +280,12 @@ def ablate_representation(
 #: LDA: numero de classes menos uma. Nao e escolha de hiperparametro.
 SUBSPACE_FACTORS: Dict[str, int] = {"tone_level": 4, "drive_level": 7}
 
+#: Quantos subespacos ao acaso, da MESMA dimensao, acompanham cada fator. Sem
+#: este controle a linha da LDA nao significa nada: "4 direcoes recuperam o tom"
+#: pode ser apenas "o tom sobrevive a qualquer projecao em 4 dimensoes" -- e para
+#: o drive e exatamente esse o caso.
+SUBSPACE_CONTROL_SEEDS: int = 5
+
 
 def _discriminant_basis(codes: np.ndarray, labels, components: int) -> np.ndarray:
     """Base ortonormal do subespaco que melhor separa as classes do fator.
@@ -305,6 +323,7 @@ def retrieval_subspaces(
     dataset_root: Path = Path("datasets/disent"),
     feature: str = "Spec",
     factors: Mapping[str, int] = SUBSPACE_FACTORS,
+    controls: int = SUBSPACE_CONTROL_SEEDS,
 ) -> pd.DataFrame:
     """A mesma busca, sobre recortes do mesmo codigo ja treinado.
 
@@ -318,6 +337,12 @@ def retrieval_subspaces(
     discriminante **sozinho**, e o codigo **sem** ele. Se o eixo estivesse
     abafado, o primeiro subiria; se o eixo estivesse concentrado, o segundo
     desabaria.
+
+    Cada fator vem acompanhado de `controls` subespacos **ao acaso** da mesma
+    dimensao, e eles nao sao decoracao: sem essa linha, "k direcoes recuperam o
+    eixo" pode ser so "o eixo sobrevive a qualquer projecao em k dimensoes". No
+    drive e exatamente isso que acontece -- um subespaco aleatorio de 7 direcoes
+    recupera tanto quanto o discriminante.
     """
     from gefx.disent.features import FeatureStore, PixelStandardizer
     from gefx.disent.train import embed_blocks, split_frames
@@ -347,6 +372,13 @@ def retrieval_subspaces(
         rest = identity - base @ base.T
         rows.append(_retrieval_row(frames, _unit(q_e @ rest), _unit(c_e @ rest),
                                    f"z_e SEM o subespaco de {factor}"))
+        for seed in range(controls):
+            rng = np.random.default_rng(seed)
+            acaso, _ = np.linalg.qr(rng.normal(size=(c_e.shape[1], components)))
+            acaso = acaso.astype(np.float32)
+            rows.append(_retrieval_row(
+                frames, _unit(q_e @ acaso), _unit(c_e @ acaso),
+                f"z_e em {components} direcoes ao acaso (semente {seed})"))
     return pd.DataFrame(rows)
 
 

@@ -484,3 +484,31 @@ def test_the_bootstrap_can_read_either_axis(tmp_path):
     linhas.to_csv(tmp_path / "predictions.csv", index=False)
     assert list(read_predictions(tmp_path, axis="drive_level")["acerto"]) == [1.0, 0.0]
     assert list(read_predictions(tmp_path, axis="tone_level")["acerto"]) == [0.0, 1.0]
+
+
+def test_the_probe_is_invariant_to_the_scale_of_the_code():
+    """Regressao de um erro real: sem padronizar, a `LogisticRegression` com C=1
+    da muito menos regularizacao efetiva a um bloco de norma grande, e a sonda
+    passa a medir escala. O `z_e` deste trabalho e L2-normalizado (norma 1) e o
+    `z_c` chegou a norma 233 -- a comparacao entre blocos media sobretudo isso."""
+    import numpy as np
+    from gefx.disent.diagnostics import linear_probes
+
+    rng = np.random.default_rng(3)
+    frame = pd.DataFrame({"drive_level": np.repeat([0, 1, 2], 30)})
+    codigo = rng.normal(scale=0.3, size=(90, 5))
+    codigo[:, 1] += frame["drive_level"].to_numpy()
+    pequeno = linear_probes(codigo, frame, factors=["drive_level"])
+    grande = linear_probes(codigo * 200.0, frame, factors=["drive_level"])
+    assert pequeno["drive_level"]["accuracy"] == pytest.approx(
+        grande["drive_level"]["accuracy"], abs=1e-9
+    )
+
+
+def test_the_subspace_table_carries_random_controls_of_the_same_width():
+    """Sem o controle ao acaso a linha da LDA e ininterpretavel: "k direcoes
+    recuperam o eixo" pode ser so "o eixo sobrevive a qualquer projecao em k
+    dimensoes". No drive e esse o caso, e so o controle revela."""
+    from gefx.disent.diagnostics import SUBSPACE_CONTROL_SEEDS
+
+    assert SUBSPACE_CONTROL_SEEDS >= 3

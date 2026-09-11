@@ -319,8 +319,19 @@ def _cmd_disent_bootstrap(args: argparse.Namespace) -> None:
     tabela = bootstrap_study(execucoes, pares, reps=args.reps, seed=args.seed,
                              axis=args.axis)
     print(tabela.to_string(index=False))
-    sufixo = "" if args.axis == "drive_level" else f"_{args.axis}"
-    destino = Path(args.results_dir) / f"bootstrap{sufixo}.csv"
+    import pandas as pd
+
+    destino = Path(args.results_dir) / "bootstrap.csv"
+    # Acumula por (a, b, eixo): cada estudo compara um punhado de pares, e a
+    # tabela do arquivo e a juncao deles. Sobrescrever apagou uma vez a tabela
+    # da decomposicao de pesos quando a varredura de largura rodou por cima.
+    if destino.exists():
+        antiga = pd.read_csv(destino)
+        chave = ["a", "b", "eixo"]
+        if all(coluna in antiga.columns for coluna in chave):
+            juncao = antiga.merge(tabela[chave], on=chave, how="left", indicator=True)
+            antiga = antiga[juncao["_merge"].to_numpy() == "left_only"]
+            tabela = pd.concat([antiga, tabela], ignore_index=True)
     tabela.to_csv(destino, index=False)
     print(f"\ntabela em {destino}")
 
