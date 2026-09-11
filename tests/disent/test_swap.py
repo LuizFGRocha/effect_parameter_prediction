@@ -95,3 +95,14 @@ def test_swap_study_refuses_a_directory_without_runs(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="nenhuma execucao"):
         swap_study(tmp_path, tmp_path)
+
+
+def test_the_recovered_fraction_normalises_away_each_decoder_own_floor():
+    """Os erros crus nao sao comparaveis entre execucoes: um autoencoder melhor
+    tem piso mais baixo e erro de troca mais baixo sem que a troca tenha
+    funcionado melhor. A fracao recuperada e o que torna a coluna legivel."""
+    identidade, piso = 0.55, 0.13
+    fracao = lambda troca: (identidade - troca) / (identidade - piso)
+    assert fracao(piso) == pytest.approx(1.0)         # troca perfeita
+    assert fracao(identidade) == pytest.approx(0.0)   # troca nao fez nada
+    assert fracao(0.1717) == pytest.approx(0.901, abs=0.01)

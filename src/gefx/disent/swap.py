@@ -107,10 +107,21 @@ def swap_fidelity(
     drive = grade["drive_level"].reindex(index.configs).to_numpy()
     tone = grade["tone_level"].reindex(index.configs).to_numpy()
 
+    erros = {"troca": erro(troca), "identidade": erro(identidade),
+             "piso": erro(piso), "media_do_recorte": erro(media_do_recorte)}
+    # A leitura que resume a tabela: quanto da distancia entre "nao trocar nada" e
+    # o piso da reconstrucao a troca percorreu. Os erros crus nao sao comparaveis
+    # entre execucoes, porque cada decoder tem o seu proprio piso -- um
+    # autoencoder melhor tem piso mais baixo e erro de troca mais baixo sem que a
+    # troca tenha funcionado melhor.
+    erros["fracao_recuperada"] = (
+        (erros["identidade"] - erros["troca"])
+        / max(erros["identidade"] - erros["piso"], 1e-12)
+    )
+
     saida: Dict[str, object] = {
         "run_dir": str(run_dir), "split": split, "pares": int(pairs),
-        "erro": {"troca": erro(troca), "identidade": erro(identidade),
-                 "piso": erro(piso), "media_do_recorte": erro(media_do_recorte)},
+        "erro": erros,
     }
     for rotulo, predicao, esperado in (("troca", troca, config_doador),
                                        ("identidade", identidade, rotulos["config"])):

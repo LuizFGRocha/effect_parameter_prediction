@@ -596,3 +596,29 @@ def test_the_adversary_input_norm_touches_the_head_and_not_the_codes():
     assert not np.allclose(np.linalg.norm(np.asarray(z_c), axis=1), 1.0, atol=1e-3)
     sem = DisentModel(config.__class__(input_shape=(64, 64, 1)), cabecas)
     assert "adv_arm_bn" not in {c.name for c in sem.adversaries["arm"].layers}
+
+
+def test_the_manifest_records_the_encoder_that_actually_ran():
+    """Segunda metade de um bug que ja tinha sido consertado pela metade.
+
+    O `replace` no `train()` fez o MODELO receber todo campo do encoder. Faltava o
+    REGISTRO: `config.as_dict()` lia `self.encoder`, a config pedida, entao uma
+    execucao da fase 2 gravava `decoder_units: []` e o `load_run` reconstruia o
+    modelo sem decoder -- a execucao ficava inavaliavel, com os pesos do decoder
+    salvos ao lado e ninguem para carrega-los.
+    """
+    from dataclasses import replace
+
+    from gefx.disent.model import EncoderConfig
+    from gefx.disent.train import DEFAULT_DECODER_UNITS, TrainConfig
+
+    pedido = TrainConfig(technique="swap")
+    assert pedido.encoder.decoder_units == ()
+    resolvido = replace(
+        pedido,
+        encoder=replace(pedido.encoder, decoder_units=DEFAULT_DECODER_UNITS,
+                        input_shape=(256, 173, 1)),
+    )
+    gravado = resolvido.as_dict()["encoder"]
+    assert gravado["decoder_units"] == list(DEFAULT_DECODER_UNITS)
+    assert EncoderConfig.from_dict(gravado).decoder_units == DEFAULT_DECODER_UNITS
