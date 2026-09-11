@@ -529,3 +529,27 @@ def test_the_encoder_width_reaches_the_run_through_the_config(monkeypatch):
     config = TrainConfig(encoder=EncoderConfig(effect_dim=96))
     assert config.encoder.as_dict()["effect_dim"] == 96
     assert EncoderConfig.from_dict(config.encoder.as_dict()).effect_dim == 96
+
+
+def test_normalizing_the_content_block_is_off_by_default_and_keeps_the_layer_name():
+    """Duas coisas de uma vez. O padrao tem de ser desligado -- e assim que toda
+    execucao publicada rodou. E o nome `content_code` tem de ficar na Dense: os
+    pesos sao recarregados por estrutura, e mover o nome para a normalizacao
+    quebraria a releitura de todas elas."""
+    from gefx.disent.model import EncoderConfig, build_encoder
+
+    assert EncoderConfig().normalize_content is False
+    nomes = {camada.name for camada in build_encoder(EncoderConfig()).layers}
+    assert "content_code" in nomes and "content_norm" not in nomes
+    com = {c.name for c in build_encoder(EncoderConfig(normalize_content=True)).layers}
+    assert "content_code" in com and "content_norm" in com
+
+
+def test_the_normalized_content_block_really_lands_on_the_unit_sphere():
+    import numpy as np
+
+    from gefx.disent.model import EncoderConfig, build_encoder
+
+    config = EncoderConfig(normalize_content=True)
+    _, z_c = build_encoder(config)(np.random.rand(3, *config.input_shape).astype("float32"))
+    assert np.allclose(np.linalg.norm(np.asarray(z_c), axis=1), 1.0, atol=1e-5)
