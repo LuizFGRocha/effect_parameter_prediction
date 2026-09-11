@@ -45,6 +45,14 @@ class EncoderConfig:
     dropout: float = 0.2
     effect_dim: int = 32
     content_dim: int = 64
+    #: L2-normalizar tambem o `z_c`. O padrao e False -- e assim que todas as
+    #: execucoes publicadas rodaram, e assim que o desenho pede (so o `z_e`
+    #: precisa viver na esfera, porque a busca e por cosseno). Existe para um
+    #: experimento: dos tres adversarios, os dois que ficaram no acaso o treino
+    #: inteiro penduram no bloco normalizado e o unico que se mexeu pendura no
+    #: livre. Ligar isto poe o adversario de configuracao na mesma condicao dos
+    #: outros dois.
+    normalize_content: bool = False
     adversary_units: int = 128
 
     def as_dict(self) -> Dict[str, object]:
@@ -122,7 +130,12 @@ def build_encoder(config: EncoderConfig):
     features = trunk.output
     z_e = layers.Dense(config.effect_dim, name="effect_dense")(features)
     z_e = layers.UnitNormalization(name="effect_code")(z_e)
+    # O nome `content_code` fica na Dense, e nao na normalizacao: os pesos ja
+    # gravados sao recarregados por estrutura, e renomear a camada quebraria a
+    # releitura de toda execucao publicada.
     z_c = layers.Dense(config.content_dim, name="content_code")(features)
+    if config.normalize_content:
+        z_c = layers.UnitNormalization(name="content_norm")(z_c)
     return models.Model(trunk.input, [z_e, z_c], name="encoder")
 
 

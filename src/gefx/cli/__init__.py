@@ -200,8 +200,10 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
         STUDY_ORDER, TECHNIQUES, WEIGHT_VARIANTS, TrainConfig, compare, train,
     )
 
-    encoder = (EncoderConfig(effect_dim=args.effect_dim)
-               if args.effect_dim else EncoderConfig())
+    encoder = EncoderConfig(
+        **{"effect_dim": args.effect_dim} if args.effect_dim else {},
+        normalize_content=args.normalize_content,
+    )
 
     conhecidas = {**TECHNIQUES, **WEIGHT_VARIANTS}
 
@@ -616,6 +618,10 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Largura de z_e. O padrao (32) e o das execucoes "
                                    "publicadas; aumentar testa se o eixo do tom esta "
                                    "limitado por capacidade.")
+    disent_train.add_argument("--normalize-content", action="store_true",
+                              help="L2-normalizar tambem o z_c. Poe o adversario "
+                                   "de configuracao na mesma condicao dos outros "
+                                   "dois, que penduram no bloco normalizado.")
     disent_train.add_argument("--output-dir", default=None,
                               help="Padrao: results/disent/etapa5/<tecnica>.")
     disent_train.set_defaults(func=_cmd_disent_train)
