@@ -553,3 +553,25 @@ def test_the_normalized_content_block_really_lands_on_the_unit_sphere():
     config = EncoderConfig(normalize_content=True)
     _, z_c = build_encoder(config)(np.random.rand(3, *config.input_shape).astype("float32"))
     assert np.allclose(np.linalg.norm(np.asarray(z_c), axis=1), 1.0, atol=1e-5)
+
+
+def test_every_encoder_field_reaches_the_model_that_trains(monkeypatch, tmp_path):
+    """Regressao de um bug que custou uma execucao inteira e quase uma conclusao.
+
+    `train()` reconstruia o `EncoderConfig` campo a campo. Um campo novo era
+    descartado em silencio -- e o `run.json` gravava a config PEDIDA, entao o
+    manifesto dizia `normalize_content=True` numa execucao que rodou com False, e
+    ela saiu identica a de controle byte a byte. Um experimento nulo que parecia
+    um resultado.
+    """
+    from dataclasses import fields, replace
+
+    from gefx.disent.model import EncoderConfig
+
+    pedido = EncoderConfig(effect_dim=48, content_dim=24, normalize_content=True,
+                           dropout=0.37, adversary_units=77)
+    usado = replace(pedido, input_shape=(8, 9, 1))
+    for campo in fields(EncoderConfig):
+        if campo.name == "input_shape":
+            continue
+        assert getattr(usado, campo.name) == getattr(pedido, campo.name), campo.name

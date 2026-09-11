@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
@@ -524,15 +524,14 @@ def train(
     standardizer = PixelStandardizer.fit(stores["train"])
     aux = aux_targets(index.frame)
 
-    encoder_config = EncoderConfig(
-        input_shape=(*stores["train"].feature_shape, 1),
-        filters=tuple(config.encoder.filters),
-        kernel_size=config.encoder.kernel_size,
-        trunk_units=config.encoder.trunk_units,
-        dropout=config.encoder.dropout,
-        effect_dim=config.encoder.effect_dim,
-        content_dim=config.encoder.content_dim,
-        adversary_units=config.encoder.adversary_units,
+    # `replace` e nao uma construcao campo a campo: a versao anterior listava os
+    # campos um a um e **descartava em silencio** qualquer campo novo do
+    # `EncoderConfig`, enquanto o `run.json` gravava a config PEDIDA. O manifesto
+    # passava a mentir sobre o modelo que rodou, e uma execucao inteira saia
+    # identica a de controle sem nenhum aviso. So o `input_shape` e sobrescrito,
+    # porque quem o sabe e a loja de features.
+    encoder_config = replace(
+        config.encoder, input_shape=(*stores["train"].feature_shape, 1)
     )
     heads = HeadConfig(
         n_arms=len(index.arms), n_contents=len(index.contents), n_configs=len(index.configs)
