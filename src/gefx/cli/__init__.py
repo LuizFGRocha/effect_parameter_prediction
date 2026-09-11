@@ -197,7 +197,8 @@ def _cmd_disent_plots(args: argparse.Namespace) -> None:
 def _cmd_disent_train(args: argparse.Namespace) -> None:
     from gefx.disent.model import EncoderConfig
     from gefx.disent.train import (
-        STUDY_ORDER, TECHNIQUES, WEIGHT_VARIANTS, TrainConfig, compare, train,
+        PHASE2_TECHNIQUES, STUDY_ORDER, TECHNIQUES, WEIGHT_VARIANTS,
+        TrainConfig, compare, train,
     )
 
     encoder = EncoderConfig(
@@ -206,7 +207,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
         adversary_input_norm=args.adversary_input_norm,
     )
 
-    conhecidas = {**TECHNIQUES, **WEIGHT_VARIANTS}
+    conhecidas = {**TECHNIQUES, **WEIGHT_VARIANTS, **PHASE2_TECHNIQUES}
 
     escolhidas = args.technique or ["full"]
     # A ordem de execucao decide quais criterios podem ser avaliados, entao ela e
@@ -284,6 +285,20 @@ def _cmd_disent_subspaces(args: argparse.Namespace) -> None:
         antiga = pd.read_csv(destino)
         antiga = antiga[antiga["technique"] != run_dir.name]
         tabela = pd.concat([antiga, tabela], ignore_index=True)
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
+
+
+def _cmd_disent_swap(args: argparse.Namespace) -> None:
+    from gefx.disent.swap import swap_study
+
+    tabela = swap_study(
+        Path(args.results_dir), Path(args.output_root), techniques=args.technique,
+        split=args.split, pairs=args.pairs, seed=args.seed,
+    )
+    print(tabela.to_string(index=False))
+    destino = Path(args.results_dir) / "troca.csv"
+    destino.parent.mkdir(parents=True, exist_ok=True)
     tabela.to_csv(destino, index=False)
     print(f"\ntabela em {destino}")
 
@@ -654,6 +669,19 @@ def build_parser() -> argparse.ArgumentParser:
     disent_subspaces.add_argument("--output-root", default="datasets/disent")
     disent_subspaces.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
     disent_subspaces.set_defaults(func=_cmd_disent_subspaces)
+
+    disent_swap = disent_sub.add_parser(
+        "swap",
+        help="Fase 2: a troca de codigos move o espectro para a configuracao do doador?",
+    )
+    disent_swap.add_argument("--results-dir", default="results/disent/fase2")
+    disent_swap.add_argument("--output-root", default="datasets/disent")
+    disent_swap.add_argument("--technique", action="append", default=None)
+    disent_swap.add_argument("--split", default="query",
+                             help="Padrao: consulta, que e conteudo inedito.")
+    disent_swap.add_argument("--pairs", type=int, default=2000)
+    disent_swap.add_argument("--seed", type=int, default=0)
+    disent_swap.set_defaults(func=_cmd_disent_swap)
 
     disent_loo = disent_sub.add_parser(
         "loo", help="Etapa 7: leave-one-arm-out, a transferencia para implementacao inedita.")

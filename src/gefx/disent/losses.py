@@ -154,6 +154,37 @@ def orthogonality(z_e, z_c):
     return tf.reduce_mean(tf.square(cross))
 
 
+# --- fase 2: reconstrucao e troca de codigos ----------------------------------
+def loss_recon(ctx: Mapping[str, Any]):
+    """Reconstrucao do proprio espectro medio, a partir dos codigos da ancora.
+
+    Sozinha ela nao afirma nada sobre desemaranhamento -- e o termo que torna o
+    decoder um decoder. Sem ela, `swap_recon` poderia ser minimizada por um
+    decoder que ignora `z_e` e chuta a media do dataset.
+    """
+    import tensorflow as tf
+
+    return tf.reduce_mean(tf.square(ctx["recon_prediction"] - ctx["recon_target"]))
+
+
+def loss_swap_recon(ctx: Mapping[str, Any]):
+    """Troca de codigos: `z_e` do doador + `z_c` da ancora -> espectro do alvo.
+
+    E a afirmacao central da fase 2, e ela e **supervisionada**: numa grade
+    totalmente cruzada o alvo `x[conteudo(a), configuracao(b), implementacao(a)]`
+    existe em disco. DrNet e DNA-GAN precisam de um discriminador exatamente
+    porque neles esse alvo nao existe; aqui existe, e a perda e um erro quadratico
+    contra o arquivo certo.
+
+    Se os blocos nao estiverem separados nao ha como minimizar esta perda: o
+    decoder recebe o efeito de uma gravacao e o conteudo de outra, e so acerta o
+    alvo se cada bloco carregar de fato a sua metade.
+    """
+    import tensorflow as tf
+
+    return tf.reduce_mean(tf.square(ctx["swap_prediction"] - ctx["swap_target_spec"]))
+
+
 # --- o registro ---------------------------------------------------------------
 LossFn = Callable[[Mapping[str, Any]], Any]
 
@@ -216,6 +247,8 @@ LOSS_REGISTRY: Dict[str, LossFn] = {
     "adversary_content": loss_adversary_content,
     "adversary_config": loss_adversary_config,
     "orthogonality": loss_orthogonality,
+    "recon": loss_recon,
+    "swap_recon": loss_swap_recon,
 }
 
 

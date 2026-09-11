@@ -62,12 +62,19 @@ class EncoderConfig:
     #: de `z_e` nunca saírem do acaso -- e nao perturba a representacao, que e o
     #: confundidor de `normalize_content`.
     adversary_input_norm: bool = False
+    #: Larguras das camadas ocultas do decoder da fase 2. Vazio = sem decoder, e
+    #: e o padrao: toda execucao publicada rodou sem ele, e construi-lo sempre
+    #: acrescentaria parametros a modelos que nao o usam. Fica no `EncoderConfig`
+    #: -- e nao num argumento do `DisentModel` -- porque e o `run.json` que
+    #: reconstroi o modelo nos diagnosticos, e ele grava esta dataclass.
+    decoder_units: Tuple[int, ...] = ()
     adversary_units: int = 128
 
     def as_dict(self) -> Dict[str, object]:
         out = asdict(self)
         out["input_shape"] = list(self.input_shape)
         out["filters"] = list(self.filters)
+        out["decoder_units"] = list(self.decoder_units)
         return out
 
     @classmethod
@@ -75,6 +82,9 @@ class EncoderConfig:
         data = dict(data)
         data["input_shape"] = tuple(data["input_shape"])  # type: ignore[arg-type]
         data["filters"] = tuple(data["filters"])  # type: ignore[arg-type]
+        # Execucoes gravadas antes da fase 2 nao tem a chave; ausente e "sem
+        # decoder", que e o que elas de fato eram.
+        data["decoder_units"] = tuple(data.get("decoder_units", ()))  # type: ignore[arg-type]
         return cls(**data)  # type: ignore[arg-type]
 
 
@@ -192,7 +202,29 @@ class DisentModel:
             ),
         }
 
+        self.decoder = (
+            build_decoder(encoder_config, head_config.n_arms)
+            if encoder_config.decoder_units else None
+        )
+
     # --- o contrato ----------------------------------------------------------
+    def decode(self, z_e, z_c, arm_onehot, training: bool = False):
+        """Espectro medio reconstruido. E aqui que a troca de codigos acontece:
+        quem chama decide de qual linha vem cada bloco."""
+        if self.decoder is None:
+            raise ValueError(
+                "esta execucao nao tem decoder. Use `decoder_units` nao vazio "
+                "no EncoderConfig (a tecnica `swap` ja o faz)."
+            )
+        import tensorflow as tf
+
+        # O Keras recusa uma chamada que misture tensores e arrays; quem chama
+        # daqui vem tanto do laco de treino (tensores) quanto de um diagnostico
+        # em numpy, e a conversao aqui evita que cada chamador tenha de lembrar.
+        entradas = [tf.convert_to_tensor(v, dtype=tf.float32)
+                    for v in (z_e, z_c, arm_onehot)]
+        return self.decoder(entradas, training=training)
+
     def encode(self, x, training: bool = False):
         """`(z_e, z_c)`. E so isto que a recuperacao e a fase 2 usam."""
         z_e, z_c = self.encoder(x, training=training)
@@ -223,11 +255,18 @@ class DisentModel:
         out += list(self.aux_head.trainable_variables)
         for head in self.adversaries.values():
             out += list(head.trainable_variables)
+        if self.decoder is not None:
+            out += list(self.decoder.trainable_variables)
         return out
 
     def parts(self) -> Dict[str, object]:
-        return {"encoder": self.encoder, "aux_head": self.aux_head,
-                **{f"adv_{name}": head for name, head in self.adversaries.items()}}
+        # `load_weights` tolera arquivo ausente em tudo menos o encoder, entao
+        # execucoes gravadas antes da fase 2 continuam recarregando.
+        out: Dict[str, object] = {"encoder": self.encoder, "aux_head": self.aux_head}
+        out.update({f"adv_{name}": head for name, head in self.adversaries.items()})
+        if self.decoder is not None:
+            out["decoder"] = self.decoder
+        return out
 
     def save_weights(self, directory: Path) -> None:
         directory = Path(directory)
@@ -243,6 +282,36 @@ class DisentModel:
                 part.load_weights(path)
             elif name == "encoder":
                 raise FileNotFoundError(f"pesos do encoder ausentes em {directory}")
+
+
+def build_decoder(config: EncoderConfig, n_arms: int):
+    """`[z_e | z_c] + implementacao` -> espectro medio no tempo (fase 2).
+
+    **O alvo e o espectro medio, e nao o espectrograma**, porque e o que o codigo
+    pode conter: o tronco faz `time_pool` (media sobre o tempo) ANTES do gargalo,
+    entao a resolucao temporal ja nao existe em `z_e` nem em `z_c`. Um decoder
+    para o espectrograma inteiro so poderia inventar o eixo do tempo, e o que ele
+    inventasse nao estaria vindo do codigo -- a demonstracao mediria o decoder, e
+    nao a representacao. O espectro medio tambem e a grandeza com que o trabalho
+    inteiro mede distorcao, entao nao e uma concessao: e o alvo certo.
+
+    A implementacao entra como one-hot, e nao pelos codigos: o alvo da troca e
+    `x[conteudo(a), configuracao(b), implementacao(a)]`, e sem condicionar em
+    `arm` o problema fica mal posto (o `z_c` carrega implementacao so
+    parcialmente). E a quarta costura registrada em
+    `poc2-extensao-decoder-troca-de-codigos`.
+    """
+    from keras import layers, models
+
+    z_e = layers.Input(shape=(config.effect_dim,), name="dec_z_e")
+    z_c = layers.Input(shape=(config.content_dim,), name="dec_z_c")
+    arm = layers.Input(shape=(n_arms,), name="dec_arm")
+    x = layers.Concatenate(name="dec_concat")([z_e, z_c, arm])
+    for index, width in enumerate(config.decoder_units):
+        x = layers.Dense(width, activation="relu", name=f"dec_hidden{index}")(x)
+    bins = int(config.input_shape[0])
+    out = layers.Dense(bins, name="dec_out")(x)
+    return models.Model([z_e, z_c, arm], out, name="decoder")
 
 
 def _adversary_on(name: str, input_dim: int, units: int, n_classes: int,

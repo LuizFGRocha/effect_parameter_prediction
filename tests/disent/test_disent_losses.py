@@ -114,6 +114,11 @@ def _context(batch=6):
         "config_label": tf.constant([0, 0, 1, 1, 2, 2]),
         "content_label": tf.constant([0, 1, 2, 3, 4, 0]),
         "arm_label": tf.constant([0, 1, 2, 0, 1, 2]),
+        # Fase 2: o decoder devolve o espectro medio no tempo.
+        "recon_prediction": tf.constant(rng.normal(size=(batch, 8)).astype(np.float32)),
+        "recon_target": tf.constant(rng.normal(size=(batch, 8)).astype(np.float32)),
+        "swap_prediction": tf.constant(rng.normal(size=(batch, 8)).astype(np.float32)),
+        "swap_target_spec": tf.constant(rng.normal(size=(batch, 8)).astype(np.float32)),
     }
 
 
@@ -141,5 +146,12 @@ def test_a_zero_weight_removes_the_term_instead_of_multiplying_it():
 
 
 def test_an_unknown_loss_name_is_refused():
-    with pytest.raises(KeyError, match="swap_recon"):
-        losses.total_loss(_context(), {"swap_recon": 1.0})
+    """Este teste nasceu usando `swap_recon` como exemplo de nome desconhecido --
+    era o termo da fase 2 que ainda nao existia. Agora existe e esta no registro,
+    o que e a prova mais direta de que a costura funcionou como prometido."""
+    with pytest.raises(KeyError, match="perda_que_nao_existe"):
+        losses.total_loss(_context(), {"perda_que_nao_existe": 1.0})
+
+
+def test_the_phase_two_terms_are_in_the_registry():
+    assert {"recon", "swap_recon"} <= set(losses.LOSS_REGISTRY)
