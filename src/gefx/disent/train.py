@@ -612,6 +612,12 @@ def train(
     weights = config.resolved_weights()
     if needs_decoder(weights) and not encoder_config.decoder_units:
         encoder_config = replace(encoder_config, decoder_units=DEFAULT_DECODER_UNITS)
+    # O manifesto tem de gravar a config que RODOU, e nao a que foi pedida. Sem
+    # esta linha, `run.json` dizia `decoder_units: []` numa execucao com decoder,
+    # e `load_run` reconstruia o modelo sem ele -- a fase 2 ficava inavaliavel.
+    # E a mesma armadilha que o `replace` acima ja tinha consertado do lado do
+    # modelo; faltava o lado do registro.
+    config = replace(config, encoder=encoder_config)
     heads = HeadConfig(
         n_arms=len(index.arms), n_contents=len(index.contents), n_configs=len(index.configs)
     )
