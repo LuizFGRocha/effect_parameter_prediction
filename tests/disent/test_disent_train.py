@@ -575,3 +575,24 @@ def test_every_encoder_field_reaches_the_model_that_trains(monkeypatch, tmp_path
         if campo.name == "input_shape":
             continue
         assert getattr(usado, campo.name) == getattr(pedido, campo.name), campo.name
+
+
+def test_the_adversary_input_norm_touches_the_head_and_not_the_codes():
+    """O confundidor de `normalize_content` e que ele restringe o proprio bloco.
+    Esta bandeira existe para separar as duas coisas: padroniza a entrada da
+    cabeca e deixa `z_e` e `z_c` exatamente como estavam."""
+    import numpy as np
+
+    from gefx.disent.model import DisentModel, EncoderConfig, HeadConfig
+
+    cabecas = HeadConfig(n_arms=3, n_contents=4, n_configs=5)
+    config = EncoderConfig(input_shape=(64, 64, 1), adversary_input_norm=True)
+    modelo = DisentModel(config, cabecas)
+    nomes = {c.name for c in modelo.adversaries["arm"].layers}
+    assert "adv_arm_bn" in nomes
+    # os codigos seguem intactos: z_e na esfera, z_c livre
+    z_e, z_c = modelo.encode(np.random.rand(2, 64, 64, 1).astype("float32"))
+    assert np.allclose(np.linalg.norm(np.asarray(z_e), axis=1), 1.0, atol=1e-5)
+    assert not np.allclose(np.linalg.norm(np.asarray(z_c), axis=1), 1.0, atol=1e-3)
+    sem = DisentModel(config.__class__(input_shape=(64, 64, 1)), cabecas)
+    assert "adv_arm_bn" not in {c.name for c in sem.adversaries["arm"].layers}

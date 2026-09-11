@@ -53,6 +53,15 @@ class EncoderConfig:
     #: livre. Ligar isto poe o adversario de configuracao na mesma condicao dos
     #: outros dois.
     normalize_content: bool = False
+    #: Padronizar a entrada das cabecas adversarias (BatchNorm), sem tocar nos
+    #: codigos. O `z_e` e L2-normalizado, entao cada coordenada dele vive em
+    #: torno de 1/sqrt(32) ~ 0,18: as pre-ativacoes da cabeca nascem minusculas e
+    #: ela nao consegue ler o que uma regressao logistica padronizada le. Medido
+    #: post-hoc: a mesma cabeca sobe de 17,5% para 39,1% no conteudo quando a
+    #: entrada e padronizada. Isto testa se era esse o motivo de os adversarios
+    #: de `z_e` nunca saírem do acaso -- e nao perturba a representacao, que e o
+    #: confundidor de `normalize_content`.
+    adversary_input_norm: bool = False
     adversary_units: int = 128
 
     def as_dict(self) -> Dict[str, object]:
@@ -168,15 +177,18 @@ class DisentModel:
 
         units = encoder_config.adversary_units
         drop = encoder_config.dropout
+        norm = encoder_config.adversary_input_norm
         self.adversaries = {
             "arm": _adversary_on(
-                "adv_arm", encoder_config.effect_dim, units, head_config.n_arms, drop
+                "adv_arm", encoder_config.effect_dim, units, head_config.n_arms, drop, norm
             ),
             "content": _adversary_on(
-                "adv_content", encoder_config.effect_dim, units, head_config.n_contents, drop
+                "adv_content", encoder_config.effect_dim, units, head_config.n_contents,
+                drop, norm
             ),
             "config": _adversary_on(
-                "adv_config", encoder_config.content_dim, units, head_config.n_configs, drop
+                "adv_config", encoder_config.content_dim, units, head_config.n_configs,
+                drop, norm
             ),
         }
 
@@ -233,7 +245,8 @@ class DisentModel:
                 raise FileNotFoundError(f"pesos do encoder ausentes em {directory}")
 
 
-def _adversary_on(name: str, input_dim: int, units: int, n_classes: int, dropout: float):
+def _adversary_on(name: str, input_dim: int, units: int, n_classes: int,
+                  dropout: float, input_norm: bool = False):
     """Cabeca adversaria: duas camadas, logits crus, sem softmax.
 
     Rasa de proposito. Um adversario forte demais aprende a ler ruido e o encoder
@@ -243,7 +256,8 @@ def _adversary_on(name: str, input_dim: int, units: int, n_classes: int, dropout
     from keras import layers, models
 
     inputs = layers.Input(shape=(input_dim,), name=f"{name}_in")
-    x = layers.Dense(units, activation="relu", name=f"{name}_hidden")(inputs)
+    x = layers.BatchNormalization(name=f"{name}_bn")(inputs) if input_norm else inputs
+    x = layers.Dense(units, activation="relu", name=f"{name}_hidden")(x)
     x = layers.Dropout(dropout, name=f"{name}_drop")(x)
     return models.Model(inputs, layers.Dense(n_classes, name=f"{name}_logits")(x), name=name)
 

@@ -203,6 +203,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
     encoder = EncoderConfig(
         **{"effect_dim": args.effect_dim} if args.effect_dim else {},
         normalize_content=args.normalize_content,
+        adversary_input_norm=args.adversary_input_norm,
     )
 
     conhecidas = {**TECHNIQUES, **WEIGHT_VARIANTS}
@@ -622,6 +623,10 @@ def build_parser() -> argparse.ArgumentParser:
                               help="L2-normalizar tambem o z_c. Poe o adversario "
                                    "de configuracao na mesma condicao dos outros "
                                    "dois, que penduram no bloco normalizado.")
+    disent_train.add_argument("--adversary-input-norm", action="store_true",
+                              help="BatchNorm na entrada das cabecas adversarias, "
+                                   "sem tocar nos codigos. Testa se o que impedia "
+                                   "os adversarios de z_e era a escala da esfera.")
     disent_train.add_argument("--output-dir", default=None,
                               help="Padrao: results/disent/etapa5/<tecnica>.")
     disent_train.set_defaults(func=_cmd_disent_train)
