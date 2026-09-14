@@ -181,4 +181,51 @@ ARQUIVOS
   experiments/listening/teste_troca_gabarito.csv
   experiments/listening/build_teste_troca.py   (montagem reproduzivel)
 
-RESPOSTAS: pendentes.
+RESPOSTAS (2026-09-13, 24/24, 4 marcados como chute ou quase chute)
+
+UM ERRO DE MONTAGEM MEU, ACHADO NA PONTUACAO
+O estrato "oraculo da razao a ancora" foi montado com desigualdade ESTRITA
+(dist_troca < dist_ancora -> troca; senao -> ancora). Os EMPATES caram no
+estrato da ancora. Dos 12 ensaios desse estrato, 7 sao empates: o doador fica
+exatamente no meio dos dois candidatos (ancora 3 ou 7, recuperada 7 ou 3,
+doador mapeado 5). Nesses nao ha resposta certa. Sobram 17 bem-postos: 12 em que
+o oraculo da razao a troca e 5 em que da razao a ancora.
+
+O avaliador descreveu dois desses empates sem saber que eram empates (ensaios 6
+e 9): "achei uma das opcoes com menos drive, a outra com mais". E a descricao
+literal de um doador no meio.
+
+  ouvido x oraculo, 24 brutos                   18/24 = 75%   p = 0,023
+  ouvido x oraculo, SEM EMPATES                 15/17 = 88%   p = 0,002
+    oraculo = troca                             10/12 = 83%   p = 0,039
+    oraculo = ancora (o MODELO ERROU)            5/5  = 100%  p = 0,063
+  sem empates e sem chutes                      13/15 = 87%   p = 0,007
+  escolheu o candidato da troca, 24 brutos      14/24 = 58%   p = 0,54
+
+LEITURA
+1. O transplante espectral e AUDIVEL. Quando o oraculo diz que um candidato esta
+   mais perto do doador, o ouvido escolhe esse candidato 15 de 17 vezes.
+2. O ouvido segue o SOM, e nao o modelo. Nos 5 ensaios em que o modelo errou, o
+   ouvido discordou do modelo 5 de 5. E exatamente o controle que o estrato
+   existia para oferecer -- com n = 5, p = 0,06 isolado, entao vale como
+   coerencia e nao como prova.
+3. "Escolheu a troca" em 58% nao e o numero da fase 2: ele mistura acertos,
+   erros e empates do modelo, e fica perto de 50% por construcao do desenho.
+
+CHUTES DECLARADOS
+  6, 9    empates -- nao havia resposta, e o avaliador disse isso.
+  17, 23  doador no nivel 0 do arm da ancora, candidatos em 3 e 5: "ambas com
+          drive demais". Nos dois o avaliador escolheu o mais limpo, que e o
+          que o oraculo manda. Percepcao certa, declarada como incerta.
+
+POSICAO
+Respondeu "2" em 15/24. Nos 7 empates, escolheu "2" em 6 -- a preferencia por
+"2" aparece onde nao ha som para decidir, e some onde ha: acerto x oraculo
+81,8% com a troca em 1 e 69,2% com a troca em 2, sem empates ainda maior.
+
+LIMITACOES
+Um avaliador; 17 ensaios bem-postos; o estrato de erro do modelo tem 5.
+
+LICAO DE MONTAGEM (vai para a memoria)
+Estratificar por veredito de um arbitro exige tres classes, nao duas: a favor,
+contra e EMPATE. Desigualdade estrita manda o empate calado para um dos lados.
