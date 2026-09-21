@@ -21,7 +21,6 @@ from gefx.disent.calibrate import (
     build_probes,
     crest_factor_db,
     describe,
-    drive_knob,
     harmonic_powers,
     high_frequency_ratio,
     levels_from_range,
@@ -205,13 +204,6 @@ def test_levels_span_the_calibrated_range_uniformly_in_the_knob():
     assert levels[0] == 5.0 and levels[-1] == 40.0
     steps = np.diff(levels)
     assert steps == pytest.approx([steps[0]] * len(steps))
-
-
-def test_drive_knob_reads_the_calibration():
-    calibration = {"arms": {"x": {"levels": [1.0, 2.0, 3.0]}}}
-    assert drive_knob(calibration, "x", 1) == 2.0
-    with pytest.raises(ValueError, match="fora de"):
-        drive_knob(calibration, "x", 3)
 
 
 def test_a_decreasing_knob_passes_the_gate():

@@ -1,26 +1,13 @@
 """Encoder bifurcado do POC II e o controle beta-VAE.
 
-O contrato que o resto do pacote enxerga e um so:
+O contrato que o resto do pacote enxerga e `z_e, z_c = model.encode(x)`:
 
-    z_e, z_c = model.encode(x)
+- `z_e` e o codigo de efeito, L2-normalizado porque a busca e por cosseno. So
+  ele entra no catalogo.
+- `z_c` e o codigo de conteudo, o destino do que deve sair de `z_e`.
 
-`z_e` (32-d, L2-normalizado) e o **codigo de efeito** -- e ele, e so ele, que vai
-para o catalogo e para a busca. `z_c` (64-d) e o **codigo de conteudo**: existe
-para dar onde o resto morar, ja que sem um destino alternativo a informacao de
-conteudo nao sai de `z_e`, so se esconde. Nenhuma cabeca faz parte desse
-contrato, o que e a segunda costura do compromisso da fase 2 (memoria
-`poc2-extensao-decoder-troca-de-codigos`): o decoder pluga em `encode`, nao no
-modelo de treino.
-
-`z_e` normalizado nao e detalhe: a recuperacao e por vizinho mais proximo e o
-contrastivo opera em produto interno. Deixar a norma livre daria a rede um jeito
-barato de mexer na perda sem mudar a direcao, que e a unica coisa que a busca le.
-
-**Reducao no tempo, nao no espaco inteiro.** Depois das convolucoes a media e
-tirada so no eixo temporal, preservando o de frequencia. E uma afirmacao sobre o
-problema: dentro de um segmento de dois segundos o ajuste de distorcao e
-estacionario e o que muda ao longo do tempo e o que foi tocado. Mediar o tempo
-descarta conteudo de graca; mediar a frequencia descartaria justamente o efeito.
+O tronco tira a media so no eixo do tempo: o ajuste de distorcao e estacionario
+num segmento de dois segundos, e o que varia no tempo e o que foi tocado.
 """
 from __future__ import annotations
 
@@ -30,7 +17,6 @@ from typing import Dict, Tuple
 
 from gefx.disent.losses import gradient_reversal
 
-#: Larguras dos blocos convolucionais do tronco.
 DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
 
 
@@ -45,58 +31,29 @@ class EncoderConfig:
     dropout: float = 0.2
     effect_dim: int = 32
     content_dim: int = 64
-    #: L2-normalizar tambem o `z_c`. O padrao e False -- e assim que todas as
-    #: execucoes publicadas rodaram, e assim que o desenho pede (so o `z_e`
-    #: precisa viver na esfera, porque a busca e por cosseno). Existe para um
-    #: experimento: dos tres adversarios, os dois que ficaram no acaso o treino
-    #: inteiro penduram no bloco normalizado e o unico que se mexeu pendura no
-    #: livre. Ligar isto poe o adversario de configuracao na mesma condicao dos
-    #: outros dois.
+    #: Experimento da assimetria dos adversarios: poe `z_c` na esfera tambem.
     normalize_content: bool = False
-    #: Padronizar a entrada das cabecas adversarias (BatchNorm), sem tocar nos
-    #: codigos. O `z_e` e L2-normalizado, entao cada coordenada dele vive em
-    #: torno de 1/sqrt(32) ~ 0,18: as pre-ativacoes da cabeca nascem minusculas e
-    #: ela nao consegue ler o que uma regressao logistica padronizada le. Medido
-    #: post-hoc: a mesma cabeca sobe de 17,5% para 39,1% no conteudo quando a
-    #: entrada e padronizada. Isto testa se era esse o motivo de os adversarios
-    #: de `z_e` nunca saírem do acaso -- e nao perturba a representacao, que e o
-    #: confundidor de `normalize_content`.
+    #: BatchNorm na entrada dos adversarios, sem tocar nos codigos: as
+    #: coordenadas de `z_e` sao pequenas demais para uma cabeca crua ler.
     adversary_input_norm: bool = False
-    #: Larguras das camadas ocultas do decoder da fase 2. Vazio = sem decoder, e
-    #: e o padrao: toda execucao publicada rodou sem ele, e construi-lo sempre
-    #: acrescentaria parametros a modelos que nao o usam. Fica no `EncoderConfig`
-    #: -- e nao num argumento do `DisentModel` -- porque e o `run.json` que
-    #: reconstroi o modelo nos diagnosticos, e ele grava esta dataclass.
+    #: Camadas ocultas do decoder da fase 2; vazio = sem decoder. Fica aqui
+    #: porque e esta dataclass que o `run.json` grava para reconstruir o modelo.
     decoder_units: Tuple[int, ...] = ()
     adversary_units: int = 128
 
     def as_dict(self) -> Dict[str, object]:
-        out = asdict(self)
-        out["input_shape"] = list(self.input_shape)
-        out["filters"] = list(self.filters)
-        out["decoder_units"] = list(self.decoder_units)
-        return out
+        return {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(self).items()}
 
     @classmethod
     def from_dict(cls, data: Dict[str, object]) -> "EncoderConfig":
-        data = dict(data)
-        data["input_shape"] = tuple(data["input_shape"])  # type: ignore[arg-type]
-        data["filters"] = tuple(data["filters"])  # type: ignore[arg-type]
-        # Execucoes gravadas antes da fase 2 nao tem a chave; ausente e "sem
-        # decoder", que e o que elas de fato eram.
-        data["decoder_units"] = tuple(data.get("decoder_units", ()))  # type: ignore[arg-type]
-        return cls(**data)  # type: ignore[arg-type]
+        # Chave ausente cai no padrao: execucoes antigas continuam recarregando.
+        return cls(**{k: tuple(v) if isinstance(v, list) else v  # type: ignore[arg-type]
+                      for k, v in data.items()})
 
 
 @dataclass
 class HeadConfig:
-    """Quantas classes cada cabeca enxerga. Sai do recorte de treino, nao da grade.
-
-    Os adversarios sao descartaveis: existem so para empurrar o encoder. Sao
-    portanto as unicas partes do modelo cujo tamanho depende do split -- o numero
-    de conteudos de treino nao tem por que ser o mesmo em outro recorte, e nada
-    fora do treino consulta essas cabecas.
-    """
+    """Quantas classes cada cabeca enxerga, contadas no recorte de treino."""
 
     n_arms: int
     n_contents: int
@@ -149,9 +106,7 @@ def build_encoder(config: EncoderConfig):
     features = trunk.output
     z_e = layers.Dense(config.effect_dim, name="effect_dense")(features)
     z_e = layers.UnitNormalization(name="effect_code")(z_e)
-    # O nome `content_code` fica na Dense, e nao na normalizacao: os pesos ja
-    # gravados sao recarregados por estrutura, e renomear a camada quebraria a
-    # releitura de toda execucao publicada.
+    # O nome `content_code` fica na Dense para os pesos gravados recarregarem.
     z_c = layers.Dense(config.content_dim, name="content_code")(features)
     if config.normalize_content:
         z_c = layers.UnitNormalization(name="content_norm")(z_c)
@@ -161,11 +116,8 @@ def build_encoder(config: EncoderConfig):
 class DisentModel:
     """Encoder mais as cabecas de treino, com a reversao de gradiente no meio.
 
-    Nao e uma `keras.Model`: e um recipiente. O laco de treino e customizado
-    (varias perdas, um lambda que muda a cada passo) e uma `Model.fit` nao daria
-    nada de graca aqui -- daria so uma camada de indirecao entre a perda e o
-    gradiente. Os submodelos continuam sendo `keras.Model`, entao pesos, resumo e
-    serializacao seguem os do Keras.
+    Um recipiente de submodelos `keras.Model`, nao uma `keras.Model`: o laco de
+    treino e customizado.
     """
 
     def __init__(self, encoder_config: EncoderConfig, head_config: HeadConfig) -> None:
@@ -185,21 +137,15 @@ class DisentModel:
             name="aux_head",
         )
 
-        units = encoder_config.adversary_units
-        drop = encoder_config.dropout
-        norm = encoder_config.adversary_input_norm
+        def adversary(name: str, input_dim: int, n_classes: int):
+            return _adversary_on(f"adv_{name}", input_dim, encoder_config.adversary_units,
+                                 n_classes, encoder_config.dropout,
+                                 encoder_config.adversary_input_norm)
+
         self.adversaries = {
-            "arm": _adversary_on(
-                "adv_arm", encoder_config.effect_dim, units, head_config.n_arms, drop, norm
-            ),
-            "content": _adversary_on(
-                "adv_content", encoder_config.effect_dim, units, head_config.n_contents,
-                drop, norm
-            ),
-            "config": _adversary_on(
-                "adv_config", encoder_config.content_dim, units, head_config.n_configs,
-                drop, norm
-            ),
+            "arm": adversary("arm", encoder_config.effect_dim, head_config.n_arms),
+            "content": adversary("content", encoder_config.effect_dim, head_config.n_contents),
+            "config": adversary("config", encoder_config.content_dim, head_config.n_configs),
         }
 
         self.decoder = (
@@ -209,8 +155,7 @@ class DisentModel:
 
     # --- o contrato ----------------------------------------------------------
     def decode(self, z_e, z_c, arm_onehot, training: bool = False):
-        """Espectro medio reconstruido. E aqui que a troca de codigos acontece:
-        quem chama decide de qual linha vem cada bloco."""
+        """Espectro medio reconstruido; para trocar codigos, passe blocos de linhas diferentes."""
         if self.decoder is None:
             raise ValueError(
                 "esta execucao nao tem decoder. Use `decoder_units` nao vazio "
@@ -218,15 +163,13 @@ class DisentModel:
             )
         import tensorflow as tf
 
-        # O Keras recusa uma chamada que misture tensores e arrays; quem chama
-        # daqui vem tanto do laco de treino (tensores) quanto de um diagnostico
-        # em numpy, e a conversao aqui evita que cada chamador tenha de lembrar.
+        # O Keras recusa misturar tensores e arrays numpy na mesma chamada.
         entradas = [tf.convert_to_tensor(v, dtype=tf.float32)
                     for v in (z_e, z_c, arm_onehot)]
         return self.decoder(entradas, training=training)
 
     def encode(self, x, training: bool = False):
-        """`(z_e, z_c)`. E so isto que a recuperacao e a fase 2 usam."""
+        """`(z_e, z_c)`."""
         z_e, z_c = self.encoder(x, training=training)
         return z_e, z_c
 
@@ -251,17 +194,9 @@ class DisentModel:
     # --- pesos ---------------------------------------------------------------
     @property
     def trainable_variables(self):
-        out = list(self.encoder.trainable_variables)
-        out += list(self.aux_head.trainable_variables)
-        for head in self.adversaries.values():
-            out += list(head.trainable_variables)
-        if self.decoder is not None:
-            out += list(self.decoder.trainable_variables)
-        return out
+        return [v for part in self.parts().values() for v in part.trainable_variables]
 
     def parts(self) -> Dict[str, object]:
-        # `load_weights` tolera arquivo ausente em tudo menos o encoder, entao
-        # execucoes gravadas antes da fase 2 continuam recarregando.
         out: Dict[str, object] = {"encoder": self.encoder, "aux_head": self.aux_head}
         out.update({f"adv_{name}": head for name, head in self.adversaries.items()})
         if self.decoder is not None:
@@ -280,26 +215,16 @@ class DisentModel:
             path = directory / f"{name}.weights.h5"
             if path.exists():
                 part.load_weights(path)
-            elif name == "encoder":
+            elif name == "encoder":  # as cabecas podem faltar em execucoes antigas
                 raise FileNotFoundError(f"pesos do encoder ausentes em {directory}")
 
 
 def build_decoder(config: EncoderConfig, n_arms: int):
     """`[z_e | z_c] + implementacao` -> espectro medio no tempo (fase 2).
 
-    **O alvo e o espectro medio, e nao o espectrograma**, porque e o que o codigo
-    pode conter: o tronco faz `time_pool` (media sobre o tempo) ANTES do gargalo,
-    entao a resolucao temporal ja nao existe em `z_e` nem em `z_c`. Um decoder
-    para o espectrograma inteiro so poderia inventar o eixo do tempo, e o que ele
-    inventasse nao estaria vindo do codigo -- a demonstracao mediria o decoder, e
-    nao a representacao. O espectro medio tambem e a grandeza com que o trabalho
-    inteiro mede distorcao, entao nao e uma concessao: e o alvo certo.
-
-    A implementacao entra como one-hot, e nao pelos codigos: o alvo da troca e
-    `x[conteudo(a), configuracao(b), implementacao(a)]`, e sem condicionar em
-    `arm` o problema fica mal posto (o `z_c` carrega implementacao so
-    parcialmente). E a quarta costura registrada em
-    `poc2-extensao-decoder-troca-de-codigos`.
+    O alvo e o espectro medio porque o tronco ja tirou o tempo antes do gargalo.
+    A implementacao entra como one-hot porque o alvo da troca a fixa, e os
+    codigos a carregam so em parte.
     """
     from keras import layers, models
 
@@ -316,12 +241,7 @@ def build_decoder(config: EncoderConfig, n_arms: int):
 
 def _adversary_on(name: str, input_dim: int, units: int, n_classes: int,
                   dropout: float, input_norm: bool = False):
-    """Cabeca adversaria: duas camadas, logits crus, sem softmax.
-
-    Rasa de proposito. Um adversario forte demais aprende a ler ruido e o encoder
-    passa a lutar contra o ruido; um raso demais nao pressiona nada. Duas camadas
-    e o meio-termo usado no DANN.
-    """
+    """Cabeca adversaria rasa (duas camadas, como no DANN), logits crus."""
     from keras import layers, models
 
     inputs = layers.Input(shape=(input_dim,), name=f"{name}_in")
@@ -333,18 +253,10 @@ def _adversary_on(name: str, input_dim: int, units: int, n_classes: int,
 
 # --- controle que se espera falhar -------------------------------------------
 class BetaVAE:
-    """beta-VAE (Higgins et al. 2017) sobre o mesmo tronco, sem rotulo nenhum.
+    """beta-VAE (Higgins et al. 2017) sobre o mesmo tronco: controle negativo.
 
-    Entra como **controle negativo declarado**, nao como concorrente: Locatello
-    et al. (2019) mostram que desemaranhamento nao supervisionado nao e
-    identificavel sem vies indutivo, e aqui o fator dominante da variancia e o
-    conteudo -- ou seja, espera-se que as dimensoes que o beta-VAE separa sejam
-    as do conteudo, e que a recuperacao por configuracao nao melhore. Se ele
-    ganhar, e a supervisao que esta mal usada, e isso tambem e resultado.
-
-    Para deixar a comparacao justa, o codigo latente tem a mesma largura da
-    concatenacao `z_e + z_c`, e a recuperacao usa as `effect_dim` primeiras
-    dimensoes -- a escolha mais generosa possivel sem rotulo.
+    O codigo tem a largura de `z_e + z_c`; as `effect_dim` primeiras dimensoes
+    fazem o papel de `z_e`.
     """
 
     def __init__(self, encoder_config: EncoderConfig, beta: float = 4.0) -> None:
@@ -373,12 +285,7 @@ class BetaVAE:
         self.decoder = models.Model(code, x, name="vae_decoder")
 
     def encode(self, x, training: bool = False):
-        """`(z_e, z_c)`, para casar com o contrato do `DisentModel`.
-
-        No modo de avaliacao usa a media da posterior, nao uma amostra: amostrar
-        na hora de montar catalogo introduziria ruido que nada tem a ver com o
-        que o modelo aprendeu.
-        """
+        """`(z_e, z_c)` como no `DisentModel`; fora do treino, a media da posterior."""
         import tensorflow as tf
 
         stats = self.encoder(x, training=training)
@@ -404,12 +311,9 @@ class BetaVAE:
         )
         return {"reconstruction": recon, "kl": kl, "total": recon + self.beta * kl}
 
-    @property
-    def trainable_variables(self):
-        return list(self.encoder.trainable_variables) + list(self.decoder.trainable_variables)
-
     def parts(self) -> Dict[str, object]:
         return {"encoder": self.encoder, "decoder": self.decoder}
 
+    trainable_variables = DisentModel.trainable_variables
     save_weights = DisentModel.save_weights
     load_weights = DisentModel.load_weights

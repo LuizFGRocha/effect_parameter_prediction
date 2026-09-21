@@ -1,12 +1,6 @@
-"""Figuras dos baselines do POC II.
+"""Figuras do POC II, lidas dos CSV/JSON gravados: nada aqui recalcula resultado.
 
-Le os CSV/JSON que `disent/retrieval.py` grava e nao recalcula nada: quem produz
-numero e o modulo de recuperacao, quem desenha e este. Separar os dois e o que
-permite refazer uma figura sem repetir dez minutos de comparacao.
-
-A ordem dos arms nas figuras e sempre a do roster (`arms.arm_keys()`), com a
-referencia primeiro e os estratos agrupados. Ordenar por resultado deixaria cada
-figura com uma ordem diferente e impediria a leitura cruzada.
+Os arms aparecem sempre na ordem do roster (`arms.arm_keys()`).
 """
 from __future__ import annotations
 
@@ -24,16 +18,28 @@ import pandas as pd
 
 from gefx.disent.arms import DRIVE_LEVELS, TONE_LEVELS, arm_keys
 
-# Passo medio da grade, em dB equivalentes. E a unidade de leitura de todo erro
-# reportado: errar menos que isto e acertar o nivel.
-GRID_STEP_DB = 4.15
-# Erro do regressor do POC I dentro da propria implementacao, para referencia.
-POC1_MAE_DB = 1.28
+GRID_STEP_DB = 4.15  # passo medio da grade, em dB equivalentes
+POC1_MAE_DB = 1.28  # erro do POC I dentro da propria implementacao
 
 COLOR_B0 = "#8c8c8c"
 COLOR_B1 = "#1f77b4"
 COLOR_CHANCE = "#c44e52"
 COLOR_EAR = "#2ca02c"
+
+
+def _save(fig, out_path: Path) -> None:
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def _pct(fraction: float) -> str:
+    """Rotulo de porcentagem com virgula decimal: 0.21 -> '21,0%'."""
+    return f"{fraction * 100:.1f}%".replace(".", ",")
+
+
+def _db(value: float) -> str:
+    return f"{value:.2f} dB".replace(".", ",")
 
 
 def ordered_arms(present: Sequence[str]) -> List[str]:
@@ -43,12 +49,7 @@ def ordered_arms(present: Sequence[str]) -> List[str]:
 
 
 def _short(key: str) -> str:
-    """Rotulo de eixo. Mantem o prefixo de backend de proposito.
-
-    Encurtar `lsp-tanh` para `tanh` o tornaria indistinguivel do
-    `pedalboard-tanh` justamente na figura em que os dois quase coincidem -- e
-    essa coincidencia e o resultado.
-    """
+    """Rotulo de eixo; mantem o prefixo para `lsp-tanh` nao se confundir com `pedalboard-tanh`."""
     return key.replace("pedalboard-", "pb-")
 
 
@@ -58,13 +59,7 @@ def plot_baselines_by_arm(
     b1_metrics: Dict[str, object],
     out_path: Path,
 ) -> None:
-    """Acerto e erro dos dois baselines, arm a arm, com o acaso e o passo da grade.
-
-    Duas escalas no mesmo assunto: acerto exato responde "acha o nivel certo?" e
-    o erro em dB responde "quando erra, erra por quanto?". A segunda importa mais
-    aqui, porque a grade e discreta e o acerto exato sozinho esconde a diferenca
-    entre errar um degrau e errar quatro.
-    """
+    """Acerto exato e erro em dB dos dois baselines, arm a arm, com o acaso e o passo da grade."""
     arms = ordered_arms(list(b0_metrics["per_query_arm"]))
     b0 = [b0_metrics["per_query_arm"][a]["drive_level"]["exact"] * 100 for a in arms]
     b1 = [b1_metrics["per_query_arm"][a]["drive_level"]["exact"] * 100 for a in arms]
@@ -84,8 +79,7 @@ def plot_baselines_by_arm(
     top.annotate(f"acaso\n({chance:.1f}%)", xy=(-1.3, chance), xytext=(2, -6),
                  textcoords="offset points", ha="left", color=COLOR_CHANCE,
                  fontsize=9)
-    # Margem a esquerda para as anotacoes das linhas de referencia caberem
-    # fora das barras, e nao por cima delas.
+    # Margem a esquerda para as anotacoes das linhas de referencia.
     top.set_xlim(-1.35, len(arms) - 0.4)
     top.set_ylim(0, max(max(b0), max(b1)) * 1.18)
     top.set_ylabel("acerto exato do nível de drive (%)")
@@ -110,19 +104,12 @@ def plot_baselines_by_arm(
     bottom.set_xticks(positions)
     bottom.set_xticklabels([_short(a) for a in arms], rotation=25, ha="right")
 
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- 2. matriz par a par ------------------------------------------------------
 def plot_pairwise(pairwise: pd.DataFrame, out_path: Path) -> None:
-    """Acerto por par (consulta, catalogo), com catalogo de um arm so.
-
-    A diagonal e o controle sem troca de implementacao. O que a figura tem de
-    mostrar e que ela **nao** se destaca: e assim que se ve que a travessia entre
-    implementacoes nao e o gargalo.
-    """
+    """Acerto por par (consulta, catalogo), com catalogo de um arm so; a diagonal e o controle."""
     arms = ordered_arms(pairwise["query_arm"].unique())
     grid = (
         pairwise.pivot(index="query_arm", columns="catalog_arm", values="drive_exact")
@@ -152,20 +139,14 @@ def plot_pairwise(pairwise: pd.DataFrame, out_path: Path) -> None:
         f"diagonal {diagonal:.1f}%   fora dela {fora:.1f}%   acaso 12,5%"
     )
     fig.colorbar(image, ax=ax, shrink=0.8, label="acerto (%)")
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- 3. sorvedouro ------------------------------------------------------------
 def plot_hubness(
     predictions: pd.DataFrame, catalog_size: int, out_path: Path
 ) -> None:
-    """Concentracao das respostas: curva de ocupacao e de onde elas vem.
-
-    A curva sozinha ja denuncia o *hub*, mas e a barra da direita que da o nome
-    ao culpado -- e o que liga o defeito a uma implementacao concreta do roster.
-    """
+    """Concentracao das respostas: curva de ocupacao e o arm de onde elas vem."""
     counts = predictions["retrieved_file"].value_counts().to_numpy()
     occupancy = np.zeros(catalog_size)
     occupancy[: len(counts)] = counts
@@ -203,18 +184,14 @@ def plot_hubness(
     right.set_xlabel("fatia das consultas respondidas (%)")
     right.set_title("De qual implementação veio a resposta")
 
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- 4. paridade do B1 --------------------------------------------------------
 def plot_b1_parity(predictions: pd.DataFrame, out_path: Path) -> None:
     """Predito x verdadeiro do regressor do POC I, um painel por implementacao.
 
-    Caixa por nivel em vez de dispersao porque o eixo verdadeiro e discreto: com
-    700 pontos empilhados em 8 abscissas, a nuvem vira uma coluna solida e esconde
-    exatamente o que interessa, que e o desvio da diagonal.
+    Caixas por nivel, porque o eixo verdadeiro e discreto.
     """
     arms = ordered_arms(predictions["query_arm"].unique())
     ladder = np.array(
@@ -244,16 +221,13 @@ def plot_b1_parity(predictions: pd.DataFrame, out_path: Path) -> None:
 
     for extra in range(len(arms), nrows * ncols):
         axes[extra // ncols][extra % ncols].axis("off")
-        # `sharex` esconde os rotulos de quem tem painel abaixo. Nas colunas que
-        # terminam antes da ultima linha, o painel de cima fica sem eixo nenhum.
+        # `sharex` escondeu os rotulos do painel que agora e o ultimo da coluna.
         acima = axes[extra // ncols - 1][extra % ncols]
         acima.tick_params(labelbottom=True, labelsize=8)
     fig.supxlabel("drive verdadeiro (dB equivalentes)")
     fig.supylabel("drive predito pelo regressor do POC I (dB)")
     fig.suptitle("B1: a diagonal tracejada é o acerto perfeito", y=1.0)
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- 5. convergencia dos vieses ----------------------------------------------
@@ -266,17 +240,14 @@ def plot_bias_convergence(
 ) -> None:
     """Vies do B1 contra o vies medido no ouvido, na mesma unidade e no mesmo sinal.
 
-    O vies do B1 e tomado **em relacao a referencia**, para descontar o efeito de
-    teto do regressor -- ele satura antes do topo da escada e por isso subestima
-    em todos os arms por igual. O que sobra e o que e proprio de cada
-    implementacao, que e o que se compara com o ouvido.
+    O vies do B1 e tomado em relacao a referencia, para descontar o teto do
+    regressor, que satura igual em todos os arms.
     """
     arms = ordered_arms(predictions["query_arm"].unique())
     erro = predictions["pred_drive_db"] - predictions["true_drive_db"]
     por_arm = erro.groupby(predictions["query_arm"])
     base = float(por_arm.mean()[reference_arm])
-    # Sinal invertido: o teste cego usa "negativo = soa mais distorcido", e mais
-    # distorcido corresponde a um dB predito MAIOR.
+    # No teste cego, negativo = soa mais distorcido = dB predito maior.
     excedente = {arm: -(float(por_arm.mean()[arm]) - base) / step_db for arm in arms}
     erro_padrao = {
         arm: 1.96 * float(por_arm.std()[arm]) / np.sqrt(por_arm.size()[arm]) / step_db
@@ -302,8 +273,6 @@ def plot_bias_convergence(
         label="teste cego de escuta (IC95)", zorder=5,
     )
     ax.axhline(0, color="k", linewidth=1)
-    # Sem esta marca o arm de referencia parece um resultado: ele e zero porque
-    # e dele que os outros sao subtraidos.
     if reference_arm in arms:
         ax.annotate("referência:\nzero por construção",
                     xy=(positions[arms.index(reference_arm)], 0),
@@ -315,9 +284,7 @@ def plot_bias_convergence(
     ax.set_title("Viés residual: o regressor do POC I contra o ouvido\n"
                  "negativo = soa mais distorcido que o nível nominal")
     ax.legend()
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- 6. fidelidade da reducao -------------------------------------------------
@@ -344,9 +311,7 @@ def plot_fidelity(sweep: pd.DataFrame, chosen: int, out_path: Path) -> None:
                  f"({int(escolhido['n_pairs'])} pares do split de consulta)")
     ax.legend(loc="lower right")
     ax.grid(alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- driver -------------------------------------------------------------------
@@ -407,9 +372,7 @@ COLOR_CONTROL = "#dd8452"
 COLOR_RANDOM = "#937860"
 COLOR_CEILING = "#55a868"
 
-#: Ordem das tecnicas nas figuras: a escada de acumulo, depois os controles.
-#: Ordenar por resultado esconderia justamente o que a escada mostra -- que cada
-#: linha acrescenta uma ideia a anterior.
+#: A escada de acumulo, depois os controles.
 TECHNIQUE_ORDER = (
     "random_encoder", "beta_vae",
     "contrastive", "contrastive_aux", "grl", "full",
@@ -430,13 +393,7 @@ def ordered_techniques(present: Sequence[str]) -> List[str]:
 
 
 def plot_technique_ladder(runs: Dict[str, Dict[str, object]], out_path: Path) -> None:
-    """Acerto e erro por tecnica, com os baselines da etapa 4 como linhas.
-
-    As linhas horizontais sao o ponto da figura: sem o B1 e sem o encoder nao
-    treinado desenhados no mesmo eixo, uma barra de 44% parece um numero bom em
-    vez de um numero **comparado**. O encoder nao treinado e o mais duro dos
-    dois, porque separa o que o aprendizado trouxe do que a arquitetura ja dava.
-    """
+    """Acerto e erro por tecnica, com os baselines da etapa 4 e o encoder nao treinado como linhas."""
     from gefx.disent.train import BASELINES
 
     names = ordered_techniques(runs)
@@ -453,21 +410,20 @@ def plot_technique_ladder(runs: Dict[str, Dict[str, object]], out_path: Path) ->
     fig, (left, right) = plt.subplots(1, 2, figsize=(13, 5.5))
 
     left.bar(posicoes, exact, color=cores)
-    # Rotulo dentro da barra: as linhas de referencia cruzam o topo delas, e um
-    # rotulo por cima cairia em cima de uma linha justamente nos casos
-    # interessantes -- os que empatam com um baseline.
+    # Rotulo dentro da barra: por cima, cairia nas linhas de referencia.
     for x, valor in zip(posicoes, exact):
         left.annotate(f"{valor:.1f}", xy=(x, valor), xytext=(0, -14),
                       textcoords="offset points", ha="center", fontsize=9,
                       color="white", fontweight="bold")
     for chave, cor, estilo, texto in (
-        ("chance", COLOR_CHANCE, ":", "acaso (12,5%)"),
-        ("B0_marginal", COLOR_B0, "--", "B0 sem aprendizado (21,0%)"),
-        ("B1_poc1_regressor", COLOR_B1, "--", "B1 regressor do POC I (31,7%)"),
-        ("paired_content_ceiling", COLOR_CEILING, "-.", "teto pareado (69,6%)"),
+        ("chance", COLOR_CHANCE, ":", "acaso"),
+        ("B0_marginal", COLOR_B0, "--", "B0 sem aprendizado"),
+        ("B1_poc1_regressor", COLOR_B1, "--", "B1 regressor do POC I"),
+        ("paired_content_ceiling", COLOR_CEILING, "-.", "teto pareado"),
     ):
-        left.axhline(BASELINES[chave]["drive_exact"] * 100, color=cor,
-                     linestyle=estilo, linewidth=1.4, label=texto)
+        valor = BASELINES[chave]["drive_exact"]
+        left.axhline(valor * 100, color=cor, linestyle=estilo, linewidth=1.4,
+                     label=f"{texto} ({_pct(valor)})")
     left.set_xticks(posicoes)
     left.set_xticklabels(rotulos, fontsize=8)
     left.set_ylabel("acerto exato do nível de drive (%)")
@@ -481,9 +437,11 @@ def plot_technique_ladder(runs: Dict[str, Dict[str, object]], out_path: Path) ->
                        textcoords="offset points", ha="center", fontsize=9,
                        color="white", fontweight="bold")
     right.axhline(BASELINES["B1_poc1_regressor"]["mae_db"], color=COLOR_B1,
-                  linestyle="--", linewidth=1.4, label="B1 (4,36 dB)")
+                  linestyle="--", linewidth=1.4,
+                  label=f"B1 ({_db(BASELINES['B1_poc1_regressor']['mae_db'])})")
     right.axhline(BASELINES["paired_content_ceiling"]["mae_db"], color=COLOR_CEILING,
-                  linestyle="-.", linewidth=1.4, label="teto pareado (2,67 dB)")
+                  linestyle="-.", linewidth=1.4,
+                  label=f"teto pareado ({_db(BASELINES['paired_content_ceiling']['mae_db'])})")
     right.axhline(GRID_STEP_DB, color="k", linestyle=":", linewidth=1.2,
                   label=f"um degrau da grade ({GRID_STEP_DB:.2f} dB)")
     right.set_xticks(posicoes)
@@ -493,9 +451,7 @@ def plot_technique_ladder(runs: Dict[str, Dict[str, object]], out_path: Path) ->
     right.set_title("Distância do ajuste certo")
     right.legend(fontsize=8)
 
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 def plot_training_curves(
@@ -504,12 +460,8 @@ def plot_training_curves(
     runs: Dict[str, Dict[str, object]],
     out_path: Path,
 ) -> None:
-    """A esquerda, os termos da perda da tecnica completa; a direita, a
-    recuperacao ao longo do treino, por tecnica.
-
-    Os dois paineis respondem perguntas diferentes e nao intercambiaveis: perda
-    caindo nao e recuperacao subindo, e e justamente onde os dois se descolam que
-    a tecnica esta otimizando a coisa errada.
+    """A esquerda, os termos da perda da tecnica completa; a direita, a recuperacao
+    ao longo do treino, por tecnica.
     """
     from gefx.disent.train import BASELINES
 
@@ -521,9 +473,7 @@ def plot_training_curves(
     for termo in sorted(termos):
         suave = completa[termo].rolling(50, min_periods=1).mean()
         left.plot(completa["step"], suave, linewidth=1.6, label=termo)
-    # A rampa so e desenhada quando ha adversario: numa tecnica sem reversao ela
-    # existe no historico mas nao multiplica gradiente nenhum, e mostra-la
-    # sugeriria uma agenda que nao esta em vigor.
+    # A rampa de lambda so tem efeito quando ha adversario.
     eixo_lambda = None
     if any(termo.startswith("adversary") for termo in termos):
         eixo_lambda = left.twinx()
@@ -535,8 +485,7 @@ def plot_training_curves(
     left.set_xlabel("passo")
     left.set_ylabel("perda (média móvel de 50 passos)")
     left.set_title(f"Termos da perda — técnica «{nome_completa}»")
-    # A legenda vai no eixo de cima (o do λ, quando existe): desenhada no de
-    # baixo, a curva pontilhada passa por dentro dela.
+    # No eixo de cima, senao a curva pontilhada passa por dentro dela.
     handles, labels = left.get_legend_handles_labels()
     (eixo_lambda if eixo_lambda is not None else left).legend(
         handles, labels, fontsize=8, loc="upper right", framealpha=0.95
@@ -546,8 +495,7 @@ def plot_training_curves(
         pontos = list(checkpoints[nome])
         if not pontos:
             continue
-        # O ultimo ponto e a avaliacao final, que nao esta em `checkpoints`. Sem
-        # ele a curva termina antes do numero que a figura da escada reporta.
+        # O ultimo ponto e a avaliacao final, que nao esta em `checkpoints`.
         passos = [int(p["step"]) for p in pontos] + [len(histories[nome])]
         acertos = [float(p["drive_exact"]) * 100 for p in pontos]
         acertos.append(float(runs[nome]["drive_exact"]) * 100)
@@ -561,21 +509,14 @@ def plot_training_curves(
     right.set_xlabel("passo")
     right.set_ylabel("acerto exato do nível de drive (%)")
     right.set_title("Recuperação ao longo do treino")
-    # Fora dos eixos: as seis curvas ocupam a faixa inteira do painel e qualquer
-    # canto que a legenda escolha cobre pontos de avaliacao.
+    # Fora dos eixos: dentro, qualquer canto cobre pontos de avaliacao.
     right.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3)
 
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 def plot_hub_by_technique(shares: Dict[str, Dict[str, float]], out_path: Path) -> None:
-    """De qual implementacao vem a resposta, por tecnica, contra o B0.
-
-    O adversario de implementacao existe por causa desta figura: no B0 um unico
-    arm respondia 64,6% das consultas, e uma acuracia agregada nao mostra isso.
-    """
+    """De qual implementacao vem a resposta, por tecnica, contra o B0."""
     from gefx.disent.train import BASELINES
 
     names = ordered_techniques(shares)
@@ -594,7 +535,7 @@ def plot_hub_by_technique(shares: Dict[str, Dict[str, float]], out_path: Path) -
                 xytext=(0, 4), textcoords="offset points", ha="left", fontsize=9)
     ax.axhline(BASELINES["B0_marginal"]["top_arm_share"] * 100, color=COLOR_CHANCE,
                linestyle=":", linewidth=1.4)
-    ax.annotate("pior caso do B0 (64,6%)",
+    ax.annotate(f"pior caso do B0 ({_pct(BASELINES['B0_marginal']['top_arm_share'])})",
                 xy=(0, BASELINES["B0_marginal"]["top_arm_share"] * 100),
                 xytext=(4, 4), textcoords="offset points", fontsize=9,
                 color=COLOR_CHANCE)
@@ -604,21 +545,13 @@ def plot_hub_by_technique(shares: Dict[str, Dict[str, float]], out_path: Path) -
     ax.set_title("Concentração das respostas por implementação")
     ax.legend(fontsize=8, ncol=4)
 
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 def plot_by_arm_with_and_without_bigmuff(
     metrics: Dict[str, object], technique: str, out_path: Path
 ) -> None:
-    """Acerto por implementacao consultada, com o agregado nos dois recortes.
-
-    O agregado sem o `byod-bigmuff` acompanha todo agregado deste trabalho por
-    decisao registrada: o arm reprova a porteira de contraste no audio
-    renderizado e carrega ruido de rotulo conhecido. Mostrar so o agregado cheio
-    esconderia quanto do resultado e ele.
-    """
+    """Acerto por implementacao consultada, com o agregado com e sem o `byod-bigmuff`."""
     por_arm = metrics["per_query_arm"]  # type: ignore[index]
     arms = ordered_arms(por_arm)
     valores = [por_arm[arm]["drive_level"]["exact"] * 100 for arm in arms]
@@ -645,9 +578,7 @@ def plot_by_arm_with_and_without_bigmuff(
     ax.set_title(f"Por implementação consultada — técnica «{technique}»")
     ax.legend(fontsize=8)
 
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 def build_etapa5(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path]:
@@ -701,8 +632,7 @@ def build_etapa5(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path
         plot_transfer_cost(pd.read_csv(custo), alvo)
         escritos.append(alvo)
 
-    # Uma pasta por semente (`diversidade`, `diversidade_s2`, ...): a figura junta
-    # todas, porque a dispersao entre sementes e o que ela precisa mostrar.
+    # Uma pasta por semente: `diversidade`, `diversidade_s2`, ...
     curvas = sorted(results_dir.glob("diversidade*/resumo.csv"))
     if curvas:
         alvo = out_dir / "curva_de_diversidade.png"
@@ -733,14 +663,7 @@ def build_etapa5(results_dir: Path, out_dir: Optional[Path] = None) -> List[Path
 
 # --- etapa 7: transferencia para implementacao inedita ------------------------
 def plot_transfer_cost(custo: pd.DataFrame, out_path: Path) -> None:
-    """Visto x inedito, arm por arm, agrupado pelo estrato do roster.
-
-    E a figura que sustenta ou derruba a tese do trabalho. Os numeros da etapa 5
-    sao medidos com todas as implementacoes no treino; so esta comparacao diz o
-    que acontece com uma implementacao que a rede nunca ouviu. Agrupar por
-    estrato e o ponto: o custo nao e uniforme, ele segue exatamente o eixo que o
-    desenho do roster previu.
-    """
+    """Visto x inedito, arm por arm, agrupado pelo estrato do roster."""
     ordem = ordered_arms(custo["arm"])
     dados = custo.set_index("arm").loc[ordem]
     posicoes = np.arange(len(ordem))
@@ -756,8 +679,8 @@ def plot_transfer_cost(custo: pd.DataFrame, out_path: Path) -> None:
         left.annotate(f"{(inedito - visto) * 100:+.1f}",
                       xy=(x, max(visto, inedito) * 100), xytext=(0, 4),
                       textcoords="offset points", ha="center", fontsize=9)
-    left.axhline(100 / 8, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
-                 label="acaso (12,5%)")
+    left.axhline(100 / DRIVE_LEVELS, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
+                 label=f"acaso ({_pct(1 / DRIVE_LEVELS)})")
     left.set_xticks(posicoes)
     left.set_xticklabels([f"{_short(a)}\n{dados['estrato'][a]}" for a in ordem], fontsize=8)
     left.set_ylabel("acerto exato do nível de drive (%)")
@@ -774,8 +697,7 @@ def plot_transfer_cost(custo: pd.DataFrame, out_path: Path) -> None:
         right.annotate(f"{valor:+.1f}", xy=(x, valor),
                        xytext=(0, 4 if valor >= 0 else -14),
                        textcoords="offset points", ha="center", fontsize=10)
-    # Folga nas duas pontas: sem ela o rotulo da barra mais negativa cai fora
-    # do eixo, que e justamente a barra que carrega o resultado.
+    # Folga para os rotulos das barras extremas.
     right.set_ylim(min(por_estrato.min() * 1.35, -1.0), max(por_estrato.max() * 1.8, 1.0))
     right.set_ylabel("custo médio (pontos de acerto)")
     right.set_title("Por estrato do roster")
@@ -787,9 +709,7 @@ def plot_transfer_cost(custo: pd.DataFrame, out_path: Path) -> None:
                                       "unidade e topologia\ndiferentes"))],
         fontsize=8)
 
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- B2/B3: quantas implementacoes o treino precisa ver -----------------------
@@ -797,11 +717,8 @@ def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
                          visto: Optional[float] = None) -> None:
     """Transferencia para o arm retirado contra o numero de arms no treino.
 
-    O catalogo e o mesmo em todos os pontos, entao a unica coisa que muda ao
-    longo do eixo x e quantas implementacoes o encoder ouviu. A anotacao do
-    estrato importa mais que o numero de arms: se a curva subir nos degraus em
-    que um estrato **novo** entra e ficar plana nos outros, o que compra
-    transferencia e variedade, nao quantidade.
+    O catalogo e o mesmo em todos os pontos; a anotacao marca onde entra um estrato
+    novo.
     """
     pontos = curva[curva["condicao"] == "transferencia"]
     transferencia = pontos.groupby(["k", "estratos"], as_index=False)["drive_exact"].mean()
@@ -810,8 +727,7 @@ def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
         "drive_exact"].mean().sort_values("k")
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
-    # As sementes individuais entram como pontos: a dispersao entre elas e da
-    # ordem da excursao da curva, e uma linha sozinha esconderia exatamente isso.
+    # A dispersao entre sementes e da ordem da excursao da curva.
     sementes = pontos.groupby("k")["drive_exact"].nunique().max()
     if sementes and sementes > 1:
         ax.plot(pontos["k"], pontos["drive_exact"] * 100, "o", color=COLOR_CEILING,
@@ -822,8 +738,8 @@ def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
     if not vistos.empty:
         ax.plot(vistos["k"], vistos["drive_exact"] * 100, "s--", color=COLOR_B1,
                 linewidth=1.5, alpha=0.8, label="implementações do treino (controle)")
-    ax.axhline(100 / 8, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
-               label="acaso (12,5%)")
+    ax.axhline(100 / DRIVE_LEVELS, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
+               label=f"acaso ({_pct(1 / DRIVE_LEVELS)})")
     if visto is not None:
         ax.axhline(visto * 100, color=COLOR_B0, linestyle="-.", linewidth=1.3,
                    label="o mesmo arm, visto no treino (etapa 5)")
@@ -843,24 +759,16 @@ def plot_diversity_curve(curva: pd.DataFrame, out_path: Path,
     ax.set_ylabel("acerto exato do nível de drive (%)")
     ax.set_ylim(0, 60)
     ax.set_title("Diversidade de implementação no treino compra transferência?")
-    # Embaixo: a metade inferior do eixo esta vazia por construcao (o acaso e
-    # 12,5%) e a legenda em cima taparia justamente os primeiros pontos.
+    # Embaixo: a metade inferior fica vazia (acaso de 12,5%).
     ax.legend(fontsize=8, loc="lower left")
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)
 
 
 # --- etapa 6: onde cada fator esta escrito ------------------------------------
 def plot_structure_blocks(estrutura: pd.DataFrame, out_path: Path) -> None:
     """Fracao da importancia de cada fator que cai em `z_e`, por tecnica.
 
-    E a afirmacao do desemaranhamento na forma em que ela foi feita: em blocos.
-    A linha de referencia **nao e 50%**: os blocos tem tamanhos diferentes (32
-    contra 64 dimensoes), entao um codigo que nao separa nada espalha a
-    importancia na proporcao das dimensoes, em 33%. Medido, e onde os quatro
-    fatores caem no encoder nao treinado. Acima dela o fator esta em `z_e` mais
-    do que por acaso; abaixo, menos.
+    A linha nula e a proporcao de dimensoes de `z_e`, nao 50%.
     """
     tecnicas = ordered_techniques(estrutura["technique"].unique())
     fatores = ["drive_level", "tone_level", "arm", "content_id"]
@@ -889,6 +797,4 @@ def plot_structure_blocks(estrutura: pd.DataFrame, out_path: Path) -> None:
     ax.set_ylim(0, 100)
     ax.set_title("Onde cada fator está escrito: $z_e$ (efeito) contra $z_c$ (conteúdo)")
     ax.legend(fontsize=8, ncol=3, loc="upper right")
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+    _save(fig, out_path)

@@ -194,11 +194,32 @@ def _cmd_disent_plots(args: argparse.Namespace) -> None:
         print(f"  {caminho}")
 
 
+def _write_table(tabela, destino: Path, key=None) -> None:
+    """Mostra a tabela e grava em `destino`.
+
+    Com `key`, acumula: linhas antigas com a mesma chave sao substituidas, as demais
+    ficam. Um arquivo antigo sem as colunas da chave e sobrescrito.
+    """
+    import pandas as pd
+
+    print(tabela.to_string(index=False))
+    destino = Path(destino)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    if key and destino.exists():
+        antiga = pd.read_csv(destino)
+        if all(coluna in antiga.columns for coluna in key):
+            juncao = antiga.merge(tabela[key].drop_duplicates(), on=key,
+                                  how="left", indicator=True)
+            antiga = antiga[juncao["_merge"].to_numpy() == "left_only"]
+            tabela = pd.concat([antiga, tabela], ignore_index=True)
+    tabela.to_csv(destino, index=False)
+    print(f"\ntabela em {destino}")
+
+
 def _cmd_disent_train(args: argparse.Namespace) -> None:
     from gefx.disent.model import EncoderConfig
     from gefx.disent.train import (
-        PHASE2_TECHNIQUES, STUDY_ORDER, TECHNIQUES, WEIGHT_VARIANTS,
-        TrainConfig, compare, train,
+        KNOWN_TECHNIQUES, STUDY_ORDER, TECHNIQUES, TrainConfig, compare, train,
     )
 
     encoder = EncoderConfig(
@@ -207,20 +228,17 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
         adversary_input_norm=args.adversary_input_norm,
     )
 
-    conhecidas = {**TECHNIQUES, **WEIGHT_VARIANTS, **PHASE2_TECHNIQUES}
-
-    escolhidas = args.technique or ["full"]
-    # A ordem de execucao decide quais criterios podem ser avaliados, entao ela e
-    # imposta e nao herdada da linha de comando.
-    escolhidas = [nome for nome in STUDY_ORDER if nome in set(escolhidas)] or escolhidas
+    escolhidas = list(dict.fromkeys(args.technique or ["full"]))
+    desconhecidas = [nome for nome in escolhidas if nome not in KNOWN_TECHNIQUES]
+    if desconhecidas:
+        raise SystemExit(f"tecnica desconhecida: {desconhecidas}. Ha {sorted(KNOWN_TECHNIQUES)}")
+    # Na ordem do estudo, para as referencias dos criterios existirem a tempo;
+    # tecnicas de fora vao ao fim.
+    escolhidas.sort(key=lambda nome: STUDY_ORDER.index(nome) if nome in STUDY_ORDER
+                    else len(STUDY_ORDER))
     saida_base = Path(args.output_dir) if args.output_dir else None
-    # As referencias sao acumuladas na ordem em que as tecnicas rodam: o
-    # `random_encoder` tem de vir antes de quem ele avalia, senao o criterio mais
-    # duro do estudo fica de fora.
     referencias: dict = {}
     for nome in escolhidas:
-        if nome not in conhecidas:
-            raise SystemExit(f"tecnica desconhecida: {nome}. Ha {sorted(conhecidas)}")
         print(f"[{nome}]")
         config = TrainConfig(
             dataset_root=Path(args.output_root),
@@ -249,11 +267,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
     # As variantes de peso nao estao em `TECHNIQUES`, que e o padrao do `compare`.
     tabela = compare(raiz, techniques=sorted(set(TECHNIQUES) | set(escolhidas)))
     print()
-    print(tabela.to_string(index=False))
-    destino = raiz / "comparacao.csv"
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    tabela.to_csv(destino, index=False)
-    print(f"\ntabela em {destino}")
+    _write_table(tabela, raiz / "comparacao.csv")
 
 
 def _cmd_disent_probe(args: argparse.Namespace) -> None:
@@ -263,30 +277,17 @@ def _cmd_disent_probe(args: argparse.Namespace) -> None:
         Path(args.results_dir), Path(args.output_root),
         techniques=args.technique, split=args.split, folds=args.folds, seed=args.seed,
     )
-    print(tabela.to_string(index=False))
-    destino = Path(args.results_dir) / "sondas.csv"
-    tabela.to_csv(destino, index=False)
-    print(f"\ntabela em {destino}")
+    _write_table(tabela, Path(args.results_dir) / "sondas.csv")
 
 
 def _cmd_disent_subspaces(args: argparse.Namespace) -> None:
     from gefx.disent.diagnostics import retrieval_subspaces
 
-    import pandas as pd
-
     run_dir = Path(args.run_dir)
     tabela = retrieval_subspaces(run_dir, Path(args.output_root), feature=args.feature)
-    print(tabela.to_string(index=False))
     tabela.insert(0, "technique", run_dir.name)
-    destino = run_dir.parent / "subespacos.csv"
-    # Acumula por tecnica: uma execucao por chamada, e a tabela do estudo e a
-    # juncao delas. Sobrescrever daria sempre a ultima e apagaria a comparacao.
-    if destino.exists():
-        antiga = pd.read_csv(destino)
-        antiga = antiga[antiga["technique"] != run_dir.name]
-        tabela = pd.concat([antiga, tabela], ignore_index=True)
-    tabela.to_csv(destino, index=False)
-    print(f"\ntabela em {destino}")
+    # Uma execucao por chamada: a tabela do estudo e a juncao delas.
+    _write_table(tabela, run_dir.parent / "subespacos.csv", key=["technique"])
 
 
 def _cmd_disent_swap(args: argparse.Namespace) -> None:
@@ -296,11 +297,7 @@ def _cmd_disent_swap(args: argparse.Namespace) -> None:
         Path(args.results_dir), Path(args.output_root), techniques=args.technique,
         split=args.split, pairs=args.pairs, seed=args.seed,
     )
-    print(tabela.to_string(index=False))
-    destino = Path(args.results_dir) / "troca.csv"
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    tabela.to_csv(destino, index=False)
-    print(f"\ntabela em {destino}")
+    _write_table(tabela, Path(args.results_dir) / "troca.csv")
 
 
 def _cmd_disent_structure(args: argparse.Namespace) -> None:
@@ -310,10 +307,7 @@ def _cmd_disent_structure(args: argparse.Namespace) -> None:
         Path(args.results_dir), Path(args.output_root),
         techniques=args.technique, split=args.split, seed=args.seed, trees=args.trees,
     )
-    print(tabela.to_string(index=False))
-    destino = Path(args.results_dir) / "estrutura.csv"
-    tabela.to_csv(destino, index=False)
-    print(f"\ntabela em {destino}")
+    _write_table(tabela, Path(args.results_dir) / "estrutura.csv")
 
 
 def _cmd_disent_bootstrap(args: argparse.Namespace) -> None:
@@ -336,22 +330,7 @@ def _cmd_disent_bootstrap(args: argparse.Namespace) -> None:
 
     tabela = bootstrap_study(execucoes, pares, reps=args.reps, seed=args.seed,
                              axis=args.axis)
-    print(tabela.to_string(index=False))
-    import pandas as pd
-
-    destino = Path(args.results_dir) / "bootstrap.csv"
-    # Acumula por (a, b, eixo): cada estudo compara um punhado de pares, e a
-    # tabela do arquivo e a juncao deles. Sobrescrever apagou uma vez a tabela
-    # da decomposicao de pesos quando a varredura de largura rodou por cima.
-    if destino.exists():
-        antiga = pd.read_csv(destino)
-        chave = ["a", "b", "eixo"]
-        if all(coluna in antiga.columns for coluna in chave):
-            juncao = antiga.merge(tabela[chave], on=chave, how="left", indicator=True)
-            antiga = antiga[juncao["_merge"].to_numpy() == "left_only"]
-            tabela = pd.concat([antiga, tabela], ignore_index=True)
-    tabela.to_csv(destino, index=False)
-    print(f"\ntabela em {destino}")
+    _write_table(tabela, Path(args.results_dir) / "bootstrap.csv", key=["a", "b", "eixo"])
 
 
 def _cmd_disent_diversity(args: argparse.Namespace) -> None:
@@ -388,11 +367,7 @@ def _cmd_disent_ablate(args: argparse.Namespace) -> None:
     from gefx.disent.diagnostics import ablate_representation
 
     tabela = ablate_representation(Path(args.output_root), seed=args.seed)
-    print(tabela.to_string(index=False))
-    destino = Path(args.results_dir) / "ablacao_representacao.csv"
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    tabela.to_csv(destino, index=False)
-    print(f"\ntabela em {destino}")
+    _write_table(tabela, Path(args.results_dir) / "ablacao_representacao.csv")
 
 
 def _cmd_disent_validate(args: argparse.Namespace) -> None:

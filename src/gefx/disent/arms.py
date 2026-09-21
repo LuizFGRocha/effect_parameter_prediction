@@ -1,29 +1,16 @@
 """Roster de implementacoes (arms) de distorcao do POC II.
 
-Um arm e uma implementacao da distorcao. A diferenca para `effects/registry.py`
-e proposital: la cada parametro de referencia vira um parametro de plugin
-preservando a unidade fisica, porque o alvo da regressao precisa ser
-interpretavel na mesma escala. Aqui nao ha pretensao de unidade comum -- cada arm
-expoe um unico knob de drive, cuja faixa util sai da calibracao
-(`disent/calibrate.py`), e a correspondencia entre arms e definida a posteriori
-pelo oraculo (`disent/oracle.py`).
-
-Os arms sao estratificados para que a falha possa ser atribuida:
+Cada arm expoe um unico knob de drive; a faixa util sai da calibracao
+(`calibrate.py`) e a correspondencia entre arms, do oraculo (`oracle.py`). Os
+arms sao estratificados para que a falha possa ser atribuida:
 
 - S1  mesma forma de nao-linearidade e mesma unidade  (pedalboard-tanh, lsp-tanh)
-- S2  mesma unidade (`input_gain_db`), forma diferente (lsp-hardclip/arctan/sine)
+- S2  mesma unidade (`input_gain_db`), outra forma  (lsp-hardclip/arctan/sine)
 - S3  unidade e topologia diferentes  (byod-mxr, byod-bigmuff)
 
-O S2 e ablacao controlada da forma da nao-linearidade, nao diversidade de
-fabricante: e o mesmo plugin com outra sigmoide. E ele que mostra que
-equivalencia nominal e falsa mesmo com unidade identica -- 20 dB em `Hard clip`
-distorce muito mais que 20 dB em `Logistic`.
-
-O tone NAO vem dos plugins. E um estagio nosso, identico em todos os arms,
-aplicado depois da nao-linearidade, com os controles de tone nativos fixados em
-neutro. Isso o torna um fator exatamente compartilhado entre implementacoes, que
-serve de **controle positivo** do desemaranhamento -- e nao de teste de
-generalizacao.
+O tone e um estagio nosso, identico em todos os arms e aplicado depois da
+nao-linearidade, com os tones nativos em neutro: um fator exatamente
+compartilhado, que serve de controle positivo.
 """
 from __future__ import annotations
 
@@ -38,31 +25,15 @@ LSP_PLUGIN_NAME = "Clipper Mono"
 
 REFERENCE_ARM = "pedalboard-tanh"
 
-# Estagio de tone compartilhado: passa-baixas de primeira ordem (6 dB/oitava),
-# corte log-espacado. Identico em todos os arms, por decisao de desenho.
-#
-# Cinco e nao oito: o tone e **controle positivo** do desemaranhamento, nao teste
-# de generalizacao -- ele so precisa de niveis suficientes para mostrar que o
-# modelo o recupera. A resolucao que sobra foi para o drive, que e o eixo em
-# disputa. A grade continua com 5*8 = 40 configuracoes, ou seja, o mesmo custo
-# de render.
+# Tone: passa-baixas de primeira ordem, corte log-espacado. Menos niveis que o
+# drive porque e so controle positivo.
 TONE_LEVELS = 5
 TONE_CUTOFF_HZ: Tuple[float, float] = (500.0, 8000.0)
 
-# Oito e nao cinco. Com chowtape e chowcentaur no roster o teto comum era THD
-# 0,166 -- nao por escolha de varredura, mas porque e o limite fisico dos dois
-# plugins (medido no topo nativo do parametro: 0,172 e 0,177). Um arm de teto
-# baixo achata o eixo de todos, e o resultado era audivelmente limpo demais.
-# Sem eles o teto sobe para 0,327 e a faixa medida vai de 9,8 para 22,1 dB
-# ([5,00, 27,14] dB equivalentes), o que permite MAIS niveis com passos MAIORES
-# ao mesmo tempo: 3,16 dB por nivel contra os 2,45 dB de antes. O POC I errava
-# 1,28 dB, entao isso e 2,5x o erro.
 DRIVE_LEVELS = 8
 
-# A troca de `program` do BYOD e assincrona: sem espera, circuitos saem em
-# silencio absoluto ou com o audio do circuito anterior (verificado). O
-# `string_value` ja reporta o nome novo enquanto o DSP ainda e o velho, entao o
-# nome NAO serve de guarda -- quem confere e a assinatura de audio.
+# A troca de `program` do BYOD e assincrona: sem espera, sai silencio ou o
+# circuito anterior.
 BYOD_SETTLE_SECONDS = 3.0
 
 
@@ -70,10 +41,9 @@ BYOD_SETTLE_SECONDS = 3.0
 class Arm:
     """Uma implementacao da distorcao.
 
-    `sweep_range` e apenas o dominio em que a calibracao varre o knob; a faixa
-    util (`k_lo`, `k_hi`) e decidida por ela e gravada no JSON de calibracao.
-    `drive_in_db` marca os arms cujo knob e literalmente o mesmo pre-ganho em dB
-    da referencia -- so neles faz sentido reportar erro em dB nativo.
+    `sweep_range` e so o dominio da varredura da calibracao; a faixa util e decidida
+    por ela. `drive_in_db` marca os arms cujo knob e o mesmo pre-ganho em dB da
+    referencia.
     """
 
     key: str
@@ -84,35 +54,23 @@ class Arm:
     path: Optional[str] = None
     plugin_name: Optional[str] = None
     fixed: Mapping[str, Any] = field(default_factory=dict)
-    # Parametros que so sao enderecaveis por `raw_value` porque o `valid_values`
-    # que o plugin publica nao corresponde ao que ele de fato seleciona (caso do
-    # `program` do BYOD).
+    # So enderecaveis por `raw_value`: o `valid_values` publicado nao corresponde
+    # ao que o plugin seleciona (o `program` do BYOD).
     raw_fixed: Mapping[str, float] = field(default_factory=dict)
-    # Assinatura (rms, crest_db, hf_ratio) do circuito sobre `fingerprint_probe`,
-    # conferida no carregamento. Substitui a conferencia pelo nome exibido, que
-    # validava a coisa errada: o `string_value` do BYOD reporta o programa novo
-    # enquanto o DSP ainda toca o antigo, entao a guarda passava enquanto o audio
-    # vinha de outro pedal. Tres estatisticas e nao uma porque o rms sozinho nao
-    # separa: MXR e Big Muff diferem 2,2x no rms, mas duas variantes do mesmo Big
-    # Muff diferem so 1,9% -- ai quem separa e a razao de agudos, que difere 15%.
+    # `audio_signature` do circuito, conferida no carregamento: o nome exibido
+    # muda antes de o DSP trocar, entao nao serve de guarda.
     fingerprint: Optional[Tuple[float, float, float]] = None
     drive_in_db: bool = False
     note: str = ""
 
     def plugin_spec(self) -> Dict[str, Any]:
-        """Formato que `effects.vst_adapter.load_arm` espera.
-
-        `raw_fixed` fica de fora: o adaptador escreve por `setattr` e esses
-        parametros exigem `raw_value`. Quem aplica e o `LoadedArm`.
-        """
+        """Formato que `effects.vst_adapter.load_arm` espera, sem `raw_fixed` (aplicado pelo `LoadedArm`)."""
         if self.backend != "vst":
             raise ValueError(f"arm {self.key!r} nao e VST3")
         return {"path": self.path, "plugin_name": self.plugin_name, "fixed": dict(self.fixed)}
 
 
-# Fixos comuns aos arms do LSP Clipper: tudo que colore o som fora a sigmoide e o
-# ganho de entrada fica desligado ou neutro, para que a unica diferenca entre os
-# arms do S1/S2 seja `clipper_sigmoid_function`.
+# Tudo neutro, para que os arms LSP so difiram em `clipper_sigmoid_function`.
 _LSP_FIXED: Dict[str, Any] = {
     "bypass": False,
     "clipper_enable": True,
@@ -121,10 +79,7 @@ _LSP_FIXED: Dict[str, Any] = {
     "boosting_mode": False,
     "output_gain_db": 0.0,
     "dithering_mode": "None",
-    # ABAIXO de 0 dBFS de proposito: com o threshold da sigmoide em 0 dB o hard
-    # clip de seguranca do proprio plugin chega primeiro e todas as sigmoides
-    # produzem exatamente o mesmo audio (verificado: THD identico ate a 4a casa).
-    # A -12 dB a sigmoide e quem satura, e as formas se separam.
+    # Em 0 dB o clip de seguranca do plugin satura antes e as sigmoides soam iguais.
     "clipper_sigmoid_threshold_db": -12.0,
     "clipper_dc_offset": 0.0,
     "clipper_sigmoid_pumping_db": 0.0,
@@ -137,8 +92,6 @@ def _lsp_arm(key: str, stratum: str, sigmoid: str, note: str = "") -> Arm:
         stratum=stratum,
         backend="vst",
         drive_param="input_gain_db",
-        # As sigmoides duras precisam de mais ganho que a tanh para comecar a
-        # distorcer; a faixa util medida fica em torno de 10..30 dB.
         sweep_range=(0.0, 48.0),
         path=LSP_PATH,
         plugin_name=LSP_PLUGIN_NAME,
@@ -153,11 +106,7 @@ FINGERPRINT_RTOL = 0.01
 
 
 def fingerprint_probe(sr: int = 44100) -> np.ndarray:
-    """Probe deterministico da assinatura: pilha harmonica de 110 Hz, 0,5 s.
-
-    Sintetico e nao um trecho de guitarra porque a assinatura precisa ser
-    reproduzivel sem depender do dataset estar no disco.
-    """
+    """Probe sintetico da assinatura (pilha harmonica de 110 Hz, 0,5 s): nao depende do dataset."""
     t = np.arange(int(0.5 * sr)) / sr
     x = sum(np.sin(2 * np.pi * 110.0 * k * t) / k for k in range(1, 9))
     return (0.25 * x / np.max(np.abs(x))).astype(np.float32)
@@ -166,9 +115,8 @@ def fingerprint_probe(sr: int = 44100) -> np.ndarray:
 def audio_signature(segment: np.ndarray, sr: int = 44100) -> Tuple[float, float, float]:
     """(rms, crest em dB, razao de energia acima de 2 kHz).
 
-    Tres estatisticas de forma e de espectro, nao um hash dos bytes: um hash
-    quebraria com qualquer diferenca de arredondamento entre maquinas, e o que
-    se quer detectar e circuito trocado, nao ruido de ponto flutuante.
+    Estatisticas e nao um hash dos bytes: o que se quer pegar e circuito trocado,
+    nao diferenca de arredondamento entre maquinas.
     """
     a = np.asarray(segment, dtype=np.float64).squeeze()
     rms = float(np.sqrt(np.mean(a**2)))
@@ -186,25 +134,17 @@ def _byod_arm(
     sweep_range: Tuple[float, float],
     note: str = "",
 ) -> Arm:
-    """Um circuito do BYOD.
+    """Um circuito do BYOD, selecionado por `program` (raw = k/40).
 
-    O `program` seleciona pedais reais e e o que torna o S3 diverso de verdade.
-    Ele so e enderecavel por `raw_value` (o `valid_values` publicado pelo plugin
-    nao corresponde ao que ele seleciona) e o mapa medido e raw = k/40.
-
-    `program_name` fica so como documentacao: o nome exibido nao identifica o
-    circuito (dos 40 nomes saem 31 audios distintos, e pares como "MXR
-    Distortion"/"OctaVerb" produzem audio identico). Quem identifica e a
-    `fingerprint`.
+    O nome exibido nao identifica o circuito (nomes diferentes dao audio identico);
+    quem identifica e a `fingerprint`.
     """
     return Arm(
         key=key,
         stratum="S3",
         backend="vst",
         drive_param="in_gain",
-        # Por arm, e nao um valor unico: os circuitos do BYOD tem regioes
-        # patologicas em pontos diferentes, e varrer dentro delas reprova o arm na
-        # monotonicidade por artefato de medicao, nao por propriedade do circuito.
+        # Por arm: cada circuito tem regioes patologicas em pontos diferentes.
         sweep_range=sweep_range,
         path="plugins/real/BYOD.vst3",
         fixed={"dry_wet": 100.0, "out_gain": 0.0, "mode": "Mono", "oversampling_factor": 4.0},
@@ -220,13 +160,7 @@ ARMS: Tuple[Arm, ...] = (
         stratum="S1",
         backend="pedalboard",
         drive_param="drive_db",
-        # A faixa do POC I (`effects/catalog.py`), que e o que define a unidade
-        # de leitura "drive-tanh equivalente em dB". NAO estender abaixo de 5 dB:
-        # o baseline B1 e o regressor do POC I, cuja saida sigmoide so representa
-        # [5, 40], e um dataset fora dessa faixa o tornaria incomparavel. Nao ha
-        # perda: em 5 dB a referencia esta em THD 0,0113, acima do piso de todos
-        # os outros arms, entao e ela que prende o piso e a intersecao cai
-        # exatamente na borda do POC I.
+        # A faixa do POC I: o B1 so representa [5, 40] dB.
         sweep_range=(5.0, 40.0),
         drive_in_db=True,
         note="referencia in-domain: tanh(x * 10**(drive_db/20))",
@@ -238,29 +172,21 @@ ARMS: Tuple[Arm, ...] = (
     _byod_arm(
         "byod-mxr", 0.425, "MXR Distortion",
         (0.146208, 7.0762, 0.003771),
-        # Piso em -24: abaixo de -23 dB o THD para de cair (fica em 0,0006) e
-        # volta a subir em -48 (0,0083), que e o ruido proprio do circuito. Varrer
-        # ate -48 reprovava o arm com rho 0,85; ate -24 da rho 1,000. O piso do
-        # eixo (THD 0,0113) fica bem dentro dessa faixa.
+        # Abaixo de -24 dB domina o ruido proprio do circuito.
         sweep_range=(-24.0, 18.0),
         note="op-amp com clipping de diodo para a terra",
     ),
     _byod_arm(
         "byod-bigmuff", 0.275, "Big Muff (Russian)",
         (0.325517, 2.9778, 0.001643),
-        # Piso em -28 e nao -48: abaixo de -15 dB este circuito e tao escuro que
-        # sobra praticamente so o fundamental, e a planicidade despenca para 0,02
-        # (contra 30 da guitarra seca) e para de variar -- regiao degenerada que
-        # derrubava o rho para 0,80. A partir de -28,8 o rho e 0,998. O piso do
-        # eixo em planicidade cai perto de -3 dB, bem dentro dessa faixa.
+        # Muito abaixo disso sobra so o fundamental e a planicidade para de variar.
         sweep_range=(-28.0, 18.0),
         note="quatro transistores em cascata, clipping simetrico",
     ),
 )
 
-# Candidatos medidos e descartados, com o motivo. Ficam registrados porque a
-# medicao custou caro e porque a razao da rejeicao e propriedade do circuito, nao
-# do codigo: nao adianta tentar de novo sem mudar o desenho.
+# Candidatos medidos e descartados. O motivo e propriedade do circuito: nao
+# adianta tentar de novo sem mudar o desenho.
 REJECTED_ARMS: Dict[str, str] = {
     "chowtape": (
         "CHOWTapeModel: teto FISICO de THD 0,172, medido no topo nativo do "
@@ -306,49 +232,13 @@ REJECTED_ARMS: Dict[str, str] = {
     ),
 }
 
-# As medicoes que rejeitaram `byod-bigmuff` (piso THD 0,084), `byod-tubescreamer`
-# (rho +0,29) e `byod-rat` (rho +0,04) numa versao anterior deste arquivo estavam
-# ERRADAS: foram feitas trocando `program` sem esperar o DSP, entao mediram o
-# circuito anterior. Refeitas com espera, o Big Muff tem piso 0,0087 e rho 1,000,
-# e por isso ele voltou ao roster. Fica registrado para ninguem confiar em
-# medicao de BYOD feita sem a espera.
-
-# Vies perceptual RESIDUAL, medido por escuta cega depois da calibracao.
+# Vies residual medido por escuta cega depois da calibracao, em niveis. Fica
+# como metadado, e nao como correcao dos knobs: um avaliador so, IC largo.
 #
-# A calibracao casa os 8 niveis pelo descritor combinado e reporta desvio maximo
-# de 0,04 dB no byod-bigmuff -- ou seja, pelo descritor ele esta alinhado. O
-# ouvido discorda: em 12 ensaios cegos o avaliador escolheu um nivel ABAIXO do
-# nominal para casar a referencia, sem uma unica excecao de direcao.
-#
-# Fica como METADADO e nao como correcao dos knobs, por tres razoes: o IC vai de
-# -0,38 a -1,96 (fator de cinco, corrigir por -1,17 seria mais preciso que a
-# medida), o numero vem de UM avaliador, e assar isso na grade a tornaria
-# irreproduzivel a partir do codigo. Quem quiser corrigir a posteriori tem o
-# numero aqui.
-#
-# Ponto em aberto: a causa nao foi identificada. O avaliador descreveu um
-# "chiado" que passa por distorcao mas pode ser caracteristica do circuito, e
-# nenhum dos descritores testados (THD, crest, centroide, razao de agudos,
-# planicidade, e a combinacao) o captura.
-# LIMITE DO `byod-bigmuff`, medido em 2026-09-07 sobre o AUDIO RENDERIZADO (nao
-# sobre os probes): contraste minimo 0,51-0,65, abaixo do CONTRAST_THRESHOLD de
-# 1,0 de `disent/oracle.py`. A porteira original nao pegou porque rodou sobre os
-# probes da calibracao, onde ele media 1,6 -- probes nao tem conteudo variado nem
-# estagio de tom, e os dois elevam o piso da distancia e comprimem a razao.
-#
-# O casamento do oraculo e [0, 0, 0, 0, 2, 4, 5, 6]: os niveis 0 a 3 da
-# referencia sao TODOS melhor casados pelo nivel 0 deste arm.
-#
-# DECISAO: manter e declarar. Recalibrar foi descartado por medicao, nao por
-# custo -- renderizando nove knobs abaixo do escolhido, os minimos da distancia
-# do oraculo para os niveis 0, 1 e 2 caem todos no mesmo knob e o piso fica em
-# ~0,58 em qualquer ajuste. E limite fisico do circuito (fuzz de tres estagios
-# com tone stack nao tem regiao limpa parecida com uma tanh saturada), da mesma
-# especie do teto de THD que reprovou os arms da Chow.
-#
-# Consequencia para quem for treinar: os niveis 0 a 3 deste arm carregam rotulo
-# sonicamente errado. E ruido de rotulo CONHECIDO, a declarar no relatorio e a
-# verificar no leave-one-arm-out da etapa 7.
+# No `byod-bigmuff` os niveis 0 a 3 casam todos com o nivel 0 pelo oraculo
+# (contraste 0,51-0,65 no audio renderizado): ruido de rotulo conhecido, e limite
+# do circuito, nao da calibracao. Ele fica no roster, e todo agregado e
+# reportado tambem sem ele.
 PERCEPTUAL_BIAS: Dict[str, Dict[str, Any]] = {
     "byod-bigmuff": {
         "bias_levels": -1.17,
@@ -385,16 +275,6 @@ PERCEPTUAL_BIAS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Os dois vieses tem SINAIS OPOSTOS, e e isso que os torna interessantes: o erro
-# do descritor de calibracao nao e ruido, e sinalizado e dependente da forma da
-# nao-linearidade -- ele erra para cima num arm e para baixo no outro, e reporta
-# ambos como casados (0,04 e 0,25 dB de desvio).
-#
-# O oraculo log-mel (`disent/oracle.py`) foi a UNICA medida automatica a acertar
-# os dois sinais: -1,76 contra -1,17 do ouvido no bigmuff, +1,16 contra +0,78 no
-# hard clip. Planicidade, crest, centroide e o proprio descritor combinado falham
-# em pelo menos um dos dois.
-
 ARMS_BY_KEY: Dict[str, Arm] = {item.key: item for item in ARMS}
 
 
@@ -415,11 +295,7 @@ def arms_in_stratum(stratum: str) -> List[str]:
 
 # --- estagio de tone compartilhado -------------------------------------------
 def tone_cutoff_hz(level: int, n_levels: int = TONE_LEVELS) -> float:
-    """Corte do nivel de tone, log-espacado em `TONE_CUTOFF_HZ`.
-
-    Log e nao linear porque a percepcao de brilho e logaritmica na frequencia:
-    500->1000 Hz e um passo comparavel a 4000->8000 Hz.
-    """
+    """Corte do nivel de tone, log-espacado em `TONE_CUTOFF_HZ`."""
     if n_levels < 2:
         raise ValueError("n_levels deve ser >= 2")
     if not 0 <= level < n_levels:
@@ -437,13 +313,7 @@ def apply_tone(segment: np.ndarray, sr: int, cutoff_hz: float) -> np.ndarray:
 
 # --- arm carregado ------------------------------------------------------------
 class LoadedArm:
-    """Um arm pronto para renderizar.
-
-    Existe porque carregar um VST3 e caro e o plugin guarda estado: ele e
-    carregado uma vez por processo e so o knob de drive muda entre renders. O
-    `load_arm` do adaptador ja gasta a primeira chamada de processamento, que
-    sairia com os parametros antigos.
-    """
+    """Um arm carregado uma vez por processo; so o knob de drive muda entre renders."""
 
     def __init__(self, arm_spec: Arm, sr: int = 44100) -> None:
         from gefx.effects.vst_adapter import load_arm
@@ -460,18 +330,7 @@ class LoadedArm:
             raise ValueError(f"backend {arm_spec.backend!r} desconhecido")
 
     def _apply_raw_fixed(self) -> None:
-        """Escreve os parametros que so aceitam `raw_value` e confere a assinatura.
-
-        A troca de `program` do BYOD nao e instantanea: o plugin reconstroi o
-        grafo de processamento e, ate terminar, renderiza silencio ou o circuito
-        anterior. Por isso a espera e a queima de silencio antes de qualquer
-        medicao.
-
-        A conferencia e por audio e nao pelo nome exibido. O `string_value` passa
-        a reportar o programa novo assim que o parametro e escrito, muito antes
-        de o DSP trocar -- conferir o nome deixava passar exatamente a falha que
-        se queria pegar.
-        """
+        """Escreve os parametros de `raw_value`, espera o BYOD trocar de circuito e confere a assinatura."""
         import time
 
         for name, raw in self.arm.raw_fixed.items():
