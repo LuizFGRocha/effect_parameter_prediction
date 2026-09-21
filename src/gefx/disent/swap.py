@@ -1,37 +1,23 @@
-"""Fase 2: a troca de codigos vale? Avaliacao **nao circular**.
+"""Fase 2: avaliacao nao circular da troca de codigos.
 
-A tentacao seria encodar o espectro decodificado e perguntar ao proprio encoder
-de que configuracao ele parece. Isso mediria o encoder concordando consigo
-mesmo. Aqui nada e pontuado pelo encoder: as duas medidas comparam o espectro
-decodificado com **gravacoes reais em disco**, e so.
+Nada e pontuado pelo encoder: o espectro decodificado e comparado com gravacoes
+reais. Para ancora `a` e doador `b`, o alvo da troca
+`x[conteudo(a), configuracao(b), implementacao(a)]` existe em disco, e se mede:
 
-O que a grade totalmente cruzada permite, e que e o presente do desenho: para
-qualquer ancora `a` e doador `b`, o alvo da troca
-
-    t = x[conteudo(a), configuracao(b), implementacao(a)]
-
-existe. Entao da para perguntar duas coisas de forma direta:
-
-1. **Erro contra o alvo**, com os tres pontos de referencia que dao escala a ele:
-   o piso (decodificar o proprio alvo), a identidade (nao trocar nada -- e o que
-   se obtem se o `z_e` nao carregar efeito) e a media do recorte (o que um
-   decoder que ignora tudo entrega).
-2. **A que configuracao o espectro decodificado se parece**, comparando-o com as
-   40 gravacoes reais `x[conteudo(a), *, implementacao(a)]`. Se a troca funciona,
-   a resposta e a configuracao do doador. O acaso e 1/40 para a configuracao
-   exata e 1/8 para o nivel de drive.
+1. o erro contra o alvo, com o piso (decodificar o proprio alvo), a identidade
+   (nao trocar nada) e a media do recorte como referencias;
+2. a que configuracao o espectro decodificado mais se parece, entre as 40
+   gravacoes reais `x[conteudo(a), *, implementacao(a)]`.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
-#: Quantos pares (ancora, doador) sorteados. 2.000 ja deixa o erro padrao de uma
-#: proporcao abaixo de 1,2 ponto, e o custo e dominado pela decodificacao.
+#: Erro padrao de uma proporcao abaixo de 1,2 ponto.
 DEFAULT_PAIRS = 2000
 
 
@@ -54,7 +40,7 @@ def swap_fidelity(
     from gefx.disent.diagnostics import load_run
     from gefx.disent.features import FeatureStore, PixelStandardizer
     from gefx.disent.sampler import GridIndex
-    from gefx.disent.train import _mean_spectra, embed_blocks, split_frames
+    from gefx.disent.train import map_store, mean_spectrum, split_frames
 
     run_dir = Path(run_dir)
     model, manifest = load_run(run_dir)
@@ -65,15 +51,16 @@ def swap_fidelity(
     index = GridIndex(frame)
     store = FeatureStore(dataset_root, index.frame, feature)
     standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
-    z_e, z_c = embed_blocks(model, store, standardizer, batch)
-    espectros = _mean_spectra(store, standardizer, batch)
+    z_e, z_c, espectros = map_store(
+        store, standardizer,
+        lambda t: (*model.encode(t, training=False), mean_spectrum(t)), batch,
+    )
 
     n_contents, n_configs, n_arms = index.shape
     rng = np.random.default_rng(seed)
     ancoras = rng.integers(0, len(index.frame), size=pairs)
     rotulos = index.labels(ancoras)
-    # O doador tem de ter conteudo diferente: com o mesmo conteudo o alvo da troca
-    # seria o proprio doador e a reconstrucao nao exigiria separar nada.
+    # Com o mesmo conteudo, o alvo da troca seria o proprio doador.
     conteudo_doador = (rotulos["content"]
                        + rng.integers(1, n_contents, size=pairs)) % n_contents
     config_doador = rng.integers(0, n_configs, size=pairs)
@@ -92,7 +79,6 @@ def swap_fidelity(
     media_do_recorte = np.repeat(espectros.mean(axis=0, keepdims=True), pairs, axis=0)
 
     # --- a que configuracao o espectro decodificado se parece ------------------
-    # Comparacao com gravacoes REAIS: nenhuma nota aqui passa pelo encoder.
     candidatos = index.lookup[rotulos["content"][:, None],
                               np.arange(n_configs)[None, :],
                               rotulos["arm"][:, None]]            # (pares, 40)
@@ -109,11 +95,8 @@ def swap_fidelity(
 
     erros = {"troca": erro(troca), "identidade": erro(identidade),
              "piso": erro(piso), "media_do_recorte": erro(media_do_recorte)}
-    # A leitura que resume a tabela: quanto da distancia entre "nao trocar nada" e
-    # o piso da reconstrucao a troca percorreu. Os erros crus nao sao comparaveis
-    # entre execucoes, porque cada decoder tem o seu proprio piso -- um
-    # autoencoder melhor tem piso mais baixo e erro de troca mais baixo sem que a
-    # troca tenha funcionado melhor.
+    # Quanto do caminho entre identidade e piso a troca percorreu. Os erros crus
+    # nao se comparam entre execucoes: cada decoder tem o seu piso.
     erros["fracao_recuperada"] = (
         (erros["identidade"] - erros["troca"])
         / max(erros["identidade"] - erros["piso"], 1e-12)
@@ -133,8 +116,7 @@ def swap_fidelity(
             "acaso_drive": float(1.0 / len(set(drive))),
             "tone_exato": float(np.mean(tone[achada] == tone[esperado])),
             "acaso_tone": float(1.0 / len(set(tone))),
-            # Le como a configuracao da ANCORA: se a troca nao fez nada, e isto
-            # que sobe, e e o controle que impede ler sorte como sucesso.
+            # O controle: se a troca nao fez nada, e isto que sobe.
             "leu_a_ancora": float(np.mean(achada == rotulos["config"])),
         }
     return saida

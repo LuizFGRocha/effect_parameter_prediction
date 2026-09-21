@@ -1,22 +1,9 @@
 """Amostrador de tuplas controladas sobre a grade cruzada.
 
-E aqui que mora a costura que torna a fase 2 barata. A fase 1 (contrastivo +
-reversao de gradiente) usa `anchor` e `positive`; a fase 2 (reconstrucao com
-troca de codigos) usa `effect_donor` e `swap_target`. Emitir os quatro desde
-agora custa uma consulta de tabela e evita reescrever o pipeline de dados
-depois -- ver a memoria `poc2-extensao-decoder-troca-de-codigos`.
-
-O que a grade totalmente cruzada da de presente: para qualquer par (ancora `a`,
-doador de efeito `b`), o alvo da troca
-
-    x[conteudo(a), configuracao(b), implementacao(a)]
-
-**existe em disco**. A reconstrucao da fase 2 e portanto supervisionada, com alvo
-exato, e dispensa o adversario que DrNet e DNA-GAN precisam justamente porque
-neles esse alvo nao existe.
-
-`GridIndex` verifica a completude da grade na construcao: um buraco vira erro na
-hora de montar o indice, e nao uma tupla silenciosamente errada no meio do treino.
+Alem de ancora e positivo (fase 1), cada tupla traz o doador de efeito e o alvo
+da troca (fase 2). Como a grade e totalmente cruzada, o alvo
+`x[conteudo(a), configuracao(b), implementacao(a)]` sempre existe em disco;
+`GridIndex` recusa uma grade com buracos.
 """
 from __future__ import annotations
 
@@ -26,7 +13,6 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-# Colunas que definem os fatores. Tem de existir no sidecar.
 FACTOR_COLUMNS = ("content_id", "config_index", "arm")
 
 
@@ -35,15 +21,9 @@ class SwapTuple:
     """Uma tupla controlada, em indices de linha do `GridIndex`.
 
     - `anchor`: doador de conteudo.
-    - `positive`: mesma configuracao do anchor, outro conteudo e, quando ha mais
-      de uma implementacao, outra implementacao. E o par positivo do contrastivo:
-      o que ele afirma e que configuracao igual deve ficar junto ainda que
-      conteudo e implementacao mudem.
-    - `effect_donor`: doador de efeito, de conteudo obrigatoriamente diferente do
-      anchor -- se fosse o mesmo, o alvo da troca seria o proprio doador e a
-      reconstrucao nao exigiria separar nada.
-    - `swap_target`: conteudo do anchor + configuracao do doador + implementacao
-      do anchor. Usado so na fase 2.
+    - `positive`: mesma configuracao, outro conteudo e (havendo) outra implementacao.
+    - `effect_donor`: doador de efeito, de conteudo diferente do anchor.
+    - `swap_target`: conteudo e implementacao do anchor, configuracao do doador.
     """
 
     anchor: int
@@ -86,7 +66,6 @@ class GridIndex:
                 "da troca de codigos deixaria de existir para elas."
             )
 
-        # Rotulos por linha, prontos para as cabecas adversarias.
         self.content_label = np.empty(len(self.frame), dtype=np.int64)
         self.config_label = np.empty(len(self.frame), dtype=np.int64)
         self.arm_label = np.empty(len(self.frame), dtype=np.int64)
@@ -129,11 +108,7 @@ def _other(rng: np.random.Generator, size: int, avoid: int) -> int:
 
 
 def swap_tuples(index: GridIndex, n: int, seed: int = 0) -> List[SwapTuple]:
-    """Sorteia `n` tuplas controladas.
-
-    Nada aqui le audio: sao indices. Quem materializa as features e o laco de
-    treino, que assim pode usar o cache do dataset sem copiar nada.
-    """
+    """Sorteia `n` tuplas controladas, em indices de linha."""
     if n < 0:
         raise ValueError("n deve ser >= 0")
     n_contents, n_configs, n_arms = index.shape
@@ -147,11 +122,8 @@ def swap_tuples(index: GridIndex, n: int, seed: int = 0) -> List[SwapTuple]:
         config = int(rng.integers(0, n_configs))
         arm = int(rng.integers(0, n_arms))
 
-        # Positivo: mesma configuracao, outro conteudo e outra implementacao.
         positive = index.row(_other(rng, n_contents, content), config, _other(rng, n_arms, arm))
 
-        # Doador de efeito: conteudo obrigatoriamente diferente, senao o alvo da
-        # troca seria o proprio doador.
         donor_content = _other(rng, n_contents, content)
         donor_config = int(rng.integers(0, n_configs))
         donor_arm = int(rng.integers(0, n_arms))
@@ -161,7 +133,6 @@ def swap_tuples(index: GridIndex, n: int, seed: int = 0) -> List[SwapTuple]:
                 anchor=index.row(content, config, arm),
                 positive=positive,
                 effect_donor=index.row(donor_content, donor_config, donor_arm),
-                # A consulta de tabela que e o ponto de toda esta classe.
                 swap_target=index.row(content, donor_config, arm),
             )
         )
@@ -181,12 +152,7 @@ def build_index(
     split: Optional[str] = None,
     arms: Optional[Sequence[str]] = None,
 ) -> GridIndex:
-    """Indice restrito a um split e a um subconjunto de implementacoes.
-
-    E por aqui que se monta o leave-one-arm-out: passar as N-1 implementacoes de
-    treino. O recorte preserva o cruzamento, entao o alvo da troca continua
-    existindo dentro do recorte.
-    """
+    """Indice restrito a um split e a um subconjunto de implementacoes (leave-one-out)."""
     if split is not None:
         frame = frame[frame["split"] == split]
     if arms is not None:
@@ -200,11 +166,8 @@ def build_index(
 class Batch:
     """Um batch balanceado por configuracao, em indices de linha do `GridIndex`.
 
-    `rows` sao as ancoras -- e so elas que o passo para frente da fase 1 encoda.
-    `effect_donor` e `swap_target` acompanham linha a linha, sem custo (sao
-    consultas na tabela do indice), e ficam ali para a fase 2: a reconstrucao com
-    troca de codigos precisa exatamente destas duas colunas, e produzi-las aqui e
-    o que impede que acrescentar o decoder vire uma reescrita do pipeline.
+    `rows` sao as ancoras; `effect_donor` e `swap_target` as acompanham linha a
+    linha, para a fase 2.
     """
 
     rows: np.ndarray
@@ -226,14 +189,8 @@ def class_balanced_batch(
 ) -> Batch:
     """`P` configuracoes x `K` vistas, cada vista com conteudo e arm sorteados.
 
-    O contrastivo supervisionado so produz termo para ancoras que tenham ao menos
-    um positivo no batch. Sorteio uniforme sobre 40 configuracoes num batch de 64
-    deixaria a maioria das ancoras sem par -- a perda passaria a medir a sorte da
-    amostragem. Dai o batch ser montado por classe, e nao por linha.
-
-    Dentro de uma configuracao as `K` vistas variam em conteudo **e** em
-    implementacao. E essa a afirmacao que o treino inteiro faz: mesmo ajuste,
-    outro violao, outro plugin, mesmo lugar no espaco.
+    Montado por classe porque o contrastivo so produz termo para ancoras com algum
+    positivo no batch.
     """
     n_contents, n_configs, n_arms = index.shape
     if configs_per_batch > n_configs:
@@ -248,9 +205,7 @@ def class_balanced_batch(
     donors: List[int] = []
     targets: List[int] = []
     for config in chosen:
-        # Sem reposicao no conteudo: duas vistas do mesmo conteudo e mesma
-        # configuracao so diferem na implementacao, e um batch cheio delas
-        # ensinaria invariancia a implementacao a custo de nao ver conteudo.
+        # Conteudos sem reposicao sempre que possivel.
         replace = n_contents < views_per_config
         contents = rng.choice(n_contents, size=views_per_config, replace=replace)
         arms = rng.integers(0, n_arms, size=views_per_config)
@@ -287,9 +242,7 @@ def batch_stream(
 
 
 # --- controle de permutacao ---------------------------------------------------
-#: Colunas que descrevem a configuracao. Permutar todas juntas mantem cada linha
-#: internamente coerente -- o rotulo, o nivel e o valor em dB continuam falando
-#: da mesma configuracao, so que da configuracao errada.
+#: Permutadas juntas, para cada linha continuar coerente consigo mesma.
 CONFIG_COLUMNS: Tuple[str, ...] = (
     "config_index", "config_key", "drive_level", "tone_level",
     "drive_knob", "tone_cutoff_hz", "drive_db_equivalente",
@@ -297,19 +250,10 @@ CONFIG_COLUMNS: Tuple[str, ...] = (
 
 
 def permute_configs(frame: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
-    """Embaralha a configuracao **dentro de cada (conteudo, implementacao)**.
+    """Embaralha a configuracao dentro de cada (conteudo, implementacao).
 
-    E o controle de permutacao do estudo, e a forma do embaralhamento e o ponto.
-    Sortear rotulo ao acaso destruiria o balanceamento do batch e o contrastivo
-    ficaria sem positivos -- o gradiente sumiria, e ai o controle mediria "treino
-    sem gradiente" em vez de "treino com rotulo sem sentido". Permutando o eixo
-    de configuracao dentro de cada par (conteudo, arm), a grade continua cruzada,
-    cada pseudo-configuracao continua tendo exatamente uma linha por par, os
-    batches continuam balanceados e a perda continua tendo positivos. **So o
-    agrupamento deixa de ter relacao com o audio.**
-
-    Se a recuperacao melhorar mesmo assim, o ganho nao vinha do rotulo -- vinha
-    do procedimento de treino, e a conclusao do estudo estaria errada.
+    Controle de permutacao: a grade continua cruzada e os batches balanceados, mas o
+    agrupamento deixa de ter relacao com o audio.
     """
     frame = frame.reset_index(drop=True)
     faltando = [c for c in ("content_id", "arm") if c not in frame.columns]

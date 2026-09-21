@@ -1,14 +1,7 @@
-"""Cache de features do dataset do POC II.
+"""Cache de features do dataset do POC II, sobre `data/cache.py`.
 
-Reaproveita `data/cache.py` inteiro: ele ja opera sobre uma pasta de wavs, grava
-`<feature>.npz` + `file_names.json` ao lado do audio e nao sabe nada sobre
-cadeias. O que falta, e o que esta aqui, e o alinhamento.
-
-O alinhamento e a mesma armadilha do POC I: `file_names.json` guarda a ordem em
-que as features foram extraidas (ordem alfabetica dos wavs), que nao e a ordem
-das linhas do sidecar nem a do `GridIndex`. Usar as duas trocadas nao levanta
-erro nenhum -- so treina o modelo com os rotulos errados. Por isso o casamento e
-sempre por nome de arquivo, e sobra ou falta vira excecao.
+A ordem do cache (alfabetica) nao e a do sidecar: as features sao sempre
+casadas as linhas por nome de arquivo, e sobra ou falta e erro.
 """
 from __future__ import annotations
 
@@ -36,11 +29,7 @@ def ensure_arm_cache(
 def align_to_frame(
     features: np.ndarray, file_names: Sequence[str], frame: pd.DataFrame
 ) -> np.ndarray:
-    """Reordena as features para a ordem das linhas de `frame`.
-
-    Casa por nome de arquivo em vez de assumir que as duas ordens coincidem: elas
-    nao coincidem, e o erro seria silencioso.
-    """
+    """Reordena as features para a ordem das linhas de `frame`, casando por nome de arquivo."""
     position = {str(name): index for index, name in enumerate(file_names)}
     wanted = [str(name) for name in frame["file_name"]]
 
@@ -59,11 +48,7 @@ def load_features(
     feature_name: str,
     rebuild: bool = False,
 ) -> np.ndarray:
-    """Features alinhadas linha a linha com `frame`, que pode misturar arms.
-
-    E esta a entrada do treino: o `GridIndex` e construido sobre o mesmo `frame`,
-    entao os indices de linha das tuplas indexam diretamente este array.
-    """
+    """Features alinhadas linha a linha com `frame`, que pode misturar arms, todas em RAM."""
     out: Optional[np.ndarray] = None
     for arm in sorted(frame["arm"].unique()):
         rows = frame["arm"] == arm
@@ -103,24 +88,18 @@ def build_all_caches(
 
 
 # --- acesso sem carregar tudo -------------------------------------------------
-# O cache do `Spec` tem 708 MB por arm; com 7 arms sao 4,96 GB, contra ~5 GB de
-# RAM livre nesta maquina. Carregar os sete de uma vez nao cabe. O que salva e
-# que `data/cache.py` grava com `np.savez` (sem compressao), entao o membro
-# `arr_0.npy` dentro do zip esta **contiguo e cru** em disco: da para mapear a
-# memoria direto no deslocamento dele, sem descompactar e sem duplicar o arquivo.
-# O sistema operacional passa a decidir o que fica residente, e o laco de treino
-# so paga pelas linhas do batch.
+# Os caches nao cabem juntos na RAM. Como `np.savez` nao comprime, o `.npy`
+# dentro do zip esta cru em disco e pode ser mapeado direto.
 NPZ_MEMBER = "arr_0.npy"
-_LOCAL_HEADER = "<IHHHHHIIIHH"  # assinatura ... tamanho do nome, tamanho do extra
+_LOCAL_HEADER = "<IHHHHHIIIHH"
 _LOCAL_HEADER_SIZE = 30
 
 
 def npy_member_offset(path: Path, member: str = NPZ_MEMBER):
     """(deslocamento, shape, dtype, ordem) do membro cru de um `.npz` sem compressao.
 
-    O deslocamento do cabecalho local que o indice central do zip guarda **nao** e
-    o inicio dos dados: entre um e outro ficam o nome do membro e o campo extra,
-    cujos tamanhos so estao no cabecalho local. Por isso a leitura em duas etapas.
+    O indice central aponta para o cabecalho local, e nao para os dados: entre
+    os dois ficam o nome e o campo extra, cujos tamanhos so o cabecalho local tem.
     """
     import struct
     import zipfile
@@ -136,10 +115,11 @@ def npy_member_offset(path: Path, member: str = NPZ_MEMBER):
 
     with path.open("rb") as handle:
         handle.seek(info.header_offset)
-        fields = struct.unpack(_LOCAL_HEADER, handle.read(_LOCAL_HEADER_SIZE))
-        if fields[0] != 0x04034B50:
+        signature, *_, name_length, extra_length = struct.unpack(
+            _LOCAL_HEADER, handle.read(_LOCAL_HEADER_SIZE))
+        if signature != 0x04034B50:
             raise ValueError(f"{path}: cabecalho local do zip invalido")
-        handle.seek(info.header_offset + _LOCAL_HEADER_SIZE + fields[9] + fields[10])
+        handle.seek(info.header_offset + _LOCAL_HEADER_SIZE + name_length + extra_length)
         version = np.lib.format.read_magic(handle)
         readers = {
             (1, 0): np.lib.format.read_array_header_1_0,
@@ -156,8 +136,7 @@ def open_cache_memmap(
 ) -> Tuple[np.memmap, np.ndarray]:
     """(memmap das features, nomes) de um arm, sem trazer nada para a RAM.
 
-    Exige o cache ja construido -- `gefx disent cache` -- porque construir aqui
-    dentro anularia o proposito.
+    Exige o cache ja construido por `gefx disent cache`.
     """
     import json
 
@@ -255,18 +234,10 @@ class FeatureStore:
 
 
 class PixelStandardizer:
-    """Media e desvio por pixel do espectrograma, estimados numa passada.
+    """Media e desvio por pixel do espectrograma, acumulados numa passada.
 
-    Faz o mesmo que a `StandardScaler` por linha de `training/scaling.py` -- ali
-    ha uma scaler por linha ajustada sobre `(n, tempo)`, o que na pratica
-    padroniza cada par (frequencia, quadro) -- mas por acumulacao de somas, sem
-    materializar o conjunto de treino inteiro. E esse o ponto: o conjunto de
-    treino do POC II tem 16.800 linhas de 177 KB e nao cabe na memoria junto com
-    o resto.
-
-    Ajustado **so no treino** e persistido, pela mesma razao do POC I: catalogo e
-    consulta tem de passar pela escala do treino, senao a comparacao entre
-    implementacoes deixa de significar alguma coisa.
+    O equivalente de `training/scaling.py` sem materializar o treino. Ajustado
+    so no treino e persistido com a execucao.
     """
 
     def __init__(self, mean: np.ndarray, std: np.ndarray, n: int) -> None:
@@ -288,8 +259,7 @@ class PixelStandardizer:
             total_sq += (block ** 2).sum(axis=0)
         mean = total / len(rows)
         variance = np.maximum(total_sq / len(rows) - mean ** 2, 0.0)
-        # Piso no desvio: pixels constantes (silencio nas bandas altas) dariam
-        # divisao por zero e propagariam NaN pela rede inteira.
+        # Pixels constantes (silencio nas bandas altas) teriam desvio zero.
         std = np.maximum(np.sqrt(variance), floor)
         return cls(mean.astype(np.float32), std.astype(np.float32), len(rows))
 

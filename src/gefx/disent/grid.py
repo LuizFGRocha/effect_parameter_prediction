@@ -1,20 +1,9 @@
 """Grade de configuracoes e particao de conteudo do POC II.
 
-Duas coisas que juntas definem o desenho fatorial do dataset:
-
-- **A grade de configuracoes**: 8 niveis de drive x 5 de tone. O nivel e um
-  indice, nao um valor -- o valor de knob correspondente depende do arm e sai da
-  calibracao (`disent/calibrate.py`), enquanto o corte do tone e o mesmo em todos
-  os arms por construcao.
-- **A particao por conteudo**: treino / catalogo / consulta, disjuntas. Particiona
-  por conteudo e nao por linha porque a pergunta do trabalho e justamente se o
-  codigo de efeito sobrevive a uma execucao diferente: se a mesma execucao
-  aparecesse no catalogo e na consulta, a busca poderia acertar reconhecendo o
-  que foi tocado, e nao o ajuste.
-
-O produto cartesiano (conteudo x configuracao x arm) e renderizado inteiro. E
-isso que torna o alvo exato da troca de codigos uma consulta de tabela, e nao uma
-aproximacao -- ver `disent/sampler.py`.
+- A grade: 8 niveis de drive x 5 de tone. O nivel e um indice; o valor de knob
+  depende do arm e sai da calibracao, e o corte do tone e o mesmo em todos.
+- A particao: treino / catalogo / consulta, disjuntas por conteudo, para a busca
+  nao acertar reconhecendo o que foi tocado.
 """
 from __future__ import annotations
 
@@ -49,9 +38,7 @@ def all_configs(
 ) -> List[Config]:
     """As configuracoes na ordem canonica (drive externo, tone interno).
 
-    A ordem e o indice: `all_configs()[config_index(c)] is c`. Ela vai para o
-    rotulo de classe do contrastivo e para a ordem das entradas do catalogo, e
-    por isso nao pode mudar sem invalidar modelos treinados.
+    A ordem e o indice de classe: muda-la invalida modelos treinados.
     """
     return [
         Config(drive, tone) for drive in range(drive_levels) for tone in range(tone_levels)
@@ -101,11 +88,7 @@ def resolve(
 
 # --- identidade de um render --------------------------------------------------
 def render_name(content_id: str, config: Config, index: int) -> str:
-    """Nome do wav. Identico entre arms de proposito.
-
-    E o que torna o pareamento verificavel: o oraculo compara
-    `<A>/<nome>` com `<B>/<nome>` sabendo que so a implementacao mudou.
-    """
+    """Nome do wav, identico entre arms: e o que torna o pareamento verificavel."""
     return f"{content_id}__{config.key}__{index:05d}.wav"
 
 
@@ -117,10 +100,7 @@ def split_contents(
 ) -> Dict[str, List[str]]:
     """Divide os conteudos em treino/catalogo/consulta, disjuntos.
 
-    Embaralha antes de cortar porque os nomes das gravacoes de Rossi vem
-    agrupados por guitarra, captador e tecnica; cortar a lista ordenada poria uma
-    guitarra inteira num unico split e confundiria "outra execucao" com
-    "outro instrumento".
+    Embaralha antes porque os nomes vem agrupados por guitarra, captador e tecnica.
     """
     if set(fractions) != set(SPLITS):
         raise ValueError(f"fracoes devem cobrir exatamente {SPLITS}")
@@ -138,16 +118,13 @@ def split_contents(
     total_items = len(shuffled)
     n_train = max(1, int(round(fractions["train"] * total_items)))
     n_catalog = max(1, int(round(fractions["catalog"] * total_items)))
-    # Cada split fica com ao menos um conteudo: sem isso a pre-condicao de
-    # `len(SPLITS)` conteudos seria falsa, porque com exatamente 3 o
-    # arredondamento levaria os 3 para treino e catalogo.
+    # Garante ao menos um conteudo para a consulta, que leva o resto.
     while n_train + n_catalog > total_items - 1:
         if n_train >= n_catalog:
             n_train -= 1
         else:
             n_catalog -= 1
 
-    # A consulta leva o resto, para nenhum conteudo se perder no arredondamento.
     out = {
         "train": shuffled[:n_train],
         "catalog": shuffled[n_train : n_train + n_catalog],

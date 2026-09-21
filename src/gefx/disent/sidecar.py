@@ -1,14 +1,7 @@
-"""Sidecar do dataset do POC II: uma linha por render, com os fatores explicitos.
+"""Sidecar do dataset do POC II: uma linha por render, com os fatores como colunas.
 
-Nao reaproveita `data/metadata.py` porque o esquema de la e o do POC I -- cadeia
-de efeitos, presenca binaria, vetor de parametros normalizado. Aqui os fatores
-sao outros e sao o objeto de estudo: conteudo, configuracao (drive x tone) e
-implementacao. Deixa-los como colunas de primeira classe e o que permite ao
-amostrador montar tuplas controladas por consulta de tabela.
-
-O sidecar fica em `<raiz>/<arm>/metadata.csv`, um por arm. `file_name` e
-identico entre arms de proposito: e o que torna o pareamento verificavel, e
-`validate_pairing` e quem cobra isso.
+Um `metadata.csv` por arm, em `<raiz>/<arm>/`. `file_name` e identico entre
+arms, e `validate_pairing` cobra isso.
 """
 from __future__ import annotations
 
@@ -83,13 +76,7 @@ def arm_dirs(root: Path) -> List[Path]:
 
 
 def validate_pairing(root: Path) -> Dict[str, int]:
-    """Checa o invariante de que o desenho inteiro depende: a grade e cruzada.
-
-    Todos os arms tem de conter exatamente o mesmo conjunto de `file_name`, com os
-    mesmos fatores. Sem isso o oraculo compararia renders que diferem em mais de
-    uma coisa, e o alvo exato da troca de codigos deixaria de existir para alguns
-    pares -- que e a base da extensao com decoder.
-    """
+    """Checa que a grade e cruzada: todos os arms com os mesmos `file_name` e fatores."""
     dirs = arm_dirs(root)
     if not dirs:
         raise FileNotFoundError(f"nenhum arm com sidecar em {root}")

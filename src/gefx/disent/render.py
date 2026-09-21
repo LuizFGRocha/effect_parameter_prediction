@@ -1,21 +1,11 @@
-"""Renderizador da grade combinatoria do POC II.
+"""Renderizador da grade completa conteudo x configuracao x arm.
 
-Produz o produto cartesiano completo **conteudo x configuracao x arm**. Ser
-completo nao e luxo: e o que faz existir em disco o alvo exato da troca de
-codigos (`disent/sampler.py`), e o que permite ao oraculo comparar dois arms
-sobre o mesmo segmento e a mesma execucao.
-
-Cadeia de cada render, herdada do protocolo do POC I:
+Cadeia de cada render, a do POC I com o tone depois da nao-linearidade:
 
     segmento -> normalize_loudness -> nao-linearidade do arm -> tone -> normalize_loudness
 
-O tone vem depois da nao-linearidade, como num pedal real (ganho, depois filtro),
-e e o mesmo estagio em todos os arms.
-
-Determinismo: o inicio do segmento de cada conteudo e sorteado uma vez, no
-processo pai, a partir de `seed` e do indice do conteudo -- nunca do arm nem da
-configuracao. Por isso o mesmo `content_id` da exatamente o mesmo trecho tocado
-em toda a grade, independentemente da ordem em que os processos terminam.
+O inicio do segmento de cada conteudo depende so de `seed` e do indice do
+conteudo, entao o mesmo `content_id` e o mesmo trecho em toda a grade.
 """
 from __future__ import annotations
 
@@ -61,8 +51,7 @@ class RenderOptions:
     split_seed: int = 20260906
     arms: Optional[Sequence[str]] = None
     workers: int = 4
-    # Quantas gravacoes do fim da lista estao reservadas aos probes da calibracao
-    # e portanto nao podem virar conteudo.
+    # Gravacoes do fim da lista reservadas aos probes da calibracao.
     reserved_probes: int = 8
 
 
@@ -88,7 +77,6 @@ def content_items(options: RenderOptions) -> List[ContentItem]:
         highest = audio.shape[1] - margin - frames
         if highest <= margin:
             raise ValueError(f"{path} e curta demais para um segmento de {options.segment_seconds}s")
-        # RNG derivado so do indice: independente de arm e de configuracao.
         rng = np.random.default_rng(options.seed * 1000003 + index)
         start = int(rng.integers(margin, highest + 1))
         items.append(
@@ -105,11 +93,7 @@ def _render_chunk(
     output_root: str,
     segment_seconds: float,
 ) -> List[Dict[str, object]]:
-    """Renderiza um lote de conteudos num arm. Roda no processo trabalhador.
-
-    O plugin e carregado uma vez por lote: e a parte cara, e recarrega-lo por
-    render dominaria o tempo total.
-    """
+    """Renderiza um lote de conteudos num arm, carregando o plugin uma vez. Roda no trabalhador."""
     spec = arm(arm_key)
     loaded = LoadedArm(spec)
     folder = Path(output_root) / arm_key / EFFECT_FOLDER
@@ -201,8 +185,6 @@ def render(options: RenderOptions) -> Dict[str, int]:
         json.dumps([item.__dict__ for item in items], indent=2), encoding="utf-8"
     )
 
-    # Cobra o invariante na hora, e nao la na frente: uma grade com buraco so
-    # daria erro ao montar o `GridIndex`, depois de horas de renderizacao.
     summary = validate_pairing(root)
     print(f"grade pareada: {summary}")
     return totals

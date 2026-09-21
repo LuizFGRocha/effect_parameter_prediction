@@ -1,32 +1,12 @@
-"""Recuperacao em catalogo: a tarefa do POC II sem aprendizado nenhum.
+"""Recuperacao em catalogo sem aprendizado: o baseline B0 e o protocolo da tarefa.
 
-A pergunta operacional do trabalho e de **recuperacao**, nao de regressao: dado
-um audio de implementacao desconhecida, achar no catalogo o ajuste equivalente.
-Este modulo executa essa tarefa diretamente sobre distancia espectral, sem
-treinar nada, e e por isso o baseline **B0** -- o piso contra o qual qualquer
-desemaranhamento aprendido precisa se justificar.
+Consulta e catalogo vem de splits de conteudo disjuntos, e por padrao o catalogo
+exclui o arm da consulta: a resposta tem de atravessar implementacoes. A
+diagonal (mesmo arm) fica como controle.
 
-O recorte que faz a pergunta ser sobre implementacao, e nao sobre gravacao:
-
-- consulta e catalogo vem de **splits de conteudo disjuntos**, entao acertar
-  reconhecendo o que foi tocado esta fora de questao;
-- por padrao o catalogo **exclui o arm da consulta**, entao acertar reconhecendo
-  o timbre da implementacao tambem esta. A diagonal (consulta e catalogo no mesmo
-  arm) fica disponivel como controle: e o teto do que a distancia crua alcanca
-  quando nao ha troca de implementacao.
-
-**O descritor.** A distancia e a mesma familia do oraculo (`disent/oracle.py`):
-L1 sobre log-mel multi-resolucao. A diferenca e que aqui ela precisa rodar
-5.600 x 5.600 vezes, e a pilha inteira tem 82.880 numeros por item -- 2,6e12
-operacoes, inviavel. Entao o eixo do tempo e agrupado em `MEL_TIME_POOL` faixas
-antes da comparacao, o que reduz o item a 4.096 numeros mantendo a distincao
-ataque/corpo. `reduction_fidelity` mede o preco dessa reducao contra a distancia
-integral, num subconjunto, e o resultado entra no relatorio: o baseline nao pode
-se apoiar numa aproximacao cujo erro nao foi medido.
-
-Como cada resolucao contribui com o mesmo numero de celulas depois do
-agrupamento, a media simples sobre o vetor achatado reproduz a media-sobre-
-resolucoes-de-media-sobre-celulas do oraculo. Nao ha peso implicito.
+O descritor e o do oraculo (L1 sobre log-mel multirresolucao) com o tempo
+agrupado em `MEL_TIME_POOL` faixas, para caber em 5.600 x 5.600 comparacoes.
+`reduction_fidelity` mede o preco dessa reducao.
 """
 from __future__ import annotations
 
@@ -41,26 +21,15 @@ from gefx.audio import load_audio_file
 from gefx.disent.oracle import FFT_SIZES, N_MELS, log_mel_stack
 from gefx.disent.sidecar import EFFECT_FOLDER, read_sidecar
 
-# Faixas de tempo mantidas no descritor. 1 seria o espectro medio, que apaga a
-# diferenca entre ataque e sustentacao -- e distorcao age diferente nos dois.
-#
-# 16 e escolha medida, nao arbitraria: `reduction_fidelity` sobre 500 pares do
-# split de consulta da rho de Spearman 0,556 / 0,701 / 0,880 / 0,973 / 0,993 para
-# 1 / 4 / 8 / 16 / 32 faixas contra a distancia integral do oraculo. Em 16 a
-# ordem induzida ja e praticamente a mesma (rho 0,97) a 1/4 do custo de 32, e e a
-# ordem -- nao o valor -- que decide uma recuperacao.
+# Faixas de tempo do descritor, escolhidas por `fidelity_sweep` (Spearman 0,97
+# contra a distancia integral).
 MEL_TIME_POOL = 16
 
-# Teto de memoria de um bloco de comparacao. A matriz de diferencas e
-# (consultas x catalogo x dimensoes) em float32: com 4.096 dimensoes e 4.800
-# itens de catalogo, cada linha de consulta ja custa 79 MB, entao o tamanho do
-# bloco tem de sair de um orcamento e nao de uma constante.
+# Orcamento de memoria de um bloco da matriz (consultas x catalogo x dimensoes).
 NEAREST_BLOCK_BYTES = 512 * 1024 * 1024
 
 DESCRIPTOR_FILENAME = "retrieval_descriptor.npz"
 
-# Eixos da grade sobre os quais o acerto e reportado, com o tamanho do respectivo
-# alfabeto -- e dele que sai o acaso.
 LEVEL_AXES: Tuple[str, ...] = ("drive_level", "tone_level")
 
 
@@ -87,8 +56,8 @@ def descriptor(
 ) -> np.ndarray:
     """Vetor achatado `(len(fft_sizes) * n_mels * bands,)`.
 
-    Toda resolucao contribui com a mesma quantidade de celulas, o que mantem a
-    ponderacao do oraculo sem precisar de pesos explicitos.
+    Toda resolucao contribui com o mesmo numero de celulas, entao a media simples
+    reproduz a ponderacao do oraculo.
     """
     stack = log_mel_stack(audio, sr, fft_sizes=fft_sizes, n_mels=n_mels)
     return np.concatenate([pool_time(part, bands).ravel() for part in stack]).astype(
@@ -112,10 +81,9 @@ def ensure_descriptors(
     bands: int = MEL_TIME_POOL,
     rebuild: bool = False,
 ) -> Tuple[np.ndarray, List[str]]:
-    """`(descritores, nomes)` daquele arm, calculando e cacheando na primeira vez.
+    """`(descritores, nomes)` daquele arm, calculados e cacheados na primeira vez.
 
-    O cache mora ao lado do audio, como o do POC I, e guarda `bands` junto: mudar
-    o agrupamento invalida o cache em vez de misturar descritores incompativeis.
+    O cache guarda `bands`: mudar o agrupamento invalida o cache.
     """
     root = Path(root)
     path = root / arm / DESCRIPTOR_FILENAME
@@ -135,12 +103,7 @@ def ensure_descriptors(
 def load_descriptors(
     root: Path, frame: pd.DataFrame, bands: int = MEL_TIME_POOL, rebuild: bool = False
 ) -> np.ndarray:
-    """Descritores na ordem das linhas de `frame`, casados por nome de arquivo.
-
-    Mesma armadilha de `disent/features.py`: a ordem do cache e a alfabetica dos
-    wavs, que nao e a ordem do recorte pedido. Trocar as duas nao levanta erro --
-    so responde a pergunta errada.
-    """
+    """Descritores na ordem das linhas de `frame`, casados por nome de arquivo."""
     frame = frame.reset_index(drop=True)
     out = np.empty((len(frame), len(FFT_SIZES) * N_MELS * bands), dtype=np.float32)
     for arm in frame["arm"].unique():
@@ -164,10 +127,7 @@ def block_size(n_catalog: int, dims: int, budget: int = NEAREST_BLOCK_BYTES) -> 
     return max(1, budget // per_query)
 
 
-#: Metricas de busca. `l1` e a do descritor cru (a mesma do oraculo, so que
-#: reduzida); `cosine` e a do codigo aprendido, onde `z_e` vive na esfera e o
-#: contrastivo otimiza produto interno. Buscar em L1 um espaco treinado em
-#: cosseno mediria outra coisa que nao o que a rede aprendeu.
+#: `l1` para o descritor cru, `cosine` para o codigo aprendido.
 METRICS: Tuple[str, ...] = ("l1", "cosine")
 
 
@@ -179,10 +139,8 @@ def nearest(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Indice e distancia do item de catalogo mais proximo de cada consulta.
 
-    Em blocos porque a matriz de diferencas nao cabe inteira: 5.600 x 4.800 x
-    4.096 em float32 seriam 440 GB. `chunk=None` dimensiona o bloco pelo
-    orcamento de memoria, que e o que mantem isto valido quando o descritor muda
-    de tamanho.
+    Em L1 a matriz de diferencas nao cabe inteira; `chunk=None` dimensiona o bloco
+    por `NEAREST_BLOCK_BYTES`.
     """
     if metric not in METRICS:
         raise ValueError(f"metrica desconhecida: {metric!r}. Ha {list(METRICS)}")
@@ -194,9 +152,7 @@ def nearest(
         )
 
     if metric == "cosine":
-        # Sem bloco: o produto de matrizes e 5.600 x 5.600, cabe folgado, e a
-        # normalizacao aqui torna a funcao segura mesmo se o codigo chegar sem
-        # norma unitaria.
+        # Normaliza aqui tambem: nem todo codigo chega com norma unitaria.
         q = queries / (np.linalg.norm(queries, axis=1, keepdims=True) + 1e-12)
         c = catalog / (np.linalg.norm(catalog, axis=1, keepdims=True) + 1e-12)
         similarity = q @ c.T
@@ -258,12 +214,7 @@ def retrieve(
 
 
 def score(predictions: pd.DataFrame, alphabet: Mapping[str, int]) -> Dict[str, object]:
-    """Acerto e erro por eixo, sempre ao lado do acaso do proprio eixo.
-
-    Acerto exato sozinho nao diz nada: 25% e otimo em 8 niveis e pessimo em 2. E
-    o erro medio importa mais que o acerto, porque errar por um nivel e um
-    resultado diferente de errar por cinco.
-    """
+    """Acerto exato, acerto a um nivel e erro medio por eixo, com o acaso do eixo."""
     out: Dict[str, object] = {"n": int(len(predictions))}
     for axis, size in alphabet.items():
         true = predictions[f"true_{axis}"].to_numpy()
@@ -289,12 +240,7 @@ def score(predictions: pd.DataFrame, alphabet: Mapping[str, int]) -> Dict[str, o
 
 
 def alphabet(frame: pd.DataFrame) -> Dict[str, int]:
-    """Quantos niveis cada eixo tem *neste recorte* -- o acaso sai daqui.
-
-    Lido do dado e nao de `arms.py` de proposito: um recorte que so contenha
-    parte da grade tem outro acaso, e reportar o acaso da grade cheia
-    esconderia isso.
-    """
+    """Quantos niveis cada eixo tem neste recorte; o acaso sai daqui, nao da grade cheia."""
     return {axis: int(frame[axis].nunique()) for axis in LEVEL_AXES}
 
 
@@ -306,15 +252,10 @@ def retrieve_by_arm(
     same_arm: bool = False,
     metric: str = "l1",
 ) -> RetrievalResult:
-    """A tarefa do POC II, dada uma representacao qualquer das duas particoes.
+    """A tarefa do POC II sobre uma representacao qualquer das duas particoes.
 
-    Separada de `baseline_b0` porque e exatamente o mesmo protocolo que avalia o
-    codigo aprendido: mesma exclusao do proprio arm, mesmo alfabeto, mesmo
-    denominador de sorvedouro. Se as duas avaliacoes divergissem em qualquer
-    detalhe, a comparacao entre B0 e a rede deixaria de medir a rede.
-
-    `same_arm=False` (o padrao) e a tarefa: o catalogo nao contem o arm da
-    consulta, entao a resposta tem de atravessar implementacoes.
+    E o protocolo unico que avalia o B0 e o codigo aprendido. `same_arm=False` (o
+    padrao) exclui o arm da consulta do catalogo.
     """
     if len(queries) != len(query_vectors) or len(catalog) != len(catalog_vectors):
         raise ValueError(
@@ -352,9 +293,7 @@ def retrieve_by_arm(
         "same_arm": bool(same_arm),
         "metric": metric,
         "alphabet": sizes,
-        # Quantos itens cada consulta de fato pode alcancar. Sem `same_arm` o
-        # proprio arm sai do catalogo, entao nao e `len(catalog)` -- e e este o
-        # denominador da ocupacao esperada no diagnostico de sorvedouro.
+        # Quantos itens cada consulta de fato alcanca: o denominador de `hubness`.
         "catalog_size": len(catalog) if same_arm else len(catalog) - por_arm,
     }
     return RetrievalResult(predictions=predictions, metrics=metrics)
@@ -368,11 +307,9 @@ def reduction_fidelity(
     bands: int = MEL_TIME_POOL,
     seed: int = 0,
 ) -> Dict[str, float]:
-    """Quanto o descritor agrupado no tempo diverge da distancia integral.
+    """Correlacao entre a distancia do descritor agrupado e a integral, em `n_pairs` pares.
 
-    Compara as duas distancias sobre `n_pairs` pares sorteados. O que importa
-    para recuperacao e a **ordem**, nao o valor: por isso o relatorio traz a
-    correlacao de postos, e nao so a de Pearson.
+    A de postos e a que importa: a busca so depende da ordem.
     """
     from scipy.stats import pearsonr, spearmanr
 
@@ -420,9 +357,7 @@ def baseline_b0(
 ) -> RetrievalResult:
     """B0: vizinho mais proximo em distancia espectral crua, sem aprender nada.
 
-    `same_arm=False` (o padrao) e a tarefa do POC II: o catalogo nao contem o arm
-    da consulta, entao a resposta tem de atravessar implementacoes.
-    `same_arm=True` e o controle -- o mesmo procedimento sem essa travessia.
+    `same_arm=True` e o controle sem travessia de implementacao.
     """
     from gefx.disent.sidecar import read_dataset
 
@@ -443,11 +378,7 @@ def baseline_b0(
 def cross_arm_table(
     predictions: pd.DataFrame, axis: str = "drive_level"
 ) -> pd.DataFrame:
-    """Acerto exato por (arm da consulta, arm recuperado).
-
-    Diz de onde vieram os acertos: se um arm concentra as respostas, o baseline
-    esta explorando proximidade de timbre e nao equivalencia de ajuste.
-    """
+    """Acerto exato por (arm da consulta, arm recuperado)."""
     hit = predictions[f"true_{axis}"] == predictions[f"pred_{axis}"]
     return (
         predictions.assign(hit=hit)
@@ -475,19 +406,9 @@ def baseline_b1(
 ) -> RetrievalResult:
     """B1: o regressor do POC I, sem retreino, aplicado aos arms do POC II.
 
-    E o baseline mais importante para a tese do trabalho, porque responde
-    diretamente "isto ja nao estava resolvido?". A saida dele e continua e ja
-    esta na unidade da referencia (`drive_db` do catalogo, [5, 40]), a mesma de
-    `drive_db_equivalente` -- entao o erro sai em dB sem nenhuma conversao, e e
-    comparavel ao 1,28 dB que o POC I relata dentro da propria implementacao.
-
-    Duas mudancas de dominio incidem sobre ele de uma vez, e o resultado nao as
-    separa: a implementacao muda (e essa e a pergunta) e o estagio de tone e novo
-    (o POC I nao tinha). Por isso o recorte em `pedalboard-tanh` importa: ali so
-    a segunda mudanca age, e ele mede quanto do erro e dela.
-
-    As features saem na hora, sem cache: sao 5.600 itens lidos uma vez, contra
-    ~5 GB de `Spec.npz` que so a etapa de treino justifica.
+    A saida ja esta em `drive_db`, a unidade de `drive_db_equivalente`, entao o erro
+    sai em dB sem conversao. Mistura duas mudancas de dominio (implementacao e o
+    estagio de tone novo); em `pedalboard-tanh` so a segunda age.
     """
     from gefx.data.features import extract_feature, stack_features
     from gefx.effects.catalog import EFFECT_PARAMETER_RANGES
@@ -532,10 +453,7 @@ def baseline_b1(
             "true_drive_level": queries["drive_level"].to_numpy(),
             "pred_drive_level": _nearest_level(drive_db, ladder),
             "true_tone_level": queries["tone_level"].to_numpy(),
-            # O regressor do POC I nao prediz tone: nao havia estagio de tone la.
-            # Fica constante para o eixo aparecer no relatorio com o valor que
-            # tem -- o de acaso -- em vez de sumir.
-            "pred_tone_level": -1,
+            "pred_tone_level": -1,  # o POC I nao tinha estagio de tone
             "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
             "pred_drive_db": drive_db,
         }
@@ -557,13 +475,9 @@ def baseline_b1(
 
 # --- diagnostico: sorvedouros -------------------------------------------------
 def hubness(predictions: pd.DataFrame, catalog_size: int) -> Dict[str, object]:
-    """Quantas consultas cada item de catalogo atrai, e o quanto isso desvia.
+    """Quantas consultas cada item de catalogo atrai (Radovanovic et al. 2010).
 
-    Em espaco de alta dimensao, alguns itens viram vizinho de quase todo mundo --
-    o efeito de *hub* (Radovanovic et al. 2010). Quando isso acontece, a resposta
-    do vizinho mais proximo diz mais sobre a posicao do item no espaco do que
-    sobre a consulta, e a acuracia agregada esconde o fenomeno. Assimetria alta e
-    o sinal.
+    Assimetria alta indica sorvedouros: itens que respondem por quase tudo.
     """
     counts = predictions["retrieved_file"].value_counts()
     full = np.zeros(catalog_size, dtype=float)
@@ -591,12 +505,9 @@ def pairwise_b0(
     arms: Optional[Sequence[str]] = None,
     bands: int = MEL_TIME_POOL,
 ) -> pd.DataFrame:
-    """Acerto de drive por par (arm da consulta, arm do catalogo), um par por vez.
+    """Acerto de drive por par (arm da consulta, arm do catalogo), com catalogo de um arm so.
 
-    Cada celula usa um catalogo de um arm so. Isso e o que separa duas coisas que
-    o B0 agregado mistura: a **transferencia** entre aquele par especifico e a
-    **competicao** entre arms dentro de um catalogo comum, que um sorvedouro
-    domina. A diagonal e o controle sem troca de implementacao.
+    Separa a transferencia entre o par da competicao entre arms num catalogo comum.
     """
     from gefx.disent.sidecar import read_dataset
 
@@ -641,12 +552,7 @@ def fidelity_sweep(
     n_pairs: int = 500,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Fidelidade da reducao para varios agrupamentos, num sorteio de itens.
-
-    Existe para que a escolha de `MEL_TIME_POOL` seja refazivel e nao um numero
-    herdado. Calcula a pilha integral uma vez por item e reagrupa, entao varrer
-    seis valores custa quase o mesmo que medir um.
-    """
+    """`reduction_fidelity` para varios agrupamentos, com a pilha integral calculada uma vez."""
     from scipy.stats import pearsonr, spearmanr
 
     from gefx.disent.oracle import spectral_distance
@@ -699,18 +605,9 @@ def paired_content_b0(
     bands: int = MEL_TIME_POOL,
     same_arm: bool = False,
 ) -> RetrievalResult:
-    """B0 no cenario do oraculo: candidatos do MESMO conteudo, outra implementacao.
+    """B0 com candidatos do mesmo conteudo em outra implementacao: um teto, nao a tarefa.
 
-    **Isto nao e a tarefa** -- exige que exista em disco a mesma execucao tocada
-    sob todos os ajustes, que e justamente o que falta no uso real. E um teto, e
-    existe para responder uma pergunta que o B0 sozinho nao responde: quando o
-    vizinho mais proximo erra, e porque a distancia espectral nao distingue
-    ajuste, ou porque ela esta ocupada distinguindo *gravacao*?
-
-    A diferenca entre este numero e o do `baseline_b0` e, por construcao, o que o
-    conteudo custa. Se for grande, o alvo da etapa 5 e invariancia a conteudo; se
-    for pequeno, o problema esta na propria nocao de distancia e a rede tem menos
-    a ganhar.
+    A diferenca para o `baseline_b0` e o que o conteudo custa.
     """
     from gefx.disent.sidecar import read_dataset
 
@@ -736,9 +633,7 @@ def paired_content_b0(
             c_where = np.flatnonzero(keep)
             q_frame = bloco.iloc[q_where].reset_index(drop=True)
             c_frame = bloco.iloc[c_where].reset_index(drop=True)
-            # `retrieve` recusa conteudo compartilhado, que aqui e o ponto: a
-            # montagem do quadro e feita a mao para dizer que a violacao e
-            # deliberada e que o resultado e teto, nao desempenho.
+            # A mao porque `retrieve` recusa conteudo compartilhado, que aqui e o ponto.
             picks, dists = nearest(
                 descriptors[do_conteudo][q_where], descriptors[do_conteudo][c_where]
             )

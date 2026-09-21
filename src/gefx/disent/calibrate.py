@@ -1,28 +1,15 @@
-"""Calibracao da faixa util do knob de drive de cada arm.
+"""Calibracao do knob de drive de cada arm contra a referencia.
 
-O problema: implementacoes diferentes de distorcao nao compartilham unidade de
-ganho, entao "o mesmo valor de knob" nao quer dizer "a mesma quantidade de
-distorcao". A solucao adotada tem duas partes deliberadamente separadas:
+Implementacoes nao compartilham unidade de ganho. Para cada arm:
 
-1. **Aqui** calibram-se APENAS os extremos. Varre-se o knob de cada arm, mede-se
-   um descritor de quantidade de distorcao (THD num probe padronizado) e
-   escolhem-se `k_lo`/`k_hi` que casem os extremos da referencia. Os 8 niveis de
-   drive sao entao **uniformes no knob nativo, nao no descritor**.
-2. O interior da correspondencia entre arms fica livre e e medido a posteriori
-   pelo oraculo (`disent/oracle.py`).
+1. varre-se o knob e mede-se um descritor de quantidade de distorcao;
+2. o arm so e aceito se o knob for monotono no descritor (rho de Spearman);
+3. os extremos casam a faixa comum a todos os arms aceitos, e os niveis
+   interiores seguem `level_mode` (ver `LEVEL_MODES`).
 
-Essa divisao e o que mantem a avaliacao nao-circular: se a grade fosse construida
-casando o descritor em todos os 8 niveis, o oraculo seria obrigado a devolver a
-diagonal e nao mediria nada.
-
-A hipotese declarada e **monotonicidade**: o knob de drive de cada arm e monotono
-na quantidade de distorcao. Ela e verificada aqui (rho de Spearman) e um arm que
-nao passe e rejeitado -- e por isso que esta checagem serve de porteira barata
-para candidatos novos.
-
-Validacao do proprio protocolo: em `lsp-tanh`, que compartilha a funcao tanh e a
-unidade de dB com a referencia, a calibracao tem de devolver ~[5, 40] dB. Se
-devolver, o protocolo se justifica para os arms sem unidade comum.
+A unidade de leitura e o `drive_db` da tanh de referencia que produz o mesmo
+descritor. Checagem do protocolo: em `lsp-tanh` a calibracao tem de devolver a
+faixa da referencia.
 """
 from __future__ import annotations
 
@@ -37,41 +24,20 @@ from gefx.audio import DEFAULT_LOUDNESS_LEVEL, load_audio_file, normalize_loudne
 from gefx.disent.arms import (DRIVE_LEVELS, PERCEPTUAL_BIAS, REFERENCE_ARM, Arm,
                               LoadedArm, arm, arm_keys)
 
-# Notas de guitarra em corda solta, de Mi grave (E2) a Mi agudo (E4). O THD e
-# medido nelas e nao numa senoide unica porque a quantidade de harmonicos que
-# cabe abaixo de Nyquist depende de f0.
+# Cordas soltas de E2 a E4: quantos harmonicos cabem abaixo de Nyquist depende de f0.
 PROBE_FREQUENCIES_HZ: Tuple[float, ...] = (82.41, 110.0, 164.81, 246.94, 329.63)
 
 DESCRIPTORS: Tuple[str, ...] = ("thd", "crest_drop", "hf_ratio", "flatness",
                                 "thd_flatness")
-# Media geometrica de THD e planicidade, e nao um dos dois sozinho. Os dois
-# falham em pontas opostas do eixo, e a falha nao e de monotonicidade -- e de
-# IDENTIFICABILIDADE, que e pior porque nao aparece no rho:
-#
-#   THD        no extremo sujo, 10,1 dB de knob mapeiam para o mesmo valor: as
-#              sigmoides saturam perto de THD 0,43 e a curva deita.
-#   planicidade no extremo limpo, 13,5 dB mapeiam para o mesmo valor: abaixo de
-#              ~12 dB o clipper e transparente e a planicidade fica cravada na da
-#              guitarra seca.
-#
-# Extremo inidentificavel nao e detalhe de relatorio: `k_lo` e `k_hi` definem a
-# escada inteira de 8 niveis, que e uniforme no knob entre eles. Uma janela de
-# 13 dB ambigua pendura os 8 niveis num ponto arbitrario.
-#
-# A media geometrica herda a sensibilidade de quem esta sensivel localmente: o
-# THD carrega o extremo limpo, a planicidade o sujo. Medido sobre as mesmas
-# varreduras: 7/7 arms aceitos, eixo de 29,1 dB equivalentes (contra 22,1 do THD
-# e 27,1 da planicidade) e ambiguidade ZERO nos dois extremos.
-#
-# A planicidade entra normalizada pela do sinal SECO, entao ela e adimensional e
-# vale 1 quando o arm esta transparente -- isso a poe na mesma escala do THD, que
-# ja e uma razao.
+# Media geometrica de THD e planicidade (esta relativa a do sinal seco). Cada um
+# sozinho deita numa ponta do eixo: o THD satura no extremo sujo, a planicidade
+# nao se mexe no extremo limpo.
 PRIMARY_DESCRIPTOR = "thd_flatness"
 
 DEFAULT_SWEEP_POINTS = 33
 HF_CUTOFF_HZ = 2000.0
 
-# rho de Spearman minimo entre knob e descritor para o arm ser aceito.
+# |rho| de Spearman minimo entre knob e descritor para o arm ser aceito.
 MONOTONICITY_THRESHOLD = 0.98
 
 
@@ -83,10 +49,9 @@ def _flat(signal: np.ndarray) -> np.ndarray:
 def harmonic_powers(
     signal: np.ndarray, sr: int, f0: float, n_harmonics: int = 12
 ) -> np.ndarray:
-    """Potencia em cada harmonico de `f0`, do fundamental para cima.
+    """Potencia em cada harmonico de `f0`, somando o lobo principal da Hann (+-2 bins).
 
-    Janela de Hann e soma de +-2 bins em torno de cada harmonico, que e a largura
-    do lobo principal da Hann. Harmonicos acima de Nyquist saem como zero.
+    Harmonicos acima de Nyquist saem como zero.
     """
     x = _flat(signal)
     n = x.size
@@ -111,12 +76,7 @@ def harmonic_powers(
 def total_harmonic_distortion(
     signal: np.ndarray, sr: int, f0: float, n_harmonics: int = 12
 ) -> float:
-    """THD = sqrt(soma da potencia dos harmonicos >= 2 / potencia do fundamental).
-
-    E a medida padrao de "quantidade de distorcao" em engenharia de audio e nao
-    depende de unidade de ganho nenhuma, que e exatamente o que se precisa para
-    comparar implementacoes.
-    """
+    """THD = sqrt(soma da potencia dos harmonicos >= 2 / potencia do fundamental)."""
     powers = harmonic_powers(signal, sr, f0, n_harmonics)
     fundamental = powers[0]
     if fundamental <= 0.0:
@@ -127,20 +87,10 @@ def total_harmonic_distortion(
 def spectral_flatness(
     signal: np.ndarray, sr: int, lo_hz: float = 50.0, hi_hz: float = 16000.0
 ) -> float:
-    """Media geometrica / media aritmetica do espectro de potencia.
+    """Media geometrica / media aritmetica do espectro de potencia, na banda util.
 
-    Mede o quanto o espectro e ruidoso em vez de tonal: distorcao pesada preenche
-    os vales entre os harmonicos e a planicidade sobe. Ao contrario do crest, nao
-    depende do fator de crista do sinal; ao contrario do centroide, nao depende da
-    inclinacao espectral.
-
-    Foi ela que reproduziu a ordenacao de distorcao percebida num teste de escuta
-    onde THD, crest e centroide falharam -- com o THD casado em 0,327 nos
-    extremos, a planicidade ainda variava 10x entre os arms, e a ordem que ela dava
-    (bigmuff > mxr > resto) foi a que o ouvido apontou.
-
-    A banda e limitada porque DC e o lixo acima da banda util dominariam a media
-    geometrica: um unico bin quase nulo derruba o produto inteiro.
+    Distorcao pesada preenche os vales entre os harmonicos e a planicidade sobe.
+    Fora da banda, DC e bins quase nulos derrubariam a media geometrica.
     """
     x = _flat(signal)
     spectrum = np.abs(np.fft.rfft(x * np.hanning(x.size))) ** 2
@@ -177,13 +127,10 @@ def high_frequency_ratio(signal: np.ndarray, sr: int, cutoff_hz: float = HF_CUTO
 # --- probes -------------------------------------------------------------------
 @dataclass(frozen=True)
 class Probes:
-    """Sinais de sondagem, ja no ponto de operacao do pipeline.
+    """Sinais de sondagem no ponto de operacao do pipeline.
 
-    As senoides sao escaladas para o mesmo **pico** medio dos segmentos de
-    guitarra normalizados a -26 LUFS. Isso importa: uma senoide a -26 LUFS tem
-    pico muito mais baixo que guitarra a -26 LUFS (fator de crista bem menor), e
-    a distorcao e uma funcao do nivel instantaneo -- medir com a senoide no nivel
-    errado leria a curva de transferencia no lugar errado.
+    As senoides tem o mesmo pico medio da guitarra a -26 LUFS, e nao a mesma
+    loudness: a distorcao depende do nivel instantaneo.
     """
 
     sr: int
@@ -217,11 +164,7 @@ def load_guitar_probes(
     segment_seconds: float = 2.0,
     seed: int = 20260906,
 ) -> Tuple[List[np.ndarray], int]:
-    """Segmentos de guitarra normalizados a -26 LUFS, tirados do fim da lista.
-
-    Do FIM de proposito: a renderizacao da grade consome as gravacoes a partir do
-    inicio, entao os probes ficam fora dos splits de treino/catalogo/consulta.
-    """
+    """Segmentos de guitarra a -26 LUFS, tirados do fim da lista (fora dos splits do render)."""
     paths = sorted(Path(input_dir).glob("*.wav"))
     if len(paths) < n:
         raise ValueError(f"{input_dir} tem {len(paths)} wavs, menos que os {n} probes pedidos")
@@ -246,8 +189,6 @@ def describe(dry: np.ndarray, wet: np.ndarray, sr: int, f0: Optional[float]) -> 
     values = {
         "crest_drop": crest_factor_db(dry) - crest_factor_db(wet),
         "hf_ratio": high_frequency_ratio(wet, sr) - high_frequency_ratio(dry, sr),
-        # Absoluta, nao diferenca: a planicidade do seco e praticamente a mesma
-        # para qualquer trecho de guitarra, e subtrair so acrescentaria ruido.
         "flatness": spectral_flatness(wet, sr),
     }
     values["thd"] = total_harmonic_distortion(wet, sr, f0) if f0 is not None else float("nan")
@@ -262,16 +203,9 @@ def sweep_descriptors(
 ) -> Dict[str, List[float]]:
     """Descritores medios em cada posicao de knob.
 
-    `render(segmento, knob) -> molhado` e injetado para que esta funcao -- o miolo
-    da calibracao -- seja testavel com um waveshaper sintetico, sem VST3.
-
-    O THD sai das senoides (precisa de f0 conhecido); crest e razao de agudos
-    saem dos segmentos de guitarra, que sao o material real.
-
-    `only` restringe o que e calculado, e com isso o que e renderizado. Pedir so
-    o THD pula os 8 segmentos de guitarra por knob e deixa 5 renders no lugar de
-    13 -- o que importa porque a bissecao chama isto uma vez por iteracao e o
-    BYOD renderiza mais devagar que tempo real (2,2 s para 2 s de audio).
+    `render(segmento, knob) -> molhado` e injetado para testar sem VST3. O THD sai
+    das senoides; os demais, dos segmentos de guitarra. `only` restringe o que e
+    calculado e, com isso, o que e renderizado.
     """
     wanted = tuple(DESCRIPTORS) if only is None else tuple(only)
     unknown = set(wanted) - set(DESCRIPTORS)
@@ -281,8 +215,6 @@ def sweep_descriptors(
     combinado = "thd_flatness" in wanted
     needs_sines = "thd" in wanted or combinado
     needs_guitar = bool({"crest_drop", "hf_ratio", "flatness"} & set(wanted)) or combinado
-    # Referencia da normalizacao: a planicidade do proprio material seco. Fica
-    # fora do laco de knob porque nao depende dele.
     dry_flatness = (
         float(np.mean([spectral_flatness(seg, probes.sr) for seg in probes.guitar]))
         if combinado else 1.0
@@ -317,12 +249,9 @@ def sweep_descriptors(
 
 
 def monotonicity(knobs: Sequence[float], values: Sequence[float]) -> float:
-    """rho de Spearman com sinal entre knob e descritor. Degenerado vira 0.
+    """rho de Spearman com sinal entre knob e descritor; degenerado vira 0.
 
-    O sinal e informativo mas a porteira usa `is_monotone`, que olha o modulo: um
-    knob monotono decrescente e perfeitamente utilizavel (basta inverter), e
-    existem circuitos assim -- o Tube Screamer do BYOD perde THD conforme o ganho
-    de entrada sobe, porque empurra o sinal para um estagio compressivo.
+    A porteira (`is_monotone`) olha o modulo: um knob decrescente tambem serve.
     """
     from scipy.stats import spearmanr
 
@@ -331,8 +260,7 @@ def monotonicity(knobs: Sequence[float], values: Sequence[float]) -> float:
     finite = np.isfinite(value_array)
     if finite.sum() < 3:
         return 0.0
-    # Descritor constante nao tem correlacao definida; devolver 0 evita o
-    # ConstantInputWarning do scipy num caminho que e esperado (knob inerte).
+    # Constante: correlacao indefinida (e o scipy avisaria).
     if np.ptp(value_array[finite]) == 0.0 or np.ptp(knob_array[finite]) == 0.0:
         return 0.0
     result = spearmanr(knob_array[finite], value_array[finite]).statistic
@@ -349,10 +277,7 @@ def match_descriptor(
 ) -> Tuple[float, bool]:
     """Knob cujo descritor vale `target`, por interpolacao linear na varredura.
 
-    Devolve `(knob, alcancavel)`. Fora da faixa medida o valor e grampeado no
-    extremo mais proximo e `alcancavel` sai False -- e o caso de um arm que nao
-    consegue chegar a distorcao da referencia, que deve ser reportado e nao
-    escondido.
+    Devolve `(knob, alcancavel)`; fora da faixa, grampeia no extremo mais proximo.
     """
     knob_array = np.asarray(knobs, dtype=float)
     value_array = np.asarray(values, dtype=float)
@@ -364,11 +289,9 @@ def match_descriptor(
 
 
 def levels_from_range(k_lo: float, k_hi: float, n_levels: int = DRIVE_LEVELS) -> List[float]:
-    """Os N niveis de drive uniformes NO KNOB NATIVO entre os extremos calibrados.
+    """Os N niveis de drive uniformes no knob nativo entre os extremos.
 
-    E assim que a REFERENCIA e sempre construida, em qualquer `level_mode`: o
-    knob dela e o `drive_db` do POC I, entao uniforme no knob nativo quer dizer
-    uniforme na unidade de leitura do trabalho todo.
+    E como a referencia sempre e construida: o knob dela e a unidade de leitura.
     """
     return [float(value) for value in np.linspace(k_lo, k_hi, n_levels)]
 
@@ -380,20 +303,13 @@ def levels_from_targets(
     targets: Sequence[float],
     iterations: int = 6,
 ) -> Tuple[List[float], List[bool]]:
-    """Um knob por alvo, cada um achado por bissecao medida.
-
-    Menos iteracoes que nos extremos (6 contra 8) porque aqui o erro nao se
-    propaga: em `level_mode="knob"` os extremos definem a escada inteira, entao
-    errar `k_lo` desloca os 8 niveis; aqui cada nivel e resolvido sozinho.
-    """
+    """Um knob por alvo, cada um achado por bissecao medida."""
     out, reachable = [], []
     lo_v, hi_v = float(np.min(values)), float(np.max(values))
     for target in targets:
         ok = bool(lo_v <= target <= hi_v)
         reachable.append(ok)
         if not ok:
-            # Fora do alcance, o extremo mais proximo e a resposta certa e deve
-            # ser reportado, nao escondido.
             out.append(float(knobs[int(np.argmin(np.abs(np.asarray(values) - target)))]))
             continue
         knob, _ = refine_knob(measure, *bracket(knobs, values, target), target,
@@ -407,20 +323,13 @@ CALIBRATION_FILENAME = "arms_calibration.json"
 
 RANGE_MODES = ("intersection", "reference")
 
-# Como os niveis INTERIORES sao posicionados.
+# Como os niveis interiores sao posicionados:
 #
-#   "knob"        uniformes no knob nativo entre os extremos casados. Preserva o
-#                 argumento de nao-circularidade (o oraculo DESCOBRE a
-#                 correspondencia em vez de confirma-la), mas mede-se um desvio
-#                 de ate 11,9 dB equivalentes no `lsp-hardclip` -- quase tres
-#                 niveis. Um rotulo errado por tres niveis nao serve de positivo
-#                 contrastivo entre arms.
-#   "descriptor"  cada nivel casado contra o valor que a REFERENCIA produz
-#                 naquele nivel. O rotulo passa a valer sonicamente entre
-#                 implementacoes; em troca, o oraculo deixa de poder validar a
-#                 grade e vira medida independente de concordancia.
-#
-# Os dois sao renderizados: o desenho da grade vira variavel do experimento.
+#   "descriptor"  cada nivel casa o descritor que a referencia produz nele. O
+#                 rotulo vale sonicamente entre arms, mas o oraculo deixa de
+#                 poder validar a grade.
+#   "knob"        uniformes no knob entre os extremos casados. O oraculo descobre
+#                 a correspondencia, mas o interior pode derrapar varios niveis.
 LEVEL_MODES = ("descriptor", "knob")
 
 
@@ -456,10 +365,7 @@ def measure_at(
 def bracket(
     knobs: Sequence[float], values: Sequence[float], target: float
 ) -> Tuple[float, float]:
-    """Par de knobs adjacentes da varredura que cerca `target`.
-
-    Se `target` cair fora do medido, devolve o intervalo do extremo mais proximo.
-    """
+    """Par de knobs adjacentes da varredura que cerca `target` (ou o do extremo mais proximo)."""
     knob_array = np.asarray(knobs, dtype=float)
     value_array = np.asarray(values, dtype=float)
     for index in range(len(knob_array) - 1):
@@ -480,13 +386,8 @@ def refine_knob(
 ) -> Tuple[float, float]:
     """Bissecao no knob para atingir `target`, medindo em vez de interpolar.
 
-    Interpolar linearmente na varredura falha onde a curva tem joelho, e nao e um
-    erro so de relatorio: `k_lo` e `k_hi` definem os niveis que vao para o disco.
-    Medido no hard clip, a interpolacao errava o extremo inferior em 4,4 dB
-    equivalentes -- o nivel 0 desse arm sairia bem mais limpo que o dos demais e a
-    grade deixaria de estar alinhada entre implementacoes.
-
-    Devolve `(knob, valor medido)` do melhor ponto visitado.
+    A interpolacao na varredura erra onde a curva tem joelho. Devolve
+    `(knob, valor medido)` do melhor ponto visitado.
     """
     value_lo, value_hi = measure(lo), measure(hi)
     increasing = value_hi >= value_lo
@@ -525,11 +426,10 @@ def common_range(
     descriptor: str,
     accepted: Sequence[str],
 ) -> Tuple[float, float]:
-    """Faixa do descritor que TODOS os arms aceitos conseguem produzir.
+    """Faixa do descritor que todos os arms aceitos conseguem produzir.
 
-    E a intersecao das faixas alcancaveis, nao a faixa da referencia. Sem isso um
-    arm mais suave teria varios niveis grampeados no mesmo valor de knob e a
-    grade degeneraria -- 8 niveis dos quais so 3 soam diferentes.
+    A intersecao, e nao a faixa da referencia: senao um arm mais suave teria varios
+    niveis grampeados no mesmo knob.
     """
     lows, highs = [], []
     for key in accepted:
@@ -559,7 +459,6 @@ def calibrate_arms(
 
     wanted = list(arm_keys_wanted) if arm_keys_wanted else arm_keys()
     if REFERENCE_ARM not in wanted:
-        # Sem a referencia nao ha unidade de leitura.
         wanted = [REFERENCE_ARM] + wanted
 
     guitar, sr = load_guitar_probes(input_dir, n=n_probes, segment_seconds=segment_seconds)
@@ -567,7 +466,7 @@ def calibrate_arms(
     print(f"probes: {n_probes} segmentos de guitarra a {DEFAULT_LOUDNESS_LEVEL} LUFS, "
           f"{len(probes.frequencies)} senoides, sr={sr}\n")
 
-    # Passada 1: varrer tudo, para so entao decidir a faixa comum.
+    # Passada 1: varrer tudo; a faixa comum depende de todos.
     sweeps: Dict[str, Dict[str, object]] = {}
     accepted: List[str] = []
     print(f"{'arm':16s}{'knob':16s}{'rho':>9s}"
@@ -606,10 +505,7 @@ def calibrate_arms(
     print(f"\nfaixa de {descriptor} ({range_mode}): [{target_lo:.6g}, {target_hi:.6g}]"
           f"  =  drive-tanh equivalente [{ref_lo:.2f}, {ref_hi:.2f}] dB\n")
 
-    # Passada 2: casar os extremos e distribuir os niveis.
-    #
-    # A referencia vem primeiro porque em level_mode="descriptor" sao os valores
-    # que ELA produz em cada nivel que servem de alvo para todos os outros.
+    # Passada 2: casar os niveis. A referencia primeiro: os niveis dela sao os alvos.
     ordered = [REFERENCE_ARM] + [key for key in wanted if key != REFERENCE_ARM]
     arms_out: Dict[str, object] = {}
     level_targets: Optional[np.ndarray] = None
@@ -630,9 +526,6 @@ def calibrate_arms(
             k_lo, reachable_lo = match_descriptor(knobs, values, target_lo)
             k_hi, reachable_hi = match_descriptor(knobs, values, target_hi)
 
-            # Refina os extremos medindo: e a interpolacao na varredura que errava
-            # o joelho do hard clip em 4,4 dB. So refina o que e alcancavel --
-            # fora da faixa o grampeamento e a resposta certa.
             if reachable_lo:
                 k_lo, _ = refine_knob(measure, *bracket(knobs, values, target_lo), target_lo)
             if reachable_hi:
@@ -659,8 +552,6 @@ def calibrate_arms(
             "reachable_hi": reachable_hi,
             "levels": levels,
             "level_descriptor": [float(value) for value in level_values],
-            # Unidade de leitura: o drive da tanh de referencia que produz o mesmo
-            # descritor. Nao e conversao de unidade, e casamento de medida.
             "drive_db_equivalente": [
                 float(value)
                 for value in np.interp(level_values, ref_values_sorted, ref_knobs_sorted)
@@ -668,9 +559,7 @@ def calibrate_arms(
         }
         reach = "" if reachable_lo and reachable_hi else "   <-- faixa comum nao alcancada"
         span = np.asarray(arms_out[key]["drive_db_equivalente"], dtype=float)
-        # Desvio sobre TODOS os niveis, nao so os extremos: e no interior que a
-        # grade uniforme-no-knob derrapa (ate 11,9 dB no hard clip), e esconder
-        # isso num numero de extremos foi o que deixou o defeito passar antes.
+        # Desvio sobre todos os niveis: e no interior que a grade derrapa.
         if key == REFERENCE_ARM:
             reference_ladder = span.copy()
         drift = float(np.max(np.abs(span - reference_ladder)))
@@ -692,9 +581,7 @@ def calibrate_arms(
         "reference_arm": REFERENCE_ARM,
         "accepted_arms": accepted,
         "target_descriptor_range": [target_lo, target_hi],
-        # Vies que a calibracao NAO removeu, medido por escuta depois dela. Vai
-        # junto para que ninguem leia os desvios de nivel como alinhamento
-        # perceptual completo.
+        # O que a calibracao nao removeu, medido por escuta depois dela.
         "perceptual_bias": {k: v for k, v in PERCEPTUAL_BIAS.items() if k in wanted},
         "target_drive_db_equivalente": [float(ref_lo), float(ref_hi)],
         "arms": arms_out,
@@ -709,11 +596,3 @@ def calibrate_arms(
 
 def load_calibration(path: Path) -> Dict[str, object]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def drive_knob(calibration: Dict[str, object], arm_key: str, level: int) -> float:
-    """Valor de knob do nivel de drive `level` daquele arm."""
-    levels = calibration["arms"][arm_key]["levels"]
-    if not 0 <= level < len(levels):
-        raise ValueError(f"nivel {level} fora de [0, {len(levels)})")
-    return float(levels[level])
