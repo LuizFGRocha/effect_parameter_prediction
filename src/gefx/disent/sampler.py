@@ -205,7 +205,6 @@ def class_balanced_batch(
     donors: List[int] = []
     targets: List[int] = []
     for config in chosen:
-        # Conteudos sem reposicao sempre que possivel.
         replace = n_contents < views_per_config
         contents = rng.choice(n_contents, size=views_per_config, replace=replace)
         arms = rng.integers(0, n_arms, size=views_per_config)

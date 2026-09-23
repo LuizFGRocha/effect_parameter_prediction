@@ -493,7 +493,6 @@ def train(
     if config.permute_labels:
         treino = permute_configs(treino, seed=config.seed)
     index: GridIndex = build_index(treino, arms=config.arms)
-    # O laco indexa o `FeatureStore` com linhas do `GridIndex`.
     if not index.frame["file_name"].equals(stores["train"].frame["file_name"]):
         raise ValueError(
             "o indice da grade e o cache de features estao em ordens diferentes"

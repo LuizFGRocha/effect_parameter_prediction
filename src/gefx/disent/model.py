@@ -153,7 +153,6 @@ class DisentModel:
             if encoder_config.decoder_units else None
         )
 
-    # --- o contrato ----------------------------------------------------------
     def decode(self, z_e, z_c, arm_onehot, training: bool = False):
         """Espectro medio reconstruido; para trocar codigos, passe blocos de linhas diferentes."""
         if self.decoder is None:
@@ -191,7 +190,6 @@ class DisentModel:
             ),
         }
 
-    # --- pesos ---------------------------------------------------------------
     @property
     def trainable_variables(self):
         return [v for part in self.parts().values() for v in part.trainable_variables]
