@@ -581,7 +581,6 @@ def calibrate_arms(
         "reference_arm": REFERENCE_ARM,
         "accepted_arms": accepted,
         "target_descriptor_range": [target_lo, target_hi],
-        # O que a calibracao nao removeu, medido por escuta depois dela.
         "perceptual_bias": {k: v for k, v in PERCEPTUAL_BIAS.items() if k in wanted},
         "target_drive_db_equivalente": [float(ref_lo), float(ref_hi)],
         "arms": arms_out,

@@ -86,7 +86,6 @@ def resolve(
     )
 
 
-# --- identidade de um render --------------------------------------------------
 def render_name(content_id: str, config: Config, index: int) -> str:
     """Nome do wav, identico entre arms: e o que torna o pareamento verificavel."""
     return f"{content_id}__{config.key}__{index:05d}.wav"

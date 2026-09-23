@@ -311,7 +311,6 @@ def apply_tone(segment: np.ndarray, sr: int, cutoff_hz: float) -> np.ndarray:
     )
 
 
-# --- arm carregado ------------------------------------------------------------
 class LoadedArm:
     """Um arm carregado uma vez por processo; so o knob de drive muda entre renders."""
 
