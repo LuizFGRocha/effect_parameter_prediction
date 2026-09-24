@@ -1,82 +1,18 @@
-"""Invariantes da recuperacao em catalogo (baseline B0)."""
+"""Invariantes da recuperacao em catalogo e dos baselines sem aprendizado."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from gefx.disent.oracle import FFT_SIZES, N_MELS, log_mel_stack, spectral_distance
 from gefx.disent.retrieval import (
     LEVEL_AXES,
-    MEL_TIME_POOL,
     alphabet,
-    cross_arm_table,
-    descriptor,
     nearest,
-    pool_time,
     retrieve,
     retrieve_by_arm,
     score,
 )
-
-
-# --- descritor ----------------------------------------------------------------
-def test_pool_time_averages_within_each_band():
-    frame = np.arange(12, dtype=float).reshape(2, 6)
-    pooled = pool_time(frame, bands=3)
-    assert pooled.shape == (2, 3)
-    assert pooled[0] == pytest.approx([0.5, 2.5, 4.5])
-
-
-def test_pool_time_rejects_more_bands_than_frames():
-    with pytest.raises(ValueError, match="faixas de tempo"):
-        pool_time(np.zeros((4, 2)), bands=3)
-
-
-def test_pool_time_with_one_band_is_the_mean_spectrum():
-    rng = np.random.default_rng(0)
-    frame = rng.standard_normal((8, 20))
-    assert pool_time(frame, bands=1)[:, 0] == pytest.approx(frame.mean(axis=1))
-
-
-def test_descriptor_has_one_block_per_resolution():
-    # A ponderacao do oraculo (media sobre resolucoes) so sobrevive a media
-    # simples sobre o vetor achatado se todas contribuirem igual.
-    sr = 22050
-    rng = np.random.default_rng(0)
-    audio = (rng.standard_normal((1, sr)) * 0.05).astype(np.float32)
-    vector = descriptor(audio, sr)
-    assert vector.shape == (len(FFT_SIZES) * N_MELS * MEL_TIME_POOL,)
-    assert vector.dtype == np.float32
-
-
-def test_descriptor_separates_a_distorted_signal_from_the_clean_one():
-    sr = 22050
-    t = np.arange(sr) / sr
-    clean = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)[None, :]
-    dirty = np.tanh(12.0 * clean).astype(np.float32)
-    d_self = float(np.abs(descriptor(clean, sr) - descriptor(clean, sr)).mean())
-    d_cross = float(np.abs(descriptor(clean, sr) - descriptor(dirty, sr)).mean())
-    assert d_self == 0.0
-    assert d_cross > 0.1
-
-
-def test_pooled_distance_tracks_the_full_oracle_distance():
-    # O descritor e uma REDUCAO da distancia do oraculo. Se a reducao invertesse
-    # a ordem de um par obviamente ordenado, ela nao serviria de baseline.
-    sr = 22050
-    t = np.arange(sr) / sr
-    clean = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)[None, :]
-    pouco = np.tanh(2.0 * clean).astype(np.float32)
-    muito = np.tanh(30.0 * clean).astype(np.float32)
-
-    full_perto = spectral_distance(log_mel_stack(clean, sr), log_mel_stack(pouco, sr))
-    full_longe = spectral_distance(log_mel_stack(clean, sr), log_mel_stack(muito, sr))
-    red_perto = float(np.abs(descriptor(clean, sr) - descriptor(pouco, sr)).mean())
-    red_longe = float(np.abs(descriptor(clean, sr) - descriptor(muito, sr)).mean())
-
-    assert full_perto < full_longe
-    assert red_perto < red_longe
 
 
 # --- vizinho mais proximo -----------------------------------------------------
@@ -85,7 +21,7 @@ def test_nearest_finds_the_exact_row():
     catalog = rng.standard_normal((20, 8)).astype(np.float32)
     picks, dists = nearest(catalog[[3, 7, 11]], catalog)
     assert picks.tolist() == [3, 7, 11]
-    assert dists == pytest.approx([0.0, 0.0, 0.0])
+    assert dists == pytest.approx([0.0, 0.0, 0.0], abs=1e-6)
 
 
 def test_nearest_is_independent_of_the_chunk_size():
@@ -98,11 +34,14 @@ def test_nearest_is_independent_of_the_chunk_size():
     assert a[1] == pytest.approx(b[1])
 
 
-def test_nearest_returns_the_mean_l1_distance():
-    queries = np.array([[0.0, 0.0]], dtype=np.float32)
-    catalog = np.array([[1.0, 3.0]], dtype=np.float32)
-    _, dists = nearest(queries, catalog)
-    assert dists[0] == pytest.approx(2.0)  # media, nao soma
+def test_nearest_is_cosine_and_ignores_the_norm():
+    """O codigo aprendido vive na esfera, onde o contrastivo otimiza; o B0 e
+    buscado do mesmo jeito para a comparacao ser so aprender ou nao."""
+    queries = np.array([[2.0, 0.0]], dtype=np.float32)
+    catalog = np.array([[1.0, 0.0], [2.0, 0.6]], dtype=np.float32)
+    picks, dists = nearest(queries, catalog)
+    assert picks[0] == 0
+    assert dists[0] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_nearest_rejects_mismatched_dimensions():
@@ -119,6 +58,7 @@ def _frame(arm, contents, split, levels=(0, 1, 2, 3)):
                 {
                     "file_name": f"{content}__d{drive}.wav",
                     "arm": arm,
+                    "stratum": "S1",
                     "content_id": content,
                     "split": split,
                     "config_index": drive,
@@ -128,6 +68,11 @@ def _frame(arm, contents, split, levels=(0, 1, 2, 3)):
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _onehot(frame):
+    """Codigo que codifica o nivel: a recuperacao tem de ser perfeita."""
+    return np.eye(8, dtype=np.float32)[frame["drive_level"].to_numpy()]
 
 
 def test_retrieve_refuses_shared_content_between_query_and_catalog():
@@ -142,25 +87,20 @@ def test_retrieve_refuses_shared_content_between_query_and_catalog():
 def test_retrieve_reports_what_was_asked_and_what_came_back():
     q = _frame("a", ["c1"], "query")
     c = _frame("b", ["c2"], "catalog")
-    # Descritor que codifica o nivel: a recuperacao tem de ser perfeita.
-    qd = q[["drive_level"]].to_numpy(np.float32)
-    cd = c[["drive_level"]].to_numpy(np.float32)
-    out = retrieve(q, c, qd, cd)
+    out = retrieve(q, c, _onehot(q), _onehot(c))
     assert list(out["true_drive_level"]) == list(out["pred_drive_level"])
     assert set(out["retrieved_arm"]) == {"b"}
-    assert out["distance"].to_numpy() == pytest.approx(0.0)
+    assert out["distance"].to_numpy() == pytest.approx(0.0, abs=1e-6)
 
 
 def test_score_reports_chance_next_to_every_accuracy():
     q = _frame("a", ["c1"], "query")
     c = _frame("b", ["c2"], "catalog")
-    qd = q[["drive_level"]].to_numpy(np.float32)
-    out = retrieve(q, c, qd, c[["drive_level"]].to_numpy(np.float32))
+    out = retrieve(q, c, _onehot(q), _onehot(c))
     metrics = score(out, alphabet(q))
     assert metrics["drive_level"]["exact"] == 1.0
     assert metrics["drive_level"]["chance"] == pytest.approx(0.25)
     assert metrics["drive_level"]["mae_levels"] == 0.0
-    assert metrics["config_exact"] == 1.0
     assert metrics["mae_db"] == 0.0
     assert metrics["cross_implementation"] is True
 
@@ -168,8 +108,7 @@ def test_score_reports_chance_next_to_every_accuracy():
 def test_score_flags_a_catalog_that_leaked_the_query_arm():
     q = _frame("a", ["c1"], "query")
     c = _frame("a", ["c2"], "catalog")
-    qd = q[["drive_level"]].to_numpy(np.float32)
-    out = retrieve(q, c, qd, c[["drive_level"]].to_numpy(np.float32))
+    out = retrieve(q, c, _onehot(q), _onehot(c))
     assert score(out, alphabet(q))["cross_implementation"] is False
 
 
@@ -180,9 +119,8 @@ def test_score_counts_a_one_level_miss_as_within_one_but_not_exact():
     # consulta encontra o vizinho certo e recebe o rotulo errado por um.
     c["drive_level"] = [1, 2]
     c["drive_db_equivalente"] = [10.0, 15.0]
-    qd = np.array([[0.0], [1.0]], dtype=np.float32)
-    cd = np.array([[0.0], [1.0]], dtype=np.float32)
-    out = retrieve(q, c, qd, cd)
+    codigos = np.eye(2, dtype=np.float32)
+    out = retrieve(q, c, codigos, codigos)
     metrics = score(out, alphabet(q))
     assert metrics["drive_level"]["exact"] == 0.0
     assert metrics["drive_level"]["within_one"] == 1.0
@@ -196,95 +134,6 @@ def test_alphabet_reads_the_slice_and_not_the_full_grid():
     frame = _frame("a", ["c1"], "query", levels=(0, 1))
     assert alphabet(frame) == {"drive_level": 2, "tone_level": 1}
     assert set(alphabet(frame)) == set(LEVEL_AXES)
-
-
-def test_cross_arm_table_shows_where_the_hits_came_from():
-    q = pd.concat([_frame("a", ["c1"], "query"), _frame("b", ["c1"], "query")],
-                  ignore_index=True)
-    c = pd.concat([_frame("x", ["c2"], "catalog"), _frame("y", ["c2"], "catalog")],
-                  ignore_index=True)
-    qd = q[["drive_level"]].to_numpy(np.float32)
-    cd = c[["drive_level"]].to_numpy(np.float32)
-    table = cross_arm_table(retrieve(q, c, qd, cd))
-    assert set(table.index) == {"a", "b"}
-    assert table["size"].to_numpy().sum() == len(q)
-
-
-def test_block_size_respects_the_memory_budget():
-    from gefx.disent.retrieval import block_size
-
-    # 1.000 itens x 4.096 dimensoes x 4 bytes = 16,4 MB por consulta.
-    assert block_size(1000, 4096, budget=64 * 1024 * 1024) == 4
-    # Nunca zero, mesmo quando uma unica consulta ja estoura o orcamento.
-    assert block_size(10**6, 4096, budget=1024) == 1
-
-
-def test_nearest_sizes_its_own_block_when_none_is_given():
-    rng = np.random.default_rng(2)
-    queries = rng.standard_normal((9, 6)).astype(np.float32)
-    catalog = rng.standard_normal((11, 6)).astype(np.float32)
-    auto = nearest(queries, catalog)
-    fixed = nearest(queries, catalog, chunk=1)
-    assert auto[0].tolist() == fixed[0].tolist()
-
-
-def test_paired_ceiling_keeps_content_fixed_and_crosses_implementations(tmp_path):
-    # O teto so significa alguma coisa se cada consulta olhar para o MESMO
-    # conteudo (senao nao e teto) e para OUTRA implementacao (senao nao mede
-    # travessia). As duas coisas juntas, e nenhuma sozinha.
-    import pandas as pd
-    from gefx.disent.retrieval import paired_content_b0
-
-    def _fake_root(root):
-        for arm in ("a", "b"):
-            pasta = root / arm
-            pasta.mkdir(parents=True)
-            linhas = []
-            for content in ("c1", "c2"):
-                for nivel in range(3):
-                    linhas.append({
-                        "file_name": f"{content}__d{nivel}.wav", "arm": arm,
-                        "content_id": content, "split": "query",
-                        "config_index": nivel, "drive_level": nivel,
-                        "tone_level": 0, "drive_db_equivalente": 5.0 + 5.0 * nivel,
-                    })
-            pd.DataFrame(linhas).to_csv(pasta / "metadata.csv", index=False)
-
-    _fake_root(tmp_path)
-    # Descritor que codifica o nivel: a recuperacao pareada tem de ser exata.
-    def fake_load(root, frame, bands=16, rebuild=False):
-        return frame[["drive_level"]].to_numpy(dtype="float32")
-
-    import gefx.disent.retrieval as mod
-    original = mod.load_descriptors
-    mod.load_descriptors = fake_load
-    try:
-        res = paired_content_b0(tmp_path)
-    finally:
-        mod.load_descriptors = original
-
-    assert res.metrics["overall"]["drive_level"]["exact"] == 1.0
-    # Cada consulta foi respondida pela outra implementacao, nunca pela propria.
-    assert (res.predictions["query_arm"] != res.predictions["retrieved_arm"]).all()
-    # E sempre dentro do proprio conteudo.
-    assert res.metrics["overall"]["cross_implementation"] is True
-    assert res.metrics["note"].startswith("teto")
-
-
-def test_cosine_and_l1_are_both_available_and_disagree_where_the_norm_matters():
-    """A metrica nao e detalhe: o descritor cru vive em L1 (a distancia do
-    oraculo, reduzida) e o codigo aprendido vive em cosseno (onde o contrastivo
-    otimiza). Buscar um no espaco do outro mediria outra coisa.
-    """
-    queries = np.array([[2.0, 0.0]], dtype=np.float32)
-    catalog = np.array([[1.0, 0.0], [2.0, 0.6]], dtype=np.float32)
-    assert nearest(queries, catalog, metric="cosine")[0][0] == 0
-    assert nearest(queries, catalog, metric="l1")[0][0] == 1
-
-
-def test_an_unknown_metric_is_refused():
-    with pytest.raises(ValueError, match="metrica desconhecida"):
-        nearest(np.zeros((1, 2), np.float32), np.zeros((1, 2), np.float32), metric="l2")
 
 
 def _multi_arm(arms, contents, split):
@@ -303,8 +152,19 @@ def test_retrieve_by_arm_never_lets_a_query_reach_its_own_arm():
         same_arm=False,
     )
     assert not (result.predictions["query_arm"] == result.predictions["retrieved_arm"]).any()
-    # O denominador do sorvedouro exclui o proprio arm: nao e `len(catalog)`.
+    # O catalogo alcancavel exclui o proprio arm: nao e `len(catalog)`.
     assert result.metrics["catalog_size"] == len(catalog) - len(catalog) // len(arms)
+
+
+def test_the_metrics_carry_what_the_figures_need_from_the_dataset():
+    arms = ["m0", "m1"]
+    queries = _multi_arm(arms, ["q0"], "query")
+    catalog = _multi_arm(arms, ["k0"], "catalog")
+    result = retrieve_by_arm(queries, catalog,
+                             np.eye(len(queries), 4, dtype=np.float32),
+                             np.eye(len(catalog), 4, dtype=np.float32))
+    assert result.metrics["drive_db_ladder"] == [5.0, 10.0, 15.0, 20.0]
+    assert result.metrics["strata"] == {"m0": "S1", "m1": "S1"}
 
 
 def test_retrieve_by_arm_refuses_vectors_that_do_not_match_the_tables():

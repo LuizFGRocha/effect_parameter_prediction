@@ -1,7 +1,7 @@
 """Grade de configuracoes e particao de conteudo do POC II.
 
-- A grade: 8 niveis de drive x 5 de tone. O nivel e um indice; o valor de knob
-  depende do arm e sai da calibracao, e o corte do tone e o mesmo em todos.
+- A grade: niveis de drive x 5 de tone. O nivel e um indice; o valor de knob
+  depende do arm e sai do roster, e o corte do tone e o mesmo em todos.
 - A particao: treino / catalogo / consulta, disjuntas por conteudo, para a busca
   nao acertar reconhecendo o que foi tocado.
 """
@@ -13,7 +13,7 @@ from typing import Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
 
-from gefx.disent.arms import DRIVE_LEVELS, TONE_LEVELS, tone_cutoff_hz
+from gefx.disent.arms import TONE_LEVELS
 
 SPLITS: Tuple[str, ...] = ("train", "catalog", "query")
 DEFAULT_SPLIT_FRACTIONS: Mapping[str, float] = {"train": 0.6, "catalog": 0.2, "query": 0.2}
@@ -33,9 +33,7 @@ class Config:
         return f"d{self.drive_level}t{self.tone_level}"
 
 
-def all_configs(
-    drive_levels: int = DRIVE_LEVELS, tone_levels: int = TONE_LEVELS
-) -> List[Config]:
+def all_configs(drive_levels: int, tone_levels: int = TONE_LEVELS) -> List[Config]:
     """As configuracoes na ordem canonica (drive externo, tone interno).
 
     A ordem e o indice de classe: muda-la invalida modelos treinados.
@@ -58,32 +56,6 @@ def parse_config_key(key: str) -> Config:
     if match is None:
         raise ValueError(f"chave de configuracao invalida: {key!r}")
     return Config(int(match.group(1)), int(match.group(2)))
-
-
-# --- resolucao nivel -> valor fisico -----------------------------------------
-def resolve_drive(calibration: Mapping[str, object], arm_key: str, drive_level: int) -> float:
-    """Valor do knob de drive daquele arm para aquele nivel."""
-    arms = calibration["arms"]
-    if arm_key not in arms:
-        raise KeyError(f"arm {arm_key!r} nao esta na calibracao")
-    levels = arms[arm_key]["levels"]
-    if not 0 <= drive_level < len(levels):
-        raise ValueError(f"nivel de drive {drive_level} fora de [0, {len(levels)})")
-    return float(levels[drive_level])
-
-
-def resolve_tone(tone_level: int, tone_levels: int = TONE_LEVELS) -> float:
-    """Corte do estagio de tone. Nao depende do arm -- e essa a graca dele."""
-    return tone_cutoff_hz(tone_level, tone_levels)
-
-
-def resolve(
-    calibration: Mapping[str, object], arm_key: str, config: Config
-) -> Tuple[float, float]:
-    """(knob de drive, corte de tone em Hz) para renderizar `config` naquele arm."""
-    return resolve_drive(calibration, arm_key, config.drive_level), resolve_tone(
-        config.tone_level
-    )
 
 
 def render_name(content_id: str, config: Config, index: int) -> str:

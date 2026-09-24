@@ -1,11 +1,8 @@
-"""O laco de treino da etapa 5 e o estudo comparativo.
+"""O laco de treino e os dois controles que separam aprendizado de arquitetura.
 
-Dois testes carregam o peso deste arquivo: `test_a_run_writes_every_artifact...`,
-porque um treino que nao grava o que o produziu nao e reproduzivel, e
-`test_the_untrained_control_really_skips_optimization`, porque o controle de
-arquitetura so vale como controle se ele de fato nao treinar -- e foi ele que
-mostrou que boa parte do ganho sobre o B0 vinha da reducao de dimensao, e nao do
-aprendizado.
+Os testes que carregam o peso deste arquivo sao os dos controles: um controle
+so vale como controle se ele de fato nao treinar -- e foram eles que mostraram
+que boa parte do ganho sobre o B0 vinha da arquitetura, e nao do aprendizado.
 """
 from __future__ import annotations
 
@@ -17,15 +14,13 @@ import pandas as pd
 import pytest
 
 from gefx.disent import train as train_module
+from gefx.disent.sidecar import split_frames
 from gefx.disent.train import (
-    BASELINES,
-    CRITERIA,
+    RESULTS_ROOT,
     TECHNIQUES,
     TrainConfig,
     aux_targets,
     compare,
-    decide,
-    split_frames,
 )
 
 ARMS = ("a0", "a1", "a2")
@@ -54,6 +49,7 @@ def _dataset(tmp_path, seed=0):
                     {
                         "file_name": f"{content}__d{drive}t{tone}.wav",
                         "arm": arm,
+                        "stratum": "S1",
                         "content_id": content,
                         "config_index": drive * len(TONES) + tone,
                         "config_key": f"d{drive}t{tone}",
@@ -82,7 +78,7 @@ def _dataset(tmp_path, seed=0):
     return tmp_path
 
 
-def _config(tmp_path, technique="contrastive", **kwargs):
+def _config(tmp_path, technique="contrastive_aux", **kwargs):
     from gefx.disent.model import EncoderConfig
 
     defaults = dict(
@@ -96,180 +92,26 @@ def _config(tmp_path, technique="contrastive", **kwargs):
         seed=3,
         output_dir=tmp_path / "out",
         encoder=EncoderConfig(
-            input_shape=(*SHAPE, 1), filters=(8, 16), trunk_units=16,
-            effect_dim=4, content_dim=6, adversary_units=8,
+            input_shape=(*SHAPE, 1), filters=(8, 16), trunk_units=16, effect_dim=4,
         ),
     )
     defaults.update(kwargs)
     return TrainConfig(**defaults)
 
 
-# --- configuracao e criterios -------------------------------------------------
-def test_every_technique_only_asks_for_registered_losses():
-    from gefx.disent.losses import LOSS_REGISTRY
-
-    for name, weights in TECHNIQUES.items():
-        assert set(weights) <= set(LOSS_REGISTRY), name
+def _encoder_weights(model):
+    return [np.array(v) for v in model.encoder.weights]
 
 
-def test_the_techniques_form_a_ladder_where_each_step_adds_one_idea():
-    """A comparacao so atribui um ganho a uma ideia se as linhas vizinhas
-    diferirem por uma ideia so."""
-    ladder = ["contrastive", "contrastive_aux", "grl", "full"]
-    for earlier, later in zip(ladder, ladder[1:]):
-        assert set(TECHNIQUES[earlier]) < set(TECHNIQUES[later])
-
-
-def test_an_unknown_technique_is_refused_before_anything_is_loaded():
-    with pytest.raises(KeyError, match="inventada"):
-        TrainConfig(technique="inventada").resolved_weights()
-
-
-def test_explicit_weights_win_over_the_technique_preset():
-    config = TrainConfig(technique="full", weights={"contrastive": 2.0})
-    assert config.resolved_weights() == {"contrastive": 2.0}
+# --- configuracao -------------------------------------------------------------
+def test_an_unknown_technique_is_refused_before_anything_is_loaded(tmp_path):
+    with pytest.raises(KeyError, match="desconhecida"):
+        train_module.train(TrainConfig(technique="full", dataset_root=tmp_path),
+                           verbose=False)
 
 
 def test_the_default_output_directory_is_named_after_the_technique():
-    assert TrainConfig(technique="grl").resolved_output().name == "grl"
-
-
-def test_the_criteria_are_declared_with_numbers_from_the_measured_baselines():
-    assert set(CRITERIA) >= {
-        "supera_b1_acerto", "supera_b0_acerto", "reduz_sorvedouro",
-        "abaixo_do_teto", "supera_encoder_aleatorio",
-    }
-    assert BASELINES["B1_poc1_regressor"]["drive_exact"] == pytest.approx(0.317)
-    assert BASELINES["paired_content_ceiling"]["drive_exact"] == pytest.approx(0.696)
-
-
-def _metrics(drive_exact, mae_db, top_share):
-    return {
-        "overall": {"drive_level": {"exact": drive_exact}, "mae_db": mae_db},
-        # `top_share` tem de ser o maximo: e a fracao do arm mais atrator.
-        "hubness": {
-            "by_retrieved_arm": {
-                "a": top_share,
-                "b": (1.0 - top_share) / 2,
-                "c": (1.0 - top_share) / 2,
-            }
-        },
-    }
-
-
-def test_decide_reads_each_criterion_off_the_declared_thresholds():
-    verdicts = decide(_metrics(0.40, 3.0, 0.30))["verdicts"]
-    assert verdicts["supera_b1_acerto"] and verdicts["supera_b1_erro"]
-    assert verdicts["supera_b0_acerto"] and verdicts["reduz_sorvedouro"]
-    assert verdicts["abaixo_do_teto"]
-
-
-def test_beating_the_paired_content_ceiling_is_a_failure_not_a_triumph():
-    """O teto e o cenario do oraculo, com conteudo pareado. Passar dele nao e
-    superar o oraculo, e vazamento."""
-    assert not decide(_metrics(0.80, 1.0, 0.2))["verdicts"]["abaixo_do_teto"]
-
-
-def test_criteria_that_need_another_run_are_left_out_and_not_passed_by_default():
-    without = decide(_metrics(0.40, 3.0, 0.30))["verdicts"]
-    assert "supera_encoder_aleatorio" not in without
-    with_reference = decide(
-        _metrics(0.40, 3.0, 0.30), {"random_encoder": {"drive_exact": 0.45}}
-    )["verdicts"]
-    assert with_reference["supera_encoder_aleatorio"] is False
-
-
-def test_the_beta_vae_verdict_compares_against_the_contrastive_run():
-    verdicts = decide(
-        _metrics(0.50, 3.0, 0.3), {"contrastive": {"drive_exact": 0.40}},
-        technique="beta_vae",
-    )["verdicts"]
-    assert verdicts["beta_vae_nao_ganha"] is False
-
-
-def test_the_beta_vae_criterion_is_not_applied_to_the_supervised_techniques():
-    """Aplicado a uma linha da escada, ele compararia duas tecnicas
-    supervisionadas e reportaria falha por uma ser melhor que a outra -- o
-    contrario do que a escada mostra."""
-    verdicts = decide(
-        _metrics(0.50, 3.0, 0.3), {"contrastive": {"drive_exact": 0.40}},
-        technique="contrastive_aux",
-    )["verdicts"]
-    assert "beta_vae_nao_ganha" not in verdicts
-
-
-def test_the_untrained_control_is_not_asked_to_beat_itself():
-    verdicts = decide(
-        _metrics(0.30, 5.6, 0.2), {"random_encoder": {"drive_exact": 0.30}},
-        technique="random_encoder",
-    )["verdicts"]
-    assert "supera_encoder_aleatorio" not in verdicts
-
-
-def test_the_study_order_makes_every_reference_available_before_it_is_needed():
-    from gefx.disent.train import STUDY_ORDER
-
-    assert set(STUDY_ORDER) == set(TECHNIQUES)
-    posicao = {name: index for index, name in enumerate(STUDY_ORDER)}
-    assert posicao["random_encoder"] == 0
-    assert posicao["contrastive"] < posicao["beta_vae"]
-
-
-def test_the_alternative_aggregate_drops_the_noisy_label_arm():
-    from gefx.disent.train import EXCLUDED_FROM_AGGREGATE, aggregate_without
-
-    metrics = {
-        "per_query_arm": {
-            "pedalboard-tanh": {"n": 10, "drive_level": {"exact": 0.6}, "mae_db": 3.0},
-            "lsp-tanh": {"n": 10, "drive_level": {"exact": 0.5}, "mae_db": 3.5},
-            "byod-bigmuff": {"n": 10, "drive_level": {"exact": 0.2}, "mae_db": 6.0},
-        }
-    }
-    assert EXCLUDED_FROM_AGGREGATE == ("byod-bigmuff",)
-    resumo = aggregate_without(metrics)
-    assert resumo["arms"] == 2
-    assert resumo["drive_exact"] == pytest.approx(0.55)
-    assert resumo["mae_db"] == pytest.approx(3.25)
-
-
-def test_the_alternative_aggregate_refuses_unbalanced_arms():
-    """A media das taxas por arm so e o agregado das linhas se os arms tiverem o
-    mesmo numero de consultas. Se deixarem de ter, isto tem de gritar."""
-    from gefx.disent.train import aggregate_without
-
-    metrics = {
-        "per_query_arm": {
-            "pedalboard-tanh": {"n": 10, "drive_level": {"exact": 0.6}, "mae_db": 3.0},
-            "lsp-tanh": {"n": 7, "drive_level": {"exact": 0.5}, "mae_db": 3.5},
-        }
-    }
-    with pytest.raises(ValueError, match="numeros de consultas diferentes"):
-        aggregate_without(metrics)
-
-
-def test_every_measured_summary_carries_the_aggregate_without_bigmuff(tmp_path):
-    manifest = train_module.train(_config(tmp_path), verbose=False)
-    assert "sem_bigmuff" in manifest["decision"]["measured"]
-
-
-def test_rescore_reapplies_the_criteria_without_retraining(tmp_path):
-    """Corrigir um criterio nao pode custar horas de GPU: o veredito sai de
-    `metrics.json`, que ja esta em disco."""
-    from gefx.disent.train import rescore
-
-    estudo = tmp_path / "study"
-    train_module.train(_config(tmp_path, technique="random_encoder",
-                               output_dir=estudo / "random_encoder"), verbose=False)
-    train_module.train(_config(tmp_path, technique="contrastive",
-                               output_dir=estudo / "contrastive"), verbose=False)
-    antes = json.loads((estudo / "contrastive" / "run.json").read_text())
-    assert "supera_encoder_aleatorio" not in antes["decision"]["verdicts"]
-
-    decisoes = rescore(estudo)
-    assert "supera_encoder_aleatorio" in decisoes["contrastive"]["verdicts"]
-    depois = json.loads((estudo / "contrastive" / "run.json").read_text())
-    assert depois["decision"] == decisoes["contrastive"]
-    assert depois["decision"]["measured"] == antes["decision"]["measured"]
+    assert TrainConfig(technique="bn_only").resolved_output() == RESULTS_ROOT / "bn_only"
 
 
 # --- dados --------------------------------------------------------------------
@@ -300,23 +142,19 @@ def test_a_run_writes_every_artifact_that_makes_it_reproducible(tmp_path):
     for name in ("run.json", "metrics.json", "history.json", "predictions.csv",
                  "standardizer.npz"):
         assert (out / name).exists(), name
-    assert (out / "weights" / "encoder.weights.h5").exists()
-    assert manifest["config"]["weights"] == TECHNIQUES["contrastive"]
+    for part in ("encoder", "aux_head"):
+        assert (out / "weights" / f"{part}.weights.h5").exists(), part
+    assert manifest["config"]["technique"] == "contrastive_aux"
     assert manifest["splits"]["train"] == len(ARMS) * 3 * 4
+    assert set(manifest["summary"]) == {"drive_exact", "tone_exact", "mae_db",
+                                        "same_arm_drive_exact"}
 
 
-def test_the_history_records_one_row_per_step_with_the_lambda_that_was_used(tmp_path):
+def test_the_history_records_both_terms_at_every_step(tmp_path):
     train_module.train(_config(tmp_path, steps=3), verbose=False)
     history = json.loads((tmp_path / "out" / "history.json").read_text())
     assert [row["step"] for row in history] == [1, 2, 3]
-    assert all(0.0 <= row["lambda"] <= 1.0 for row in history)
-
-
-def test_only_the_losses_of_the_chosen_technique_show_up_in_the_history(tmp_path):
-    train_module.train(_config(tmp_path, technique="contrastive"), verbose=False)
-    history = json.loads((tmp_path / "out" / "history.json").read_text())
-    assert "adversary_arm" not in history[0]
-    assert "contrastive" in history[0]
+    assert all({"contrastive", "aux_regression", "total"} <= set(row) for row in history)
 
 
 def test_the_untrained_control_really_skips_optimization(tmp_path):
@@ -327,28 +165,41 @@ def test_the_untrained_control_really_skips_optimization(tmp_path):
     assert json.loads((tmp_path / "out" / "history.json").read_text()) == []
 
 
+def test_the_batchnorm_control_moves_only_the_moving_statistics(tmp_path, monkeypatch):
+    """`bn_only` so vale como controle se nenhum peso treinavel mudar. Se mudar,
+    ele passa a medir aprendizado e a diferenca para o encoder treinado some."""
+    from gefx.disent import model as model_module
+
+    vistos = []
+    original = model_module.EffectModel
+
+    class Espiao(original):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            vistos.append(self)
+            self.inicial = {v.path: np.array(v) for v in self.encoder.weights}
+
+    monkeypatch.setattr(train_module, "EffectModel", Espiao)
+    manifest = train_module.train(_config(tmp_path, technique="bn_only", steps=5),
+                                  verbose=False)
+    modelo = vistos[0]
+    treinaveis = {v.path for v in modelo.encoder.trainable_weights}
+    mudaram = {v.path for v in modelo.encoder.weights
+               if not np.array_equal(np.array(v), modelo.inicial[v.path])}
+    assert mudaram, "a BatchNorm nao foi calibrada"
+    assert not mudaram & treinaveis
+    assert all("moving" in path for path in mudaram)
+    assert manifest["steps_executed"] == 5
+    assert json.loads((tmp_path / "out" / "history.json").read_text()) == []
+
+
 def test_the_retrieval_never_answers_with_the_arm_that_asked(tmp_path):
-    """O protocolo da etapa 4, inteiro: sem isso a rede poderia acertar sem
-    atravessar implementacao nenhuma, que e a pergunta do trabalho."""
+    """O protocolo inteiro: sem isso a rede poderia acertar sem atravessar
+    implementacao nenhuma, que e a pergunta do trabalho."""
     train_module.train(_config(tmp_path), verbose=False)
     predictions = pd.read_csv(tmp_path / "out" / "predictions.csv")
     assert not (predictions["query_arm"] == predictions["retrieved_arm"]).any()
     assert not set(predictions["query_content"]) & set(CONTENTS["catalog"])
-
-
-def test_the_full_technique_runs_every_registered_term(tmp_path):
-    train_module.train(_config(tmp_path, technique="full"), verbose=False)
-    history = json.loads((tmp_path / "out" / "history.json").read_text())
-    assert set(TECHNIQUES["full"]) <= set(history[0])
-
-
-def test_the_beta_vae_control_trains_through_the_same_loop(tmp_path):
-    manifest = train_module.train(
-        _config(tmp_path, technique="beta_vae"), verbose=False
-    )
-    history = json.loads((tmp_path / "out" / "history.json").read_text())
-    assert set(history[0]) >= {"reconstruction", "kl", "total"}
-    assert manifest["decision"]["measured"]["drive_exact"] >= 0.0
 
 
 def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_path, monkeypatch):
@@ -365,98 +216,51 @@ def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_pa
         train_module.train(config, verbose=False)
 
 
-def test_compare_reads_the_runs_from_disk_without_retraining(tmp_path):
-    train_module.train(_config(tmp_path, output_dir=tmp_path / "study" / "contrastive"),
-                       verbose=False)
-    table = compare(tmp_path / "study")
-    assert set(table["technique"]) >= set(BASELINES) | {"contrastive"}
-    assert table.loc[table["technique"] == "contrastive", "kind"].iloc[0] == "learned"
-
-
-def test_compare_skips_techniques_that_were_not_run(tmp_path):
-    table = compare(tmp_path / "vazio")
-    assert set(table["technique"]) == set(BASELINES)
-
-
-def test_the_permutation_control_writes_to_its_own_directory():
-    from gefx.disent.train import TrainConfig
-
-    assert TrainConfig(technique="grl").resolved_output().name == "grl"
-    assert TrainConfig(technique="grl", permute_labels=True).resolved_output().name == (
-        "grl_permutado"
-    )
-
-
-def test_the_permutation_control_trains_on_scrambled_configurations(tmp_path):
-    """O controle tem de rodar pelo mesmo laco -- se rodasse por outro caminho,
-    a comparacao mediria a diferenca de caminho e nao a do rotulo."""
-    manifest = train_module.train(
-        _config(tmp_path, permute_labels=True, output_dir=tmp_path / "perm"), verbose=False
-    )
-    assert manifest["config"]["permute_labels"] is True
-    assert (tmp_path / "perm" / "metrics.json").exists()
-
-
-# --- variantes de peso (decomposicao do `full`) -------------------------------
-def test_the_weight_variants_stay_out_of_the_declared_study():
-    """Elas respondem uma pergunta aberta pela etapa 5, e nao fazem parte da
-    escada pre-declarada. Dentro de `TECHNIQUES` entrariam nas figuras e na
-    tabela do estudo, e o estudo passaria a ter tecnicas escolhidas depois de
-    ver o resultado."""
-    from gefx.disent.train import WEIGHT_VARIANTS
-
-    assert set(WEIGHT_VARIANTS).isdisjoint(TECHNIQUES)
-
-
-def test_each_weight_variant_differs_from_its_base_by_one_thing():
-    """E o ponto inteiro: `full` acrescenta dois termos a `grl` de uma vez, entao
-    a diferenca de -4,1 pontos entre os dois nao e atribuivel a nenhum deles."""
-    from gefx.disent.train import WEIGHT_VARIANTS
-
-    assert set(WEIGHT_VARIANTS["grl_config"]) - set(TECHNIQUES["grl"]) == {"adversary_config"}
-    assert set(WEIGHT_VARIANTS["grl_orth"]) - set(TECHNIQUES["grl"]) == {"orthogonality"}
-    # A terceira separa "o termo atrapalha" de "este peso atrapalha".
-    assert set(WEIGHT_VARIANTS["full_light_orth"]) == set(TECHNIQUES["full"])
-    diferentes = {
-        nome for nome, peso in WEIGHT_VARIANTS["full_light_orth"].items()
-        if TECHNIQUES["full"][nome] != peso
-    }
-    assert diferentes == {"orthogonality"}
-
-
-def test_every_weight_variant_only_asks_for_registered_losses():
-    from gefx.disent.losses import LOSS_REGISTRY
-    from gefx.disent.train import WEIGHT_VARIANTS
-
-    for name, weights in WEIGHT_VARIANTS.items():
-        assert set(weights) <= set(LOSS_REGISTRY), name
-
-
-def test_a_weight_variant_is_a_valid_technique_for_a_run():
-    from gefx.disent.train import WEIGHT_VARIANTS
-
-    config = TrainConfig(technique="grl_orth")
-    assert config.resolved_weights() == WEIGHT_VARIANTS["grl_orth"]
-
-
-def test_the_two_blocks_come_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):
-    """`embed` devolve so `z_e` porque e so isso que entra no catalogo; as
-    metricas de estrutura precisam dos dois, e os dois tem de sair da mesma
-    passagem para descreverem a mesma linha."""
+def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):
     from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.model import DisentModel, HeadConfig
-    from gefx.disent.train import embed, embed_blocks, split_frames
+    from gefx.disent.model import EffectModel
+    from gefx.disent.train import embed
 
     config = _config(tmp_path)
     frame = split_frames(config.dataset_root)["catalog"]
     store = FeatureStore(config.dataset_root, frame, "Spec")
     standardizer = PixelStandardizer.fit(store)
-    model = DisentModel(config.encoder, HeadConfig(n_arms=2, n_contents=4, n_configs=4))
+    model = EffectModel(config.encoder)
 
-    z_e, z_c = embed_blocks(model, store, standardizer, batch=8)
-    assert z_e.shape == (len(frame), config.encoder.effect_dim)
-    assert z_c.shape == (len(frame), config.encoder.content_dim)
-    assert np.allclose(embed(model, store, standardizer, batch=8), z_e)
+    codes = embed(model, store, standardizer, batch=8)
+    assert codes.shape == (len(frame), config.encoder.effect_dim)
+    direto = model.encode(standardizer.transform(store.take(np.arange(3))))
+    assert np.allclose(codes[:3], np.asarray(direto), atol=1e-6)
+
+
+# --- a escada -----------------------------------------------------------------
+def test_compare_reads_the_runs_from_disk_without_retraining(tmp_path):
+    for technique in TECHNIQUES:
+        train_module.train(
+            _config(tmp_path, technique=technique,
+                    output_dir=tmp_path / "study" / technique), verbose=False)
+    table = compare(tmp_path / "study")
+    assert set(table["run"]) == set(TECHNIQUES)
+
+
+def test_compare_puts_the_baselines_that_retrieve_wrote_on_top(tmp_path):
+    metricas = {"overall": {"drive_level": {"exact": 0.21}, "mae_db": 8.1},
+                "alphabet": {"drive_level": 8}}
+    (tmp_path / "b0.json").write_text(json.dumps(metricas), encoding="utf-8")
+    table = compare(tmp_path / "encoder")
+    assert list(table["run"]) == ["chance", "B0"]
+    assert table.set_index("run").loc["chance", "drive_exact"] == pytest.approx(0.125)
+
+
+def test_compare_of_an_empty_directory_is_empty(tmp_path):
+    assert compare(tmp_path / "vazio").empty
+
+
+def test_compare_skips_a_run_that_was_not_evaluated(tmp_path):
+    pasta = tmp_path / "sem_avaliacao"
+    pasta.mkdir(parents=True)
+    (pasta / "run.json").write_text(json.dumps({"summary": None, "config": {}}))
+    assert "sem_avaliacao" not in set(compare(tmp_path)["run"])
 
 
 # --- o recorte de uma implementacao so (B2) -----------------------------------
@@ -471,24 +275,16 @@ def test_a_single_arm_slice_refuses_the_cross_implementation_evaluation(tmp_path
 
 def test_a_run_without_the_final_evaluation_still_saves_what_reloads_it(tmp_path):
     """Sem avaliacao interna a execucao continua reproduzivel: pesos,
-    padronizador e o `run.json` com a configuracao e as cabecas. E disso que a
+    padronizador e o `run.json` com a configuracao. E disso que a
     curva de diversidade precisa -- quem pontua e o arm retirado, por fora."""
     config = _config(tmp_path, arms=(ARMS[0],), evaluate_at_end=False)
     manifest = train_module.train(config, verbose=False)
     saida = config.resolved_output()
-    assert manifest["decision"] is None
+    assert manifest["summary"] is None
     assert not (saida / "metrics.json").exists()
     assert not (saida / "predictions.csv").exists()
     assert (saida / "standardizer.npz").exists()
     assert json.loads((saida / "run.json").read_text())["config"]["arms"] == [ARMS[0]]
-
-
-def test_compare_skips_a_run_that_has_no_verdict(tmp_path):
-    pasta = tmp_path / "sem_veredito"
-    pasta.mkdir(parents=True)
-    (pasta / "run.json").write_text(json.dumps({"decision": None, "config": {"steps": 1}}))
-    tabela = compare(tmp_path, techniques=["sem_veredito"])
-    assert "sem_veredito" not in set(tabela["technique"])
 
 
 # --- determinismo -------------------------------------------------------------
@@ -519,106 +315,14 @@ def test_without_the_flag_nothing_is_turned_on(tmp_path, monkeypatch):
     assert chamadas == []
 
 
-def test_the_encoder_width_reaches_the_run_through_the_config(monkeypatch):
-    """`--effect-dim` so vale se chegar ao `run.json`: e de la que todo
-    diagnostico reconstroi o encoder, e um manifesto com a largura errada carrega
-    pesos que nao existem."""
-    from gefx.disent.model import EncoderConfig
-    from gefx.disent.train import TrainConfig
+# --- B0 -----------------------------------------------------------------------
+def test_b0_searches_the_standardized_encoder_input_across_implementations(tmp_path):
+    """O B0 le a mesma feature e a mesma padronizacao do encoder: no dataset
+    sintetico o nivel de drive move a media, entao sem aprender nada ele ja tem
+    de passar do acaso -- e nunca responder com o proprio arm."""
+    from gefx.disent.retrieval import baseline_b0
 
-    config = TrainConfig(encoder=EncoderConfig(effect_dim=96))
-    assert config.encoder.as_dict()["effect_dim"] == 96
-    assert EncoderConfig.from_dict(config.encoder.as_dict()).effect_dim == 96
-
-
-def test_normalizing_the_content_block_is_off_by_default_and_keeps_the_layer_name():
-    """Duas coisas de uma vez. O padrao tem de ser desligado -- e assim que toda
-    execucao publicada rodou. E o nome `content_code` tem de ficar na Dense: os
-    pesos sao recarregados por estrutura, e mover o nome para a normalizacao
-    quebraria a releitura de todas elas."""
-    from gefx.disent.model import EncoderConfig, build_encoder
-
-    assert EncoderConfig().normalize_content is False
-    nomes = {camada.name for camada in build_encoder(EncoderConfig()).layers}
-    assert "content_code" in nomes and "content_norm" not in nomes
-    com = {c.name for c in build_encoder(EncoderConfig(normalize_content=True)).layers}
-    assert "content_code" in com and "content_norm" in com
-
-
-def test_the_normalized_content_block_really_lands_on_the_unit_sphere():
-    import numpy as np
-
-    from gefx.disent.model import EncoderConfig, build_encoder
-
-    config = EncoderConfig(normalize_content=True)
-    _, z_c = build_encoder(config)(np.random.rand(3, *config.input_shape).astype("float32"))
-    assert np.allclose(np.linalg.norm(np.asarray(z_c), axis=1), 1.0, atol=1e-5)
-
-
-def test_every_encoder_field_reaches_the_model_that_trains(monkeypatch, tmp_path):
-    """Regressao de um bug que custou uma execucao inteira e quase uma conclusao.
-
-    `train()` reconstruia o `EncoderConfig` campo a campo. Um campo novo era
-    descartado em silencio -- e o `run.json` gravava a config PEDIDA, entao o
-    manifesto dizia `normalize_content=True` numa execucao que rodou com False, e
-    ela saiu identica a de controle byte a byte. Um experimento nulo que parecia
-    um resultado.
-    """
-    from dataclasses import fields, replace
-
-    from gefx.disent.model import EncoderConfig
-
-    pedido = EncoderConfig(effect_dim=48, content_dim=24, normalize_content=True,
-                           dropout=0.37, adversary_units=77)
-    usado = replace(pedido, input_shape=(8, 9, 1))
-    for campo in fields(EncoderConfig):
-        if campo.name == "input_shape":
-            continue
-        assert getattr(usado, campo.name) == getattr(pedido, campo.name), campo.name
-
-
-def test_the_adversary_input_norm_touches_the_head_and_not_the_codes():
-    """O confundidor de `normalize_content` e que ele restringe o proprio bloco.
-    Esta bandeira existe para separar as duas coisas: padroniza a entrada da
-    cabeca e deixa `z_e` e `z_c` exatamente como estavam."""
-    import numpy as np
-
-    from gefx.disent.model import DisentModel, EncoderConfig, HeadConfig
-
-    cabecas = HeadConfig(n_arms=3, n_contents=4, n_configs=5)
-    config = EncoderConfig(input_shape=(64, 64, 1), adversary_input_norm=True)
-    modelo = DisentModel(config, cabecas)
-    nomes = {c.name for c in modelo.adversaries["arm"].layers}
-    assert "adv_arm_bn" in nomes
-    # os codigos seguem intactos: z_e na esfera, z_c livre
-    z_e, z_c = modelo.encode(np.random.rand(2, 64, 64, 1).astype("float32"))
-    assert np.allclose(np.linalg.norm(np.asarray(z_e), axis=1), 1.0, atol=1e-5)
-    assert not np.allclose(np.linalg.norm(np.asarray(z_c), axis=1), 1.0, atol=1e-3)
-    sem = DisentModel(config.__class__(input_shape=(64, 64, 1)), cabecas)
-    assert "adv_arm_bn" not in {c.name for c in sem.adversaries["arm"].layers}
-
-
-def test_the_manifest_records_the_encoder_that_actually_ran():
-    """Segunda metade de um bug que ja tinha sido consertado pela metade.
-
-    O `replace` no `train()` fez o MODELO receber todo campo do encoder. Faltava o
-    REGISTRO: `config.as_dict()` lia `self.encoder`, a config pedida, entao uma
-    execucao da fase 2 gravava `decoder_units: []` e o `load_run` reconstruia o
-    modelo sem decoder -- a execucao ficava inavaliavel, com os pesos do decoder
-    salvos ao lado e ninguem para carrega-los.
-    """
-    from dataclasses import replace
-
-    from gefx.disent.model import EncoderConfig
-    from gefx.disent.train import DEFAULT_DECODER_UNITS, TrainConfig
-
-    pedido = TrainConfig(technique="swap")
-    assert pedido.encoder.decoder_units == ()
-    resolvido = replace(
-        pedido,
-        encoder=replace(pedido.encoder, decoder_units=DEFAULT_DECODER_UNITS,
-                        input_shape=(256, 173, 1)),
-    )
-    gravado = resolvido.as_dict()["encoder"]
-    assert gravado["decoder_units"] == list(DEFAULT_DECODER_UNITS)
-    assert EncoderConfig.from_dict(gravado).decoder_units == DEFAULT_DECODER_UNITS
+    result = baseline_b0(_dataset(tmp_path))
+    assert not (result.predictions["query_arm"] == result.predictions["retrieved_arm"]).any()
+    overall = result.metrics["overall"]
+    assert overall["drive_level"]["exact"] > overall["drive_level"]["chance"]

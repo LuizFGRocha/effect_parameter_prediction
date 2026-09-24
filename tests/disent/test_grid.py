@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gefx.disent.arms import DRIVE_LEVELS, TONE_LEVELS, tone_cutoff_hz
+from gefx.disent.arms import TONE_LEVELS
 from gefx.disent.grid import (
     DEFAULT_SPLIT_FRACTIONS,
     SPLITS,
@@ -14,45 +14,35 @@ from gefx.disent.grid import (
     config_index,
     parse_config_key,
     render_name,
-    resolve,
-    resolve_drive,
-    resolve_tone,
     split_contents,
 )
 
-# Os niveis acompanham `DRIVE_LEVELS` para o teste de faixa continuar cobrando o
-# limite de verdade quando o tamanho da grade mudar.
-CALIBRATION = {
-    "arms": {
-        "a": {"levels": [5.0 + 5.0 * index for index in range(DRIVE_LEVELS)]},
-        "b": {"levels": [0.1 * index for index in range(DRIVE_LEVELS)]},
-    }
-}
+DRIVE_LEVELS = 8
 
 
 def test_grid_has_the_declared_size():
-    configs = all_configs()
-    assert len(configs) == DRIVE_LEVELS * TONE_LEVELS == 40
+    configs = all_configs(DRIVE_LEVELS)
+    assert len(configs) == DRIVE_LEVELS * TONE_LEVELS
     assert len(set(configs)) == len(configs)
 
 
 def test_index_and_config_are_inverses():
     # A ordem canonica vira rotulo de classe do contrastivo e ordem das entradas
     # do catalogo; se ela mudar, modelos treinados param de fazer sentido.
-    for index, config in enumerate(all_configs()):
+    for index, config in enumerate(all_configs(DRIVE_LEVELS)):
         assert config_index(config) == index
         assert config_from_index(index) == config
 
 
 def test_canonical_order_is_drive_major():
-    configs = all_configs()
+    configs = all_configs(DRIVE_LEVELS)
     assert configs[0] == Config(0, 0)
     assert configs[1] == Config(0, 1)
     assert configs[TONE_LEVELS] == Config(1, 0)
 
 
 def test_config_key_round_trips():
-    for config in all_configs():
+    for config in all_configs(DRIVE_LEVELS):
         assert parse_config_key(config.key) == config
 
 
@@ -60,34 +50,6 @@ def test_config_key_round_trips():
 def test_parse_config_key_rejects_junk(bad):
     with pytest.raises(ValueError, match="invalida"):
         parse_config_key(bad)
-
-
-# --- resolucao ----------------------------------------------------------------
-def test_resolve_drive_reads_the_calibration_of_that_arm():
-    assert resolve_drive(CALIBRATION, "a", 0) == 5.0
-    assert resolve_drive(CALIBRATION, "b", DRIVE_LEVELS - 1) == pytest.approx(
-        0.1 * (DRIVE_LEVELS - 1)
-    )
-
-
-def test_resolve_drive_rejects_unknown_arm_and_level():
-    with pytest.raises(KeyError, match="nao esta na calibracao"):
-        resolve_drive(CALIBRATION, "z", 0)
-    with pytest.raises(ValueError, match="fora de"):
-        resolve_drive(CALIBRATION, "a", DRIVE_LEVELS)
-
-
-def test_resolve_tone_does_not_depend_on_the_arm():
-    # E exatamente essa a razao de ser do estagio compartilhado: o tone e um
-    # fator identico entre implementacoes, e serve de controle positivo.
-    for level in range(TONE_LEVELS):
-        assert resolve_tone(level) == tone_cutoff_hz(level)
-
-
-def test_resolve_returns_both_coordinates():
-    drive, tone = resolve(CALIBRATION, "a", Config(1, 2))
-    assert drive == resolve_drive(CALIBRATION, "a", 1)
-    assert tone == resolve_tone(2)
 
 
 # --- nome do render -----------------------------------------------------------
