@@ -1,0 +1,24 @@
+desc: pedalboard-tanh (referencia do POC II)
+// Replica o `Distortion` do pedalboard, o arm de referencia do POC II:
+//   y = tanh(x * 10^(drive_db / 20))
+// Sem oversampling, filtro nem ganho de saida -- igual ao pedalboard (conferido:
+// diferenca maxima de 1e-7 em 5, 20 e 40 dB). O valor do slider e o mesmo que
+// vai para `levels` no `experiments/disent_roster.yaml`.
+//
+// Instalacao: copie para a pasta Effects do Reaper (Options > Show REAPER resource
+// path) e procure por "pedalboard-tanh" na lista de FX.
+
+slider1:drive_db=20<0,60,0.01>Drive (dB)
+
+@init
+function tanh_(v) local(e) (
+  // tanh(v) = (e^2v - 1) / (e^2v + 1); fora de +-20 ja e +-1 em ponto flutuante.
+  v > 20 ? 1 : v < -20 ? -1 : (e = exp(2 * v); (e - 1) / (e + 1));
+);
+
+@slider
+gain = 10 ^ (drive_db / 20);
+
+@sample
+spl0 = tanh_(spl0 * gain);
+spl1 = tanh_(spl1 * gain);
