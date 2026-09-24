@@ -13,18 +13,18 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from gefx.disent.loo import STRATA, transfer_cost
+from gefx.disent.loo import transfer_cost
 
 
 def _resumo():
     return pd.DataFrame([
-        {"arm_retirado": "lsp-tanh", "condicao": "transferencia",
+        {"arm_retirado": "lsp-tanh", "estrato": "S1", "condicao": "transferencia",
          "drive_exact": 0.531, "mae_db": 2.77, "n": 800},
-        {"arm_retirado": "lsp-tanh", "condicao": "vistos",
+        {"arm_retirado": "lsp-tanh", "estrato": "S1", "condicao": "vistos",
          "drive_exact": 0.395, "mae_db": 4.32, "n": 4800},
-        {"arm_retirado": "byod-bigmuff", "condicao": "transferencia",
+        {"arm_retirado": "byod-bigmuff", "estrato": "S3", "condicao": "transferencia",
          "drive_exact": 0.139, "mae_db": 11.18, "n": 800},
-        {"arm_retirado": "byod-bigmuff", "condicao": "vistos",
+        {"arm_retirado": "byod-bigmuff", "estrato": "S3", "condicao": "vistos",
          "drive_exact": 0.533, "mae_db": 2.44, "n": 4800},
     ])
 
@@ -39,7 +39,7 @@ def _metrics(tmp_path):
 
 
 def test_transfer_cost_compares_each_arm_with_itself(tmp_path):
-    """O custo sai de (arm inedito) menos (o MESMO arm na etapa 5), onde a
+    """O custo sai de (arm inedito) menos (o MESMO arm visto no treino), onde a
     pergunta e o catalogo sao identicos. Contra a coluna `vistos` o
     `byod-bigmuff` sairia com -39 pontos em vez de -8,9, so porque ele proprio
     puxa a media dos vistos para baixo quando esta dentro dela."""
@@ -54,9 +54,7 @@ def test_transfer_cost_only_reads_the_transfer_rows(tmp_path):
     assert set(custo["arm"]) == {"lsp-tanh", "byod-bigmuff"}
 
 
-def test_transfer_cost_labels_the_stratum_even_without_the_column(tmp_path):
-    """O resumo pode ter sido gravado por uma versao sem a coluna; o estrato e o
-    eixo pelo qual o resultado se organiza e nao pode depender disso."""
+def test_transfer_cost_carries_the_stratum_of_each_arm(tmp_path):
     custo = transfer_cost(_resumo(), _metrics(tmp_path)).set_index("arm")
     assert custo.loc["lsp-tanh", "estrato"] == "S1"
     assert custo.loc["byod-bigmuff", "estrato"] == "S3"
@@ -65,15 +63,9 @@ def test_transfer_cost_labels_the_stratum_even_without_the_column(tmp_path):
 def test_an_arm_missing_from_the_reference_is_skipped(tmp_path):
     resumo = _resumo()
     resumo.loc[len(resumo)] = {"arm_retirado": "arm-novo", "condicao": "transferencia",
-                               "drive_exact": 0.4, "mae_db": 3.0, "n": 800}
+                               "drive_exact": 0.4, "mae_db": 3.0, "n": 800,
+                               "estrato": "S2"}
     assert "arm-novo" not in set(transfer_cost(resumo, _metrics(tmp_path))["arm"])
-
-
-def test_every_arm_of_the_roster_has_a_stratum():
-    from gefx.disent.arms import arm_keys
-
-    assert set(arm_keys()) == set(STRATA)
-    assert set(STRATA.values()) == {"S1", "S2", "S3"}
 
 
 def test_leave_one_out_needs_enough_arms(tmp_path):
@@ -84,22 +76,31 @@ def test_leave_one_out_needs_enough_arms(tmp_path):
 
 
 # --- curva de diversidade (B2 e B3) -------------------------------------------
-def test_the_diversity_order_crosses_the_three_strata_in_order():
-    """A ordem e o que da sentido a cada ponto: os dois primeiros sao S1, os tres
-    seguintes trazem o S2 e o ultimo traz o S3. Sorteada, a curva mediria
-    quantidade e variedade misturadas e sem rotulo."""
-    from gefx.disent.loo import DIVERSITY_HELD_OUT, DIVERSITY_ORDER
+def test_without_an_order_the_training_grows_stratum_by_stratum(tmp_path, monkeypatch):
+    """A ordem e o que da sentido a cada ponto: primeiro S1, depois S2, depois S3.
+    Sorteada, a curva mediria quantidade e variedade misturadas e sem rotulo."""
+    from gefx.disent import loo as modulo
 
-    estratos = [STRATA[arm] for arm in DIVERSITY_ORDER]
-    assert estratos == ["S1", "S1", "S2", "S2", "S2", "S3"]
-    assert DIVERSITY_HELD_OUT not in DIVERSITY_ORDER
-    assert STRATA[DIVERSITY_HELD_OUT] == "S3"
+    monkeypatch.setattr(modulo, "strata", lambda root: {
+        "s3-a": "S3", "s1-b": "S1", "s2-a": "S2", "s1-a": "S1", "fora": "S3"})
+    vistos = []
+    monkeypatch.setattr(modulo, "_evaluate_held_out",
+                        lambda run_dir, root, held_out, seen, **k:
+                            vistos.append(tuple(seen)) or [])
+    monkeypatch.setattr("gefx.disent.train.train",
+                        lambda config, verbose=True: (
+                            Path(config.output_dir).mkdir(parents=True, exist_ok=True),
+                            (Path(config.output_dir) / "run.json").write_text("{}"),
+                        ))
+    modulo.arm_diversity_curve("fora", tmp_path, tmp_path / "curva", reuse=None,
+                               verbose=False)
+    assert vistos[-1] == ("s1-a", "s1-b", "s2-a", "s3-a")
 
 
 def test_the_curve_reuses_the_leave_one_out_run_at_its_last_point(tmp_path, monkeypatch):
     """O ultimo ponto e, por construcao, a execucao do leave-one-out para o mesmo
-    arm. Retreina-lo daria um numero levemente diferente do ja publicado na etapa
-    7, e a curva deixaria de terminar onde a etapa 7 termina."""
+    arm. Retreina-lo daria um numero levemente diferente do ja publicado no
+    leave-one-out, e a curva deixaria de terminar onde ele termina."""
     from gefx.disent import loo as modulo
 
     reuse = tmp_path / "loo" / "byod-mxr"
@@ -118,8 +119,9 @@ def test_the_curve_reuses_the_leave_one_out_run_at_its_last_point(tmp_path, monk
         (Path(config.output_dir) / "run.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr("gefx.disent.train.train", _fake_train)
+    monkeypatch.setattr(modulo, "strata", lambda root: dict.fromkeys("abc", "S1"))
     tabela = modulo.arm_diversity_curve(
-        tmp_path, tmp_path / "curva", order=("a", "b", "c"), held_out="byod-mxr",
+        "byod-mxr", tmp_path, tmp_path / "curva", order=("a", "b", "c"),
         reuse=tmp_path / "loo", verbose=False,
     )
     assert [len(arms) for arms in treinados] == [1, 2]  # o ponto k=3 nao retreinou
@@ -142,8 +144,9 @@ def test_the_curve_keeps_the_catalog_fixed_while_the_training_set_grows(tmp_path
                             Path(config.output_dir).mkdir(parents=True, exist_ok=True),
                             (Path(config.output_dir) / "run.json").write_text("{}"),
                         ))
-    modulo.arm_diversity_curve(tmp_path, tmp_path / "curva", order=("a", "b", "c"),
-                               held_out="z", reuse=None, verbose=False)
+    monkeypatch.setattr(modulo, "strata", lambda root: dict.fromkeys("abc", "S1"))
+    modulo.arm_diversity_curve("z", tmp_path, tmp_path / "curva", order=("a", "b", "c"),
+                               reuse=None, verbose=False)
     assert [treino for treino, _ in vistos] == [("a",), ("a", "b"), ("a", "b", "c")]
     assert {catalogo for _, catalogo in vistos} == {("a", "b", "c")}
 

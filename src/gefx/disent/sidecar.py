@@ -8,7 +8,7 @@ from __future__ import annotations
 import csv
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
@@ -22,6 +22,7 @@ class DisentRecord:
 
     file_name: str
     arm: str
+    stratum: str
     content_id: str
     source_audio_id: str
     segment_start: int
@@ -65,6 +66,23 @@ def read_dataset(root: Path) -> pd.DataFrame:
     if not frames:
         raise FileNotFoundError(f"nenhum arm em {root}")
     return pd.concat(frames, ignore_index=True)
+
+
+def split_frames(
+    root: Path, arms: Optional[Sequence[str]] = None
+) -> Dict[str, pd.DataFrame]:
+    """As tres particoes por conteudo, ja restritas aos arms pedidos."""
+    data = read_dataset(Path(root))
+    if arms is not None:
+        data = data[data["arm"].isin(list(arms))]
+    frames = {
+        name: data[data["split"] == name].reset_index(drop=True)
+        for name in ("train", "catalog", "query")
+    }
+    empty = [name for name, frame in frames.items() if frame.empty]
+    if empty:
+        raise ValueError(f"particoes vazias: {empty}")
+    return frames
 
 
 def arm_dirs(root: Path) -> List[Path]:

@@ -25,6 +25,7 @@ def _record(arm, content, config_index, drive, tone, split="train"):
     return DisentRecord(
         file_name=f"{content}__d{drive}t{tone}__{config_index:05d}.wav",
         arm=arm,
+        stratum="S1",
         content_id=content,
         source_audio_id=f"{content}.wav",
         segment_start=1000,

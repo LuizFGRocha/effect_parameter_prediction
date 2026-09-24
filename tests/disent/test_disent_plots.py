@@ -1,107 +1,32 @@
-"""Contrato das figuras dos baselines.
+"""Contrato das figuras do POC II.
 
 Nao verifica pixel: verifica que cada figura sai de dados reais e que as
-convencoes que a tornam legivel -- ordem do roster, sinal do vies, denominador
-do sorvedouro -- nao mudam sem alguem perceber.
+convencoes que a tornam legivel -- ordem dos arms, ordem da escada -- nao mudam
+sem alguem perceber, e que nada depende do roster: o dataset pode vir de outra
+maquina com outros plugins.
 """
 from __future__ import annotations
 
 import json
 
-import numpy as np
 import pandas as pd
-import pytest
 
-from gefx.disent.arms import arm_keys
 from gefx.disent.plots import (
-    GRID_STEP_DB,
+    TECHNIQUE_LABEL,
     build_all,
     ordered_arms,
-    plot_bias_convergence,
     plot_baselines_by_arm,
-    plot_fidelity,
-    plot_hubness,
-    plot_pairwise,
+    plot_diversity_curve,
 )
+from gefx.disent.train import TECHNIQUES
 
-ARMS = arm_keys()
+STRATA = {"ref": "S1", "gemeo": "S1", "clip": "S2", "fuzz": "S3"}
+ARMS = list(STRATA)
 
 
-def test_ordered_arms_follows_the_roster_not_the_input():
+def test_ordered_arms_goes_by_stratum_then_name_whatever_the_input_order():
     # Ordem estavel entre figuras e o que permite ler uma ao lado da outra.
-    embaralhado = list(reversed(ARMS))
-    assert ordered_arms(embaralhado) == ARMS
-
-
-def test_ordered_arms_drops_what_is_not_in_the_roster():
-    assert ordered_arms([ARMS[0], "arm-que-nao-existe"]) == [ARMS[0]]
-
-
-def _b1_frame(vies_db=None):
-    vies_db = vies_db or {}
-    escada = np.array([5.04, 9.13, 13.31, 17.44, 21.59, 25.77, 29.92, 34.07])
-    linhas = []
-    for arm in ARMS:
-        for nivel, db in enumerate(escada):
-            for _ in range(4):
-                linhas.append({
-                    "query_arm": arm,
-                    "true_drive_level": nivel,
-                    "true_drive_db": db,
-                    "pred_drive_db": db + vies_db.get(arm, 0.0),
-                    "pred_drive_level": nivel,
-                    "true_tone_level": 0,
-                    "pred_tone_level": 0,
-                    "retrieved_arm": "(regressor POC I)",
-                    "retrieved_file": "",
-                })
-    return pd.DataFrame(linhas)
-
-
-def test_bias_convergence_subtracts_the_reference_and_flips_the_sign(tmp_path):
-    # O vies do B1 e relativo a referencia (o teto do regressor age em todos) e
-    # o sinal e o do teste cego: dB predito MAIOR = soa mais distorcido =
-    # negativo em niveis. Trocar qualquer um dos dois inverteria a leitura da
-    # figura sem quebrar nada mais.
-    quente = ARMS[1]
-    frame = _b1_frame({ARMS[0]: -2.0, quente: -2.0 + GRID_STEP_DB})
-    destino = tmp_path / "vies.png"
-    plot_bias_convergence(frame, {}, destino)
-    assert destino.exists() and destino.stat().st_size > 0
-
-    erro = frame["pred_drive_db"] - frame["true_drive_db"]
-    media = erro.groupby(frame["query_arm"]).mean()
-    esperado = -(media[quente] - media[ARMS[0]]) / GRID_STEP_DB
-    assert esperado == pytest.approx(-1.0)
-
-
-def test_bias_convergence_accepts_an_empty_listening_record(tmp_path):
-    # PERCEPTUAL_BIAS so cobre dois arms hoje; a figura nao pode exigir todos.
-    destino = tmp_path / "vies.png"
-    plot_bias_convergence(_b1_frame(), {}, destino)
-    assert destino.exists()
-
-
-def test_hubness_uses_the_reachable_catalog_as_denominator(tmp_path):
-    # Sem `same_arm` o proprio arm sai do catalogo: usar o catalogo inteiro
-    # subestimaria a ocupacao esperada e faria o sorvedouro parecer menor.
-    frame = pd.DataFrame({
-        "retrieved_file": ["a.wav"] * 90 + [f"{i}.wav" for i in range(10)],
-        "retrieved_arm": [ARMS[0]] * 90 + [ARMS[1]] * 10,
-    })
-    destino = tmp_path / "hub.png"
-    plot_hubness(frame, catalog_size=100, out_path=destino)
-    assert destino.exists() and destino.stat().st_size > 0
-
-
-def test_pairwise_figure_survives_a_full_matrix(tmp_path):
-    linhas = [
-        {"query_arm": q, "catalog_arm": c, "drive_exact": 0.2 + 0.01 * i}
-        for i, (q, c) in enumerate((q, c) for q in ARMS for c in ARMS)
-    ]
-    destino = tmp_path / "par.png"
-    plot_pairwise(pd.DataFrame(linhas), destino)
-    assert destino.exists() and destino.stat().st_size > 0
+    assert ordered_arms(list(reversed(ARMS)), STRATA) == ["gemeo", "ref", "clip", "fuzz"]
 
 
 def _metrics():
@@ -114,8 +39,11 @@ def _metrics():
             }
             for arm in ARMS
         },
-        "overall": {"n": 5600},
+        "overall": {"n": 5600, "drive_level": {"exact": 0.2}, "mae_db": 8.0},
         "catalog_size": 4800,
+        "alphabet": {"drive_level": 8, "tone_level": 5},
+        "drive_db_ladder": [5.0 + 4.0 * nivel for nivel in range(8)],
+        "strata": STRATA,
     }
 
 
@@ -125,145 +53,41 @@ def test_baselines_figure_is_written(tmp_path):
     assert destino.exists() and destino.stat().st_size > 0
 
 
-def test_fidelity_figure_marks_the_chosen_pooling(tmp_path):
-    sweep = pd.DataFrame({
-        "bands": [1, 4, 16], "dims": [256, 1024, 4096],
-        "pearson": [0.62, 0.80, 0.99], "spearman": [0.56, 0.70, 0.97],
-        "mean_ratio": [0.53, 0.68, 0.90], "n_pairs": [497] * 3,
-    })
-    destino = tmp_path / "fid.png"
-    plot_fidelity(sweep, chosen=16, out_path=destino)
-    assert destino.exists() and destino.stat().st_size > 0
-
-
-def test_fidelity_figure_rejects_a_pooling_absent_from_the_sweep(tmp_path):
-    sweep = pd.DataFrame({
-        "bands": [1, 4], "dims": [256, 1024], "pearson": [0.62, 0.80],
-        "spearman": [0.56, 0.70], "mean_ratio": [0.53, 0.68], "n_pairs": [497] * 2,
-    })
-    with pytest.raises(IndexError):
-        plot_fidelity(sweep, chosen=16, out_path=tmp_path / "fid.png")
-
-
-def test_build_all_refuses_results_without_the_catalog_size(tmp_path):
-    # A alternativa seria adivinhar o denominador, e um sorvedouro medido contra
-    # o denominador errado e pior que nenhum.
-    metrics = _metrics()
-    del metrics["catalog_size"]
-    (tmp_path / "b0_cross.json").write_text(json.dumps(metrics))
-    (tmp_path / "b1.json").write_text(json.dumps(_metrics()))
-    _b1_frame().to_csv(tmp_path / "b1.csv", index=False)
-    pd.DataFrame({
-        "retrieved_file": ["a.wav"], "retrieved_arm": [ARMS[0]],
-        "query_arm": [ARMS[0]],
-    }).to_csv(tmp_path / "b0_cross.csv", index=False)
-    pd.DataFrame([
-        {"query_arm": q, "catalog_arm": c, "drive_exact": 0.2}
-        for q in ARMS for c in ARMS
-    ]).to_csv(tmp_path / "b0_pairwise.csv", index=False)
-
-    with pytest.raises(KeyError, match="catalog_size"):
-        build_all(tmp_path)
-
-
-# --- figuras da etapa 5 -------------------------------------------------------
-def _etapa5_run(root, nome, drive_exact, mae_db, passos=3, checkpoints=None):
-    import json
-
-    pasta = root / nome
-    pasta.mkdir(parents=True)
-    (pasta / "run.json").write_text(
-        json.dumps(
-            {
-                "decision": {"measured": {"drive_exact": drive_exact, "mae_db": mae_db,
-                                          "top_arm_share": 0.2}},
-                "checkpoints": checkpoints or [],
-                "config": {"steps": passos},
-                "steps_executed": passos,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (pasta / "metrics.json").write_text(
-        json.dumps(
-            {
-                "alphabet": {"drive_level": 8, "tone_level": 5},
-                "per_query_arm": {
-                    arm: {"drive_level": {"exact": 0.5 if arm != "byod-bigmuff" else 0.2}}
-                    for arm in ("pedalboard-tanh", "lsp-tanh", "byod-bigmuff")
-                },
-                "hubness": {"by_retrieved_arm": {"pedalboard-tanh": 0.4, "lsp-tanh": 0.35,
-                                                 "byod-bigmuff": 0.25}},
-            }
-        ),
-        encoding="utf-8",
-    )
-    (pasta / "history.json").write_text(
-        json.dumps(
-            [
-                {"step": passo, "lambda": passo / passos, "total": 3.0 - passo * 0.1,
-                 "contrastive": 3.0 - passo * 0.1, "adversary_arm": 1.9}
-                for passo in range(1, passos + 1)
-            ]
-        ),
-        encoding="utf-8",
-    )
-    return pasta
-
-
-def test_the_technique_order_is_the_ladder_and_not_the_ranking():
-    """Ordenar por resultado esconderia o que a escada mostra: que cada linha
-    acrescenta uma ideia a anterior."""
-    from gefx.disent.plots import TECHNIQUE_ORDER, ordered_techniques
-
-    assert ordered_techniques({"full", "contrastive", "random_encoder"}) == [
-        "random_encoder", "contrastive", "full"
-    ]
-    assert list(TECHNIQUE_ORDER).index("contrastive") < list(TECHNIQUE_ORDER).index("full")
-
-
-def test_every_technique_of_the_study_has_a_label():
-    from gefx.disent.plots import TECHNIQUE_LABEL, TECHNIQUE_ORDER
-    from gefx.disent.train import TECHNIQUES
-
-    assert set(TECHNIQUE_ORDER) == set(TECHNIQUES)
+def test_every_technique_has_a_label():
     assert set(TECHNIQUE_LABEL) == set(TECHNIQUES)
 
 
-def test_build_etapa5_writes_every_figure_from_the_runs_on_disk(tmp_path):
-    from gefx.disent.plots import build_etapa5
-
-    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
-    _etapa5_run(tmp_path, "full", 0.45, 3.8,
-                checkpoints=[{"step": 1, "drive_exact": 0.40, "mae_db": 4.2}])
-    escritos = build_etapa5(tmp_path, tmp_path / "figuras")
-    nomes = {caminho.name for caminho in escritos}
-    assert nomes == {
-        "escada_de_tecnicas.png", "curvas_de_treino.png",
-        "sorvedouro_por_tecnica.png", "por_arm_melhor_tecnica.png",
-    }
-    assert all(caminho.stat().st_size > 0 for caminho in escritos)
+def _run(root, nome, technique, drive_exact, mae_db, seed=1):
+    pasta = root / "encoder" / nome
+    pasta.mkdir(parents=True)
+    (pasta / "run.json").write_text(json.dumps({
+        "config": {"technique": technique, "seed": seed},
+        "steps_executed": 0,
+        "summary": {"drive_exact": drive_exact, "tone_exact": 0.4, "mae_db": mae_db,
+                    "same_arm_drive_exact": drive_exact + 0.01},
+    }), encoding="utf-8")
+    (pasta / "metrics.json").write_text(json.dumps(_metrics()), encoding="utf-8")
 
 
-def test_build_etapa5_refuses_a_directory_without_runs(tmp_path):
-    from gefx.disent.plots import build_etapa5
-
-    (tmp_path / "vazio").mkdir()
-    with pytest.raises(FileNotFoundError, match="run.json"):
-        build_etapa5(tmp_path)
-
-
-def test_the_untrained_control_has_no_curve_and_does_not_break_the_figure(tmp_path):
-    """O controle nao treina, entao nao tem historico. A figura tem de sair
-    assim mesmo -- e ele que ancora a comparacao."""
-    from gefx.disent.plots import build_etapa5
-
-    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
-    escritos = build_etapa5(tmp_path, tmp_path / "figuras")
-    assert not any(caminho.name == "curvas_de_treino.png" for caminho in escritos)
+def test_build_all_writes_what_there_is_data_for(tmp_path):
+    _run(tmp_path, "random_encoder", "random_encoder", 0.31, 5.6)
+    _run(tmp_path, "bn_only", "bn_only", 0.36, 4.8)
+    _run(tmp_path, "contrastive_aux", "contrastive_aux", 0.44, 3.8)
+    _run(tmp_path, "contrastive_aux_s2", "contrastive_aux", 0.43, 3.9, seed=2)
+    nomes = {caminho.name for caminho in build_all(tmp_path)}
+    assert nomes == {"escada.png", "por_arm.png"}
 
 
-# --- curva de diversidade e estrutura por bloco -------------------------------
+def test_build_all_adds_the_baselines_when_retrieve_wrote_them(tmp_path):
+    for nome in ("b0.json", "b1.json"):
+        (tmp_path / nome).write_text(json.dumps(_metrics()), encoding="utf-8")
+    assert {c.name for c in build_all(tmp_path)} == {"baselines_por_arm.png"}
+
+
+def test_build_all_of_an_empty_directory_writes_nothing(tmp_path):
+    assert build_all(tmp_path) == []
+
+
 def _curva():
     return pd.DataFrame([
         {"arm_retirado": "byod-mxr", "condicao": condicao, "k": k, "estratos": estratos,
@@ -273,86 +97,31 @@ def _curva():
     ])
 
 
-def _estrutura():
-    linhas = []
-    for tecnica in ("random_encoder", "contrastive_aux"):
-        for fator, massa in (("drive_level", 0.8), ("tone_level", 0.7),
-                             ("arm", 0.2), ("content_id", 0.1)):
-            linhas.append({"technique": tecnica, "factor": fator, "massa_z_e": massa,
-                           "massa_nula": 1 / 3, "dim_z_e": 32, "dim_z_c": 64,
-                           "separacao_por_bloco": 0.5, "completude": 0.4,
-                           "informatividade": 0.6, "acaso": 0.125, "mig": 0.1,
-                           "desemaranhamento": 0.3})
-    return pd.DataFrame(linhas)
-
-
-def test_the_diversity_curve_is_drawn_even_without_the_etapa5_reference(tmp_path):
+def test_the_diversity_curve_is_drawn_even_without_the_seen_reference(tmp_path):
     from gefx.disent.plots import plot_diversity_curve
 
     alvo = tmp_path / "curva.png"
-    plot_diversity_curve(_curva(), alvo)
+    plot_diversity_curve(_curva(), 0.125, alvo)
     assert alvo.stat().st_size > 0
-
-
-def test_the_structure_figure_orders_the_techniques_by_the_ladder(tmp_path):
-    from gefx.disent.plots import plot_structure_blocks
-
-    alvo = tmp_path / "estrutura.png"
-    plot_structure_blocks(_estrutura(), alvo)
-    assert alvo.stat().st_size > 0
-
-
-def test_build_etapa5_picks_up_the_curve_and_the_structure_when_they_exist(tmp_path):
-    """As duas entram por arquivo presente, e nao por bandeira: quem roda os
-    experimentos e quem roda as figuras sao comandos diferentes, e a figura tem
-    de sair completa com o que ja existe em disco."""
-    from gefx.disent.plots import build_etapa5
-
-    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
-    _etapa5_run(tmp_path, "contrastive_aux", 0.44, 3.8, passos=0)
-    (tmp_path / "diversidade").mkdir()
-    _curva().to_csv(tmp_path / "diversidade" / "resumo.csv", index=False)
-    _estrutura().to_csv(tmp_path / "estrutura.csv", index=False)
-
-    nomes = {caminho.name for caminho in build_etapa5(tmp_path, tmp_path / "figuras")}
-    assert {"curva_de_diversidade.png", "estrutura_por_bloco.png"} <= nomes
-
-
-def test_the_structure_reference_line_is_the_dimension_share_not_a_half(tmp_path):
-    """Os blocos tem 32 e 64 dimensoes. Um codigo que nao separa nada espalha a
-    importancia em 33%, e nao em 50% -- e o encoder nao treinado cai exatamente
-    ai. Uma linha em 50% faria os quatro fatores parecerem viver em `z_c`."""
-    import matplotlib.pyplot as plt
-
-    from gefx.disent.plots import plot_structure_blocks
-
-    capturadas = []
-    original = plt.Axes.axhline
-
-    def _espia(self, y=0, *args, **kwargs):
-        capturadas.append(y)
-        return original(self, y, *args, **kwargs)
-
-    plt.Axes.axhline = _espia
-    try:
-        plot_structure_blocks(_estrutura(), tmp_path / "estrutura.png")
-    finally:
-        plt.Axes.axhline = original
-    assert capturadas == [pytest.approx(100 / 3)]
 
 
 def test_the_curve_averages_the_seeds_and_still_shows_them(tmp_path):
     """A dispersao entre sementes e da ordem da excursao da curva. Uma linha
     media sozinha faria a curva parecer ter forma."""
-    from gefx.disent.plots import build_etapa5
-
-    _etapa5_run(tmp_path, "random_encoder", 0.30, 5.6, passos=0)
-    _etapa5_run(tmp_path, "contrastive_aux", 0.44, 3.8, passos=0)
+    _run(tmp_path, "contrastive_aux", "contrastive_aux", 0.44, 3.8)
     for pasta, deslocamento in (("diversidade", 0.0), ("diversidade_s2", 0.05)):
-        (tmp_path / pasta).mkdir()
+        (tmp_path / "encoder" / pasta).mkdir()
         dados = _curva()
         dados["drive_exact"] = dados["drive_exact"] + deslocamento
-        dados.to_csv(tmp_path / pasta / "resumo.csv", index=False)
+        dados.to_csv(tmp_path / "encoder" / pasta / "resumo.csv", index=False)
 
-    nomes = {caminho.name for caminho in build_etapa5(tmp_path, tmp_path / "figuras")}
+    nomes = {caminho.name for caminho in build_all(tmp_path)}
     assert "curva_de_diversidade.png" in nomes
+
+
+def test_the_ladder_takes_the_baselines_from_what_retrieve_wrote(tmp_path):
+    for nome in ("b0.json", "b1.json"):
+        (tmp_path / nome).write_text(json.dumps(_metrics()), encoding="utf-8")
+    _run(tmp_path, "contrastive_aux", "contrastive_aux", 0.44, 3.8)
+    nomes = {caminho.name for caminho in build_all(tmp_path)}
+    assert {"baselines_por_arm.png", "escada.png", "por_arm.png"} <= nomes

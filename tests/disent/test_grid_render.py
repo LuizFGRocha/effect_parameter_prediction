@@ -32,7 +32,7 @@ def recordings(tmp_path):
 
 
 def _options(folder, **overrides):
-    defaults = dict(input_dir=folder, n_contents=8, reserved_probes=4, workers=2)
+    defaults = dict(input_dir=folder, n_contents=8, workers=2)
     return RenderOptions(**{**defaults, **overrides})
 
 
@@ -42,18 +42,9 @@ def test_content_items_pick_the_requested_number(recordings):
     assert len({item.content_id for item in items}) == 8
 
 
-def test_probe_recordings_are_never_used_as_content(recordings):
-    # Os probes da calibracao saem do FIM da lista; se virassem conteudo, a
-    # calibracao teria sido feita com material do treino.
-    folder = recordings(n=12)
-    items = content_items(_options(folder, n_contents=8, reserved_probes=4))
-    reserved = {path.stem for path in sorted(folder.glob("*.wav"))[-4:]}
-    assert reserved.isdisjoint({item.content_id for item in items})
-
-
 def test_asking_for_more_content_than_available_is_refused(recordings):
     with pytest.raises(ValueError, match="menos que os"):
-        content_items(_options(recordings(n=6), n_contents=8, reserved_probes=4))
+        content_items(_options(recordings(n=6), n_contents=8))
 
 
 def test_segment_start_is_deterministic_in_the_seed(recordings):
@@ -86,7 +77,7 @@ def test_segment_stays_inside_the_recording_with_the_edge_margin(recordings):
 
 def test_a_recording_too_short_is_refused(recordings):
     with pytest.raises(ValueError, match="curta demais"):
-        content_items(_options(recordings(seconds=2.5), n_contents=3, reserved_probes=0))
+        content_items(_options(recordings(seconds=2.5), n_contents=3))
 
 
 def test_every_content_lands_in_exactly_one_split(recordings):

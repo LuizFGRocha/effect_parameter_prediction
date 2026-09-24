@@ -5,8 +5,8 @@ Cada execucao treina em N-1 arms e responde com o mesmo modelo:
 - `transferencia`: consulta do arm retirado contra o catalogo dos vistos;
 - `vistos`: consulta dos arms vistos contra o mesmo catalogo (controle interno).
 
-A comparacao certa para o custo de transferencia e o proprio arm na etapa 5
-(`transfer_cost`), nao a linha `vistos`.
+A comparacao certa para o custo de transferencia e o proprio arm no encoder
+treinado com todos (`transfer_cost`), nao a linha `vistos`.
 """
 from __future__ import annotations
 
@@ -16,21 +16,28 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
-from gefx.disent.arms import ARMS
+from gefx.disent.train import RESULTS_ROOT
 
-DEFAULT_TECHNIQUE = "contrastive_aux"
 DEFAULT_ROOT = Path("datasets/disent")
-DEFAULT_OUTPUT = Path("results/disent/etapa5/loo")
-STRATA: Dict[str, str] = {arm.key: arm.stratum for arm in ARMS}
+DEFAULT_OUTPUT = RESULTS_ROOT / "loo"
+
+
+def strata(root: Path) -> Dict[str, str]:
+    """Estrato de cada arm, como o render gravou no sidecar."""
+    from gefx.disent.sidecar import read_dataset
+
+    return {str(arm): str(stratum) for arm, stratum
+            in read_dataset(Path(root)).groupby("arm")["stratum"].first().items()}
 
 
 def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[str],
                        catalog_arms: Optional[Sequence[str]] = None, batch: int = 64,
                        extra: Optional[Dict[str, object]] = None) -> List[Dict[str, object]]:
-    from gefx.disent.diagnostics import load_run
+    from gefx.disent.probes import load_run
     from gefx.disent.features import FeatureStore, PixelStandardizer
     from gefx.disent.retrieval import retrieve_by_arm
-    from gefx.disent.train import embed, split_frames
+    from gefx.disent.sidecar import split_frames
+    from gefx.disent.train import embed
 
     model, _ = load_run(run_dir)
     standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
@@ -48,11 +55,12 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
         z_query = embed(model, FeatureStore(root, queries, "Spec"), standardizer, batch)
         # Na transferencia o arm retirado ja esta fora do catalogo.
         result = retrieve_by_arm(queries, catalog, z_query, z_catalog,
-                                 same_arm=(held_out not in pool and label == "transferencia"),
-                                 metric="cosine")
+                                 same_arm=(held_out not in pool and label == "transferencia"))
         overall = result.metrics["overall"]
         rows.append({
-            "arm_retirado": held_out, "estrato": STRATA.get(held_out, "?"),
+            "arm_retirado": held_out,
+            "estrato": str(frames["query"].loc[frames["query"]["arm"] == held_out,
+                                               "stratum"].iloc[0]),
             "condicao": label, **(extra or {}),
             "drive_exact": float(overall["drive_level"]["exact"]),
             "within_one": float(overall["drive_level"]["within_one"]),
@@ -64,7 +72,6 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
 def leave_one_arm_out(
     root: Path = DEFAULT_ROOT,
     output_dir: Path = DEFAULT_OUTPUT,
-    technique: str = DEFAULT_TECHNIQUE,
     arms: Optional[Sequence[str]] = None,
     steps: int = 4000,
     seed: int = 20260908,
@@ -92,7 +99,7 @@ def leave_one_arm_out(
             if verbose:
                 print(f"[{held_out} fora, semente {semente}]", flush=True)
             if not (run_dir / "run.json").exists():
-                train(TrainConfig(technique=technique, arms=tuple(seen), steps=steps,
+                train(TrainConfig(arms=tuple(seen), steps=steps,
                                   seed=semente, eval_every=0, output_dir=run_dir),
                       verbose=False)
             rows.extend(_evaluate_held_out(run_dir, root, held_out, seen,
@@ -106,22 +113,11 @@ def leave_one_arm_out(
 
 
 # --- B2 e B3: quantas implementacoes o treino precisa ver? ---------------------
-#: O arm de maior custo no leave-one-out que ainda nao cai ao acaso.
-DIVERSITY_HELD_OUT = "byod-mxr"
-
-#: Ordem de acumulo do treino, por estrato: S1, S1, S2, S2, S2, S3.
-DIVERSITY_ORDER: Sequence[str] = (
-    "pedalboard-tanh", "lsp-tanh", "lsp-hardclip", "lsp-arctan", "lsp-sine",
-    "byod-bigmuff",
-)
-
-
 def arm_diversity_curve(
+    held_out: str,
     root: Path = DEFAULT_ROOT,
-    output_dir: Path = Path("results/disent/etapa5/diversidade"),
-    held_out: str = DIVERSITY_HELD_OUT,
-    order: Sequence[str] = DIVERSITY_ORDER,
-    technique: str = DEFAULT_TECHNIQUE,
+    output_dir: Path = RESULTS_ROOT / "diversidade",
+    order: Optional[Sequence[str]] = None,
     steps: int = 4000,
     seed: int = 20260908,
     reuse: Optional[Path] = DEFAULT_OUTPUT,
@@ -130,11 +126,15 @@ def arm_diversity_curve(
     """B2 e B3 na mesma curva: treinar com 1, 2, ... N-1 implementacoes.
 
     O catalogo fica fixo nos N-1 arms; so a pertinencia ao treino varia. O ultimo
-    ponto e a execucao do leave-one-out, reaproveitada de `reuse`.
+    ponto e a execucao do leave-one-out, reaproveitada de `reuse`. Sem `order`, o
+    treino acumula por estrato (S1 antes de S2...), e dentro dele por nome.
     """
     from gefx.disent.train import TrainConfig, train
 
     root, output_dir = Path(root), Path(output_dir)
+    estratos = strata(root)
+    if order is None:
+        order = sorted(estratos, key=lambda arm: (estratos[arm], arm))
     order = [arm for arm in order if arm != held_out]
     pool = list(order)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -150,13 +150,13 @@ def arm_diversity_curve(
             print(f"[k={k}] {', '.join(treinados)}", flush=True)
         if not (run_dir / "run.json").exists():
             # Quem pontua e o arm retirado, contra o catalogo fixo, logo abaixo.
-            train(TrainConfig(technique=technique, arms=tuple(treinados), steps=steps,
+            train(TrainConfig(arms=tuple(treinados), steps=steps,
                               seed=seed, eval_every=0, evaluate_at_end=False,
                               output_dir=run_dir), verbose=False)
         novas = _evaluate_held_out(
             run_dir, root, held_out, treinados, catalog_arms=pool,
             extra={"k": k, "arms_treinados": "|".join(treinados),
-                   "estratos": len({STRATA.get(arm, "?") for arm in treinados}),
+                   "estratos": len({estratos[arm] for arm in treinados}),
                    "run_dir": str(run_dir)},
         )
         rows.extend(novas)
@@ -169,11 +169,12 @@ def arm_diversity_curve(
 
 
 def transfer_cost(
-    loo: pd.DataFrame, etapa5_metrics: Path = Path("results/disent/etapa5")
-        / DEFAULT_TECHNIQUE / "metrics.json",
+    loo: pd.DataFrame,
+    seen_metrics: Path = RESULTS_ROOT / "contrastive_aux" / "metrics.json",
 ) -> pd.DataFrame:
-    """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo na etapa 5."""
-    reference = json.loads(Path(etapa5_metrics).read_text(encoding="utf-8"))["per_query_arm"]
+    """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo
+    no encoder treinado com todos."""
+    reference = json.loads(Path(seen_metrics).read_text(encoding="utf-8"))["per_query_arm"]
     transferencia = loo[loo["condicao"] == "transferencia"]
     rows: List[Dict[str, object]] = []
     for arm, grupo in transferencia.groupby("arm_retirado", sort=False):
@@ -183,7 +184,7 @@ def transfer_cost(
         visto = float(reference[arm]["drive_level"]["exact"])
         inedito = grupo["drive_exact"].astype(float)
         rows.append({
-            "arm": arm, "estrato": STRATA.get(arm, str(grupo.iloc[0].get("estrato", "?"))),
+            "arm": arm, "estrato": str(grupo.iloc[0]["estrato"]),
             "visto": visto, "inedito": float(inedito.mean()),
             "custo_pontos": (float(inedito.mean()) - visto) * 100,
             # Com uma semente so, amplitude zero e falta de medida.
