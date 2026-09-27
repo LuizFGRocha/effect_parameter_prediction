@@ -90,8 +90,7 @@ def plot_baselines_by_arm(
     top.set_ylim(0, max(max(b0), max(b1)) * 1.18)
     top.set_ylabel("acerto exato do nível de drive (%)")
     top.set_title(f"Baselines por implementação — "
-                  f"{b0_metrics['alphabet']['drive_level']} níveis de drive, "
-                  f"{b0_metrics['alphabet']['tone_level']} de tom")
+                  f"{b0_metrics['alphabet']['drive_level']} níveis de drive")
     top.legend(loc="upper left")
 
     bottom.bar(positions - width / 2, b0_db, width, color=COLOR_B0)

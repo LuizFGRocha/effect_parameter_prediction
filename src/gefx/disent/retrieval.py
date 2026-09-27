@@ -16,7 +16,7 @@ import pandas as pd
 
 from gefx.disent.sidecar import EFFECT_FOLDER, read_dataset, split_frames
 
-LEVEL_AXES: Tuple[str, ...] = ("drive_level", "tone_level")
+LEVEL_AXES: Tuple[str, ...] = ("drive_level",)
 
 
 def nearest(queries: np.ndarray, catalog: np.ndarray,
@@ -223,8 +223,8 @@ def baseline_b1(
     """B1: o regressor do POC I, sem retreino, aplicado aos arms do POC II.
 
     A saida ja esta em `drive_db`, a unidade de `drive_db_equivalente`, entao o erro
-    sai em dB sem conversao. Mistura duas mudancas de dominio (implementacao e o
-    estagio de tone novo); em `pedalboard-tanh` so a segunda age.
+    sai em dB sem conversao. Em `pedalboard-tanh`, a mesma implementacao do
+    treino, so muda a faixa de niveis.
     """
     from gefx.data.features import extract_feature, stack_features
     from gefx.effects.catalog import EFFECT_PARAMETER_RANGES
@@ -267,8 +267,6 @@ def baseline_b1(
             "distance": np.nan,
             "true_drive_level": queries["drive_level"].to_numpy(),
             "pred_drive_level": _nearest_level(drive_db, ladder),
-            "true_tone_level": queries["tone_level"].to_numpy(),
-            "pred_tone_level": -1,  # o POC I nao tinha estagio de tone
             "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
             "pred_drive_db": drive_db,
         }
@@ -283,7 +281,6 @@ def baseline_b1(
         "model_dir": str(model_dir),
         "feature": feature_name,
         "alphabet": sizes,
-        "note": "tone nao e predito pelo regressor do POC I",
         **_context(queries),
     }
     return RetrievalResult(predictions=out, metrics=metrics)

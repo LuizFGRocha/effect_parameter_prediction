@@ -25,8 +25,7 @@ from gefx.disent.train import (
 
 ARMS = ("a0", "a1", "a2")
 CONTENTS = {"train": ["c0", "c1", "c2"], "catalog": ["c3", "c4"], "query": ["c5", "c6"]}
-DRIVES = (0, 1)
-TONES = (0, 1)
+DRIVES = (0, 1, 2, 3)
 SHAPE = (32, 24)
 
 
@@ -42,19 +41,16 @@ def _dataset(tmp_path, seed=0):
     for arm_index, arm in enumerate(ARMS):
         rows = []
         for split, contents in CONTENTS.items():
-            for content, (drive, tone) in itertools.product(
-                contents, itertools.product(DRIVES, TONES)
-            ):
+            for content, drive in itertools.product(contents, DRIVES):
                 rows.append(
                     {
-                        "file_name": f"{content}__d{drive}t{tone}.wav",
+                        "file_name": f"{content}__d{drive}.wav",
                         "arm": arm,
                         "stratum": "S1",
                         "content_id": content,
-                        "config_index": drive * len(TONES) + tone,
-                        "config_key": f"d{drive}t{tone}",
+                        "config_index": drive,
+                        "config_key": f"d{drive}",
                         "drive_level": drive,
-                        "tone_level": tone,
                         "drive_db_equivalente": 10.0 + 5.0 * drive,
                         "split": split,
                     }
@@ -128,10 +124,10 @@ def test_split_frames_refuses_a_slice_that_empties_a_partition(tmp_path):
         split_frames(root, arms=["nao-existe"])
 
 
-def test_aux_targets_normalize_each_axis_by_the_levels_present(tmp_path):
+def test_aux_targets_normalize_the_drive_by_the_levels_present(tmp_path):
     frame = split_frames(_dataset(tmp_path))["train"]
     targets = aux_targets(frame)
-    assert targets.shape == (len(frame), 2)
+    assert targets.shape == (len(frame), 1)
     assert targets.min() == pytest.approx(0.0) and targets.max() == pytest.approx(1.0)
 
 
@@ -146,7 +142,7 @@ def test_a_run_writes_every_artifact_that_makes_it_reproducible(tmp_path):
         assert (out / "weights" / f"{part}.weights.h5").exists(), part
     assert manifest["config"]["technique"] == "contrastive_aux"
     assert manifest["splits"]["train"] == len(ARMS) * 3 * 4
-    assert set(manifest["summary"]) == {"drive_exact", "tone_exact", "mae_db",
+    assert set(manifest["summary"]) == {"drive_exact", "mae_db",
                                         "same_arm_drive_exact"}
 
 

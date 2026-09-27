@@ -63,7 +63,6 @@ def _frame(arm, contents, split, levels=(0, 1, 2, 3)):
                     "split": split,
                     "config_index": drive,
                     "drive_level": drive,
-                    "tone_level": 0,
                     "drive_db_equivalente": 5.0 + 5.0 * drive,
                 }
             )
@@ -132,7 +131,7 @@ def test_alphabet_reads_the_slice_and_not_the_full_grid():
     # Um recorte com menos niveis tem outro acaso; reportar o da grade cheia
     # inflaria o resultado.
     frame = _frame("a", ["c1"], "query", levels=(0, 1))
-    assert alphabet(frame) == {"drive_level": 2, "tone_level": 1}
+    assert alphabet(frame) == {"drive_level": 2}
     assert set(alphabet(frame)) == set(LEVEL_AXES)
 
 

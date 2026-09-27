@@ -4,7 +4,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gefx.disent.arms import TONE_LEVELS
 from gefx.disent.grid import (
     DEFAULT_SPLIT_FRACTIONS,
     SPLITS,
@@ -22,7 +21,7 @@ DRIVE_LEVELS = 8
 
 def test_grid_has_the_declared_size():
     configs = all_configs(DRIVE_LEVELS)
-    assert len(configs) == DRIVE_LEVELS * TONE_LEVELS
+    assert len(configs) == DRIVE_LEVELS
     assert len(set(configs)) == len(configs)
 
 
@@ -34,11 +33,8 @@ def test_index_and_config_are_inverses():
         assert config_from_index(index) == config
 
 
-def test_canonical_order_is_drive_major():
-    configs = all_configs(DRIVE_LEVELS)
-    assert configs[0] == Config(0, 0)
-    assert configs[1] == Config(0, 1)
-    assert configs[TONE_LEVELS] == Config(1, 0)
+def test_canonical_order_is_the_drive_level():
+    assert all_configs(3) == [Config(0), Config(1), Config(2)]
 
 
 def test_config_key_round_trips():
@@ -46,7 +42,7 @@ def test_config_key_round_trips():
         assert parse_config_key(config.key) == config
 
 
-@pytest.mark.parametrize("bad", ["", "d1", "t1", "x0t0", "d0t", "d-1t0"])
+@pytest.mark.parametrize("bad", ["", "d", "t1", "d0t0", "x0", "d-1"])
 def test_parse_config_key_rejects_junk(bad):
     with pytest.raises(ValueError, match="invalida"):
         parse_config_key(bad)
@@ -56,8 +52,8 @@ def test_parse_config_key_rejects_junk(bad):
 def test_render_name_is_identical_across_arms():
     # O nome nao carrega o arm: e o que permite ao oraculo parear <A>/<n> com
     # <B>/<n> sabendo que so a implementacao mudou.
-    config = Config(3, 4)
-    assert render_name("src", config, 7) == "src__d3t4__00007.wav"
+    config = Config(3)
+    assert render_name("src", config, 7) == "src__d3__00007.wav"
     assert parse_config_key(render_name("src", config, 7).split("__")[1]) == config
 
 

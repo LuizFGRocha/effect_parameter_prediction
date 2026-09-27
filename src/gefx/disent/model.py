@@ -12,8 +12,8 @@ from typing import Dict, Tuple
 
 DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
 
-#: Niveis de drive e tone, normalizados em [0, 1], que a cabeca auxiliar regride.
-N_AUX = 2
+#: O nivel de drive, normalizado em [0, 1], que a cabeca auxiliar regride.
+N_AUX = 1
 
 
 @dataclass

@@ -29,9 +29,7 @@ class DisentRecord:
     config_index: int
     config_key: str
     drive_level: int
-    tone_level: int
     drive_knob: float
-    tone_cutoff_hz: float
     drive_db_equivalente: float
     split: str
 
@@ -101,7 +99,7 @@ def validate_pairing(root: Path) -> Dict[str, int]:
 
     reference_dir = dirs[0]
     reference = read_sidecar(reference_dir).set_index("file_name").sort_index()
-    factors = ["content_id", "config_index", "drive_level", "tone_level", "split"]
+    factors = ["content_id", "config_index", "drive_level", "split"]
 
     for arm_dir in dirs[1:]:
         current = read_sidecar(arm_dir).set_index("file_name").sort_index()

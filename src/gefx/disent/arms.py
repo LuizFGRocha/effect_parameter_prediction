@@ -5,10 +5,6 @@
 - `experiments/disent_levels.yaml`: o knob de drive de cada arm em cada nivel.
   Escrito so por `gefx disent calibrate`, pareando os arms pelo Rnonlin; nao se
   edita a mao.
-
-O tone e um estagio nosso, identico em todos os arms e aplicado depois da
-nao-linearidade, com os tones nativos em neutro: um fator exatamente
-compartilhado, que serve de controle positivo.
 """
 from __future__ import annotations
 
@@ -17,15 +13,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
-from pedalboard import Distortion, LowpassFilter, Pedalboard
+from pedalboard import Distortion, Pedalboard
 
 DEFAULT_ROSTER = Path("experiments/disent_roster.yaml")
 DEFAULT_LEVELS = Path("experiments/disent_levels.yaml")
-
-# Tone: passa-baixas de primeira ordem, corte log-espacado. Menos niveis que o
-# drive porque e so controle positivo.
-TONE_LEVELS = 5
-TONE_CUTOFF_HZ: Tuple[float, float] = (500.0, 8000.0)
 
 BACKENDS = ("pedalboard", "vst")
 
@@ -177,24 +168,6 @@ def load_roster(path: Path = DEFAULT_ROSTER,
     return parse_roster(data, {key: spec["levels"] for key, spec in arms.items()})
 
 
-# --- estagio de tone compartilhado -------------------------------------------
-def tone_cutoff_hz(level: int, n_levels: int = TONE_LEVELS) -> float:
-    """Corte do nivel de tone, log-espacado em `TONE_CUTOFF_HZ`."""
-    if n_levels < 2:
-        raise ValueError("n_levels deve ser >= 2")
-    if not 0 <= level < n_levels:
-        raise ValueError(f"level {level} fora de [0, {n_levels})")
-    lo, hi = TONE_CUTOFF_HZ
-    return float(lo * (hi / lo) ** (level / (n_levels - 1)))
-
-
-def apply_tone(segment: np.ndarray, sr: int, cutoff_hz: float) -> np.ndarray:
-    """Aplica o estagio de tone. Identico em todos os arms, por construcao."""
-    return Pedalboard([LowpassFilter(cutoff_frequency_hz=float(cutoff_hz))])(
-        segment, sr, reset=True
-    )
-
-
 class LoadedArm:
     """Um arm carregado uma vez por processo; so o knob de drive muda entre renders."""
 
@@ -241,7 +214,7 @@ class LoadedArm:
             self.plugin(silence, self.sr, reset=True)
 
     def render(self, segment: np.ndarray, sr: int, drive_knob: float) -> np.ndarray:
-        """So a nao-linearidade; o tone e aplicado depois, por `apply_tone`."""
+        """A nao-linearidade do arm, sem normalizar a loudness."""
         if self.arm.backend == "pedalboard":
             board = Pedalboard([Distortion(drive_db=float(drive_knob))])
             return board(segment, sr, reset=True)

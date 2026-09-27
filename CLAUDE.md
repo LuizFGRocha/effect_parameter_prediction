@@ -219,6 +219,13 @@ Decisions already made — don't reopen without new evidence:
   arm can't reach would leave a hole in the fully-crossed grid (`GridIndex` and
   `validate_pairing` require it).
 - The reference is the anchor of the dB unit that the evaluation reports.
+- **No tone factor** (dropped 2026-09-27). It was our own low-pass after the
+  nonlinearity, meant as an exactly shared positive control, but each pedal's own EQ
+  (in some, gain-dependent) made "tone level t" differ across arms. The grid is drive
+  only (`d0`…`d7`, `config_index == drive_level`). Positive controls are same-arm
+  retrieval (the diagonal) and `lsp-tanh`; content is an *invariance* check (a probe
+  on `z_e` should stay near chance), not a positive control. `render` uses all 400
+  recordings as content by default (was 100 × 40 configs).
 
 **Adding a pedal**: find its drive parameter with `gefx inspect-plugin <vst3>`, add it to
 the roster with a `sweep`, run `calibrate`. It fits if its Rnonlin reaches
@@ -267,8 +274,11 @@ yet. Next steps on Linux:
    ```
 3. Run `pytest` — this session's changes (read-only `tune`, `load_arm` NaN retry, no
    manual levels) were only tested on Windows, where the Keras tests can't run.
-4. Render everything into a new root (the old `datasets/disent` has the 7-arm roster):
-   `gefx disent render --output-root datasets/disent_v2`, then train.
+4. Render everything into a new root (the old `datasets/disent` has the 7-arm roster
+   and the tone grid): `gefx disent render --output-root datasets/disent_v2`, then train.
+
+Steps 1–3 were done on Linux on 2026-09-27: the Linux dm-Rat build exposes the same
+parameters and hits the targets within 0.001, and the suite passes.
 
 The repo's `.git/config` has `core.autocrlf=false` and `core.filemode=false`, set for the
 Windows side of the dual boot (no longer used); unset them if they get in the way.

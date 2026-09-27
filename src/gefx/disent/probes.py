@@ -17,7 +17,6 @@ PROBE_FACTORS: Dict[str, str] = {
     "arm": "implementacao (deve sair)",
     "content_id": "conteudo (deve sair)",
     "drive_level": "configuracao (deve ficar)",
-    "tone_level": "configuracao (deve ficar)",
 }
 
 DEFAULT_FOLDS = 3
