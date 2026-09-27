@@ -2,7 +2,7 @@
 
 `gefx disent tune --recording minha.wav` sobe um servidor em localhost que
 renderiza a gravacao em cada arm, no knob que `calibrate` gravou para cada nivel,
-na cadeia do render sem o tone (loudness -> arm -> loudness). A pagina alterna A/B
+na cadeia do render (loudness -> arm -> loudness). A pagina alterna A/B
 entre a referencia e o arm no mesmo ponto da gravacao.
 
 So para ver e ouvir: os niveis vem sempre do pareamento pelo Rnonlin, e a pagina

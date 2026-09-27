@@ -1,8 +1,8 @@
 """Renderizador da grade completa conteudo x configuracao x arm.
 
-Cadeia de cada render, a do POC I com o tone depois da nao-linearidade:
+Cadeia de cada render, a do POC I:
 
-    segmento -> normalize_loudness -> nao-linearidade do arm -> tone -> normalize_loudness
+    segmento -> normalize_loudness -> nao-linearidade do arm -> normalize_loudness
 
 O inicio do segmento de cada conteudo depende so de `seed` e do indice do
 conteudo, entao o mesmo `content_id` e o mesmo trecho em toda a grade. Os knobs
@@ -20,8 +20,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from gefx.audio import export_audio, load_audio_file, normalize_loudness
-from gefx.disent.arms import (DEFAULT_LEVELS, DEFAULT_ROSTER, Arm, LoadedArm, apply_tone,
-                              load_roster, tone_cutoff_hz)
+from gefx.disent.arms import DEFAULT_LEVELS, DEFAULT_ROSTER, Arm, LoadedArm, load_roster
 from gefx.disent.grid import Config, all_configs, render_name, split_contents
 from gefx.disent.sidecar import (
     EFFECT_FOLDER,
@@ -48,7 +47,7 @@ class RenderOptions:
     output_root: Path = Path("datasets/disent")
     roster: Path = DEFAULT_ROSTER
     levels: Path = DEFAULT_LEVELS
-    n_contents: int = 100
+    n_contents: int = 400
     segment_seconds: float = 2.0
     seed: int = 20260906
     split_seed: int = 20260906
@@ -106,10 +105,7 @@ def _render_chunk(
         )
         for index, config in enumerate(configs):
             drive = spec.levels[config.drive_level]
-            cutoff = tone_cutoff_hz(config.tone_level)
-            wet = loaded.render(segment, sr, drive)
-            wet = apply_tone(wet, sr, cutoff)
-            wet = normalize_loudness(wet, sr)
+            wet = normalize_loudness(loaded.render(segment, sr, drive), sr)
 
             name = render_name(item.content_id, config, index)
             export_audio(wet, sr, folder / name)
@@ -124,9 +120,7 @@ def _render_chunk(
                     config_index=index,
                     config_key=config.key,
                     drive_level=config.drive_level,
-                    tone_level=config.tone_level,
                     drive_knob=float(drive),
-                    tone_cutoff_hz=float(cutoff),
                     # Pareado pelo Rnonlin: o nivel vale o que a referencia vale nele.
                     drive_db_equivalente=float(reference_levels[config.drive_level]),
                     split=item.split,

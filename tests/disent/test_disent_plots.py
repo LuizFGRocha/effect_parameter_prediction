@@ -41,7 +41,7 @@ def _metrics():
         },
         "overall": {"n": 5600, "drive_level": {"exact": 0.2}, "mae_db": 8.0},
         "catalog_size": 4800,
-        "alphabet": {"drive_level": 8, "tone_level": 5},
+        "alphabet": {"drive_level": 8},
         "drive_db_ladder": [5.0 + 4.0 * nivel for nivel in range(8)],
         "strata": STRATA,
     }
@@ -63,7 +63,7 @@ def _run(root, nome, technique, drive_exact, mae_db, seed=1):
     (pasta / "run.json").write_text(json.dumps({
         "config": {"technique": technique, "seed": seed},
         "steps_executed": 0,
-        "summary": {"drive_exact": drive_exact, "tone_exact": 0.4, "mae_db": mae_db,
+        "summary": {"drive_exact": drive_exact, "mae_db": mae_db,
                     "same_arm_drive_exact": drive_exact + 0.01},
     }), encoding="utf-8")
     (pasta / "metrics.json").write_text(json.dumps(_metrics()), encoding="utf-8")

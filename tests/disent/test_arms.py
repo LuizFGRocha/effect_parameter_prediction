@@ -8,14 +8,10 @@ import pytest
 
 from gefx.disent.arms import (
     DEFAULT_ROSTER,
-    TONE_CUTOFF_HZ,
-    TONE_LEVELS,
     LoadedArm,
-    apply_tone,
     load_levels,
     load_roster,
     parse_roster,
-    tone_cutoff_hz,
     write_levels,
 )
 
@@ -134,33 +130,3 @@ class _NanPlugin:
         out = np.array(audio, dtype=np.float32)
         out[:, 32:] = np.nan
         return out
-
-
-# --- estagio de tone ----------------------------------------------------------
-def test_tone_cutoff_hits_the_declared_endpoints():
-    assert tone_cutoff_hz(0) == pytest.approx(TONE_CUTOFF_HZ[0])
-    assert tone_cutoff_hz(TONE_LEVELS - 1) == pytest.approx(TONE_CUTOFF_HZ[1])
-
-
-def test_tone_cutoff_is_log_spaced():
-    cutoffs = [tone_cutoff_hz(level) for level in range(TONE_LEVELS)]
-    ratios = [b / a for a, b in zip(cutoffs, cutoffs[1:])]
-    assert ratios == pytest.approx([ratios[0]] * len(ratios))
-
-
-def test_tone_cutoff_rejects_levels_out_of_range():
-    with pytest.raises(ValueError, match="fora de"):
-        tone_cutoff_hz(TONE_LEVELS)
-    with pytest.raises(ValueError, match="fora de"):
-        tone_cutoff_hz(-1)
-
-
-def test_apply_tone_attenuates_more_at_lower_cutoff():
-    sr = 44100
-    rng = np.random.default_rng(0)
-    signal = (rng.standard_normal((1, sr)) * 0.1).astype(np.float32)
-    energies = [
-        float(np.sum(apply_tone(signal, sr, tone_cutoff_hz(level)) ** 2))
-        for level in range(TONE_LEVELS)
-    ]
-    assert energies == sorted(energies)

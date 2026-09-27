@@ -75,13 +75,9 @@ class TrainConfig:
 
 # --- dados --------------------------------------------------------------------
 def aux_targets(frame: pd.DataFrame) -> np.ndarray:
-    """Niveis de drive e tone em [0, 1], na escala do recorte e nao da grade cheia."""
-    columns = []
-    for axis in ("drive_level", "tone_level"):
-        values = frame[axis].to_numpy(dtype=np.float32)
-        span = max(float(values.max()), 1.0)
-        columns.append(values / span)
-    return np.stack(columns, axis=1)
+    """Nivel de drive em [0, 1], na escala do recorte e nao da grade cheia."""
+    values = frame["drive_level"].to_numpy(dtype=np.float32)
+    return (values / max(float(values.max()), 1.0)).reshape(-1, 1)
 
 
 # --- passo de treino ----------------------------------------------------------
@@ -276,7 +272,6 @@ def summarize(metrics: Dict[str, object]) -> Dict[str, float]:
     same = metrics["same_arm_control"]  # type: ignore[index]
     return {
         "drive_exact": float(overall["drive_level"]["exact"]),
-        "tone_exact": float(overall["tone_level"]["exact"]),
         "mae_db": float(overall["mae_db"]),
         "same_arm_drive_exact": float(same["drive_level"]["exact"]),
     }

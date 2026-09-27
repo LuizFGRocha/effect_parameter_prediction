@@ -1,7 +1,8 @@
 """Grade de configuracoes e particao de conteudo do POC II.
 
-- A grade: niveis de drive x 5 de tone. O nivel e um indice; o valor de knob
-  depende do arm e sai do roster, e o corte do tone e o mesmo em todos.
+- A grade: os niveis de drive. O nivel e um indice; o valor de knob depende do
+  arm e sai do arquivo de niveis. Nao ha tone: a EQ propria de cada pedal, que
+  em alguns muda com o ganho, impedia um fator de tone igual em todos.
 - A particao: treino / catalogo / consulta, disjuntas por conteudo, para a busca
   nao acertar reconhecendo o que foi tocado.
 """
@@ -13,12 +14,10 @@ from typing import Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
 
-from gefx.disent.arms import TONE_LEVELS
-
 SPLITS: Tuple[str, ...] = ("train", "catalog", "query")
 DEFAULT_SPLIT_FRACTIONS: Mapping[str, float] = {"train": 0.6, "catalog": 0.2, "query": 0.2}
 
-_CONFIG_KEY = re.compile(r"^d(\d+)t(\d+)$")
+_CONFIG_KEY = re.compile(r"^d(\d+)$")
 
 
 @dataclass(frozen=True, order=True)
@@ -26,36 +25,30 @@ class Config:
     """Uma configuracao da grade, em indices de nivel."""
 
     drive_level: int
-    tone_level: int
 
     @property
     def key(self) -> str:
-        return f"d{self.drive_level}t{self.tone_level}"
+        return f"d{self.drive_level}"
 
 
-def all_configs(drive_levels: int, tone_levels: int = TONE_LEVELS) -> List[Config]:
-    """As configuracoes na ordem canonica (drive externo, tone interno).
-
-    A ordem e o indice de classe: muda-la invalida modelos treinados.
-    """
-    return [
-        Config(drive, tone) for drive in range(drive_levels) for tone in range(tone_levels)
-    ]
+def all_configs(drive_levels: int) -> List[Config]:
+    """As configuracoes na ordem canonica; o indice de classe e o nivel de drive."""
+    return [Config(drive) for drive in range(drive_levels)]
 
 
-def config_index(config: Config, tone_levels: int = TONE_LEVELS) -> int:
-    return config.drive_level * tone_levels + config.tone_level
+def config_index(config: Config) -> int:
+    return config.drive_level
 
 
-def config_from_index(index: int, tone_levels: int = TONE_LEVELS) -> Config:
-    return Config(index // tone_levels, index % tone_levels)
+def config_from_index(index: int) -> Config:
+    return Config(index)
 
 
 def parse_config_key(key: str) -> Config:
     match = _CONFIG_KEY.match(key)
     if match is None:
         raise ValueError(f"chave de configuracao invalida: {key!r}")
-    return Config(int(match.group(1)), int(match.group(2)))
+    return Config(int(match.group(1)))
 
 
 def render_name(content_id: str, config: Config, index: int) -> str:

@@ -55,7 +55,7 @@ def test_above_chance_makes_factors_with_different_class_counts_comparable():
 def test_the_factors_cover_both_halves_of_the_claim_and_both_config_axes():
     """Sondar so o que deve sair mediria metade da afirmacao: um codigo
     constante zera implementacao e conteudo e nao serve para nada."""
-    assert set(PROBE_FACTORS) == {"arm", "content_id", "drive_level", "tone_level"}
+    assert set(PROBE_FACTORS) == {"arm", "content_id", "drive_level"}
 
 
 def test_a_factor_missing_from_the_sidecar_is_refused():
@@ -87,7 +87,7 @@ def test_probe_study_gives_one_row_per_run_and_factor(tmp_path, monkeypatch):
     for nome in ("contrastive_aux", "random_encoder"):
         (tmp_path / nome).mkdir()
         (tmp_path / nome / "run.json").write_text("{}", encoding="utf-8")
-    frame = _frame().assign(tone_level=lambda f: f["drive_level"])
+    frame = _frame()
     codes = np.stack([frame["drive_level"].to_numpy(dtype=float),
                       np.zeros(len(frame))], axis=1)
     monkeypatch.setattr(

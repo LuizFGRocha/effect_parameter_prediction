@@ -35,10 +35,10 @@ def test_encode_is_independent_of_the_aux_head():
     assert np.array_equal(before, np.asarray(model.encode(x)))
 
 
-def test_the_forward_pass_gives_the_code_and_the_two_levels_in_the_unit_interval():
+def test_the_forward_pass_gives_the_code_and_the_drive_level_in_the_unit_interval():
     z_e, aux = EffectModel(SMALL)(_batch(), training=False)
     assert z_e.shape == (4, SMALL.effect_dim)
-    assert aux.shape == (4, 2)
+    assert aux.shape == (4, 1)
     assert np.all((np.asarray(aux) >= 0.0) & (np.asarray(aux) <= 1.0))
 
 

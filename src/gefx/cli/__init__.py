@@ -165,10 +165,9 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
         rotulo = "B1 -- regressor do POC I, sem retreino"
     overall = result.metrics["overall"]
     print(f"{rotulo}, entre implementacoes, {overall['n']} consultas")
-    for axis in ("drive_level", "tone_level"):
-        item = overall[axis]
-        print(f"  {axis:12s} exato {item['exact']:.1%} (acaso {item['chance']:.1%})  "
-              f"+-1 {item['within_one']:.1%}  MAE {item['mae_levels']:.2f} niveis")
+    item = overall["drive_level"]
+    print(f"  {'drive_level':12s} exato {item['exact']:.1%} (acaso {item['chance']:.1%})  "
+          f"+-1 {item['within_one']:.1%}  MAE {item['mae_levels']:.2f} niveis")
     print(f"  {'drive':12s} MAE {overall['mae_db']:.2f} dB equivalentes")
     print("\npor arm de consulta (drive exato):")
     for arm, item in sorted(result.metrics["per_query_arm"].items()):
@@ -441,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
                                help="Os plugins de cada arm.")
     disent_render.add_argument("--levels", default="experiments/disent_levels.yaml",
                                help="Os knobs de drive de cada nivel (so `levels` e usado).")
-    disent_render.add_argument("--contents", type=int, default=100,
+    disent_render.add_argument("--contents", type=int, default=400,
                                help="Gravacoes distintas usadas como conteudo.")
     disent_render.add_argument("--segment-seconds", type=float, default=2.0)
     disent_render.add_argument("--seed", type=int, default=20260906)
