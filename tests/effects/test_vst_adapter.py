@@ -136,3 +136,52 @@ def test_process_mono_duplicates_and_averages_for_stereo_plugins():
     out = process_mono(plugin, True, segment, 44100)
     assert out.shape == (1, 6)
     assert np.allclose(out, segment * 2.0)  # media de 1x e 3x
+
+
+# --- instancia que nasce NaN -------------------------------------------------------
+class _Plugin:
+    """Sai NaN a partir da amostra 8192 quando `broken`, como o Fuzz da VZtec."""
+
+    def __init__(self, broken):
+        object.__setattr__(self, "parameters", {})
+        object.__setattr__(self, "broken", broken)
+
+    def __call__(self, audio, sr, reset):
+        out = np.array(audio, dtype=np.float32)
+        if self.broken:
+            out[:, 8192:] = np.nan
+        return out
+
+
+def _fake_loader(monkeypatch, pattern):
+    import pedalboard
+
+    made = []
+
+    def load_plugin(path, **kwargs):
+        made.append(_Plugin(pattern[len(made)]))
+        return made[-1]
+
+    monkeypatch.setattr(pedalboard, "load_plugin", load_plugin)
+    monkeypatch.setattr(vst_adapter, "_BROKEN", [])
+    return made
+
+
+def test_load_arm_swaps_an_instance_that_comes_out_nan(monkeypatch):
+    made = _fake_loader(monkeypatch, [True, False])
+    plugin, stereo = vst_adapter.load_arm({"path": "fuzz.vst3", "fixed": {}})
+    assert plugin is made[1] and not plugin.broken
+    # A ruim fica viva: descarta-la antes de carregar outra nao resolve no plugin real.
+    assert vst_adapter._BROKEN == [made[0]]
+
+
+def test_load_arm_gives_up_after_the_attempts(monkeypatch):
+    _fake_loader(monkeypatch, [True] * vst_adapter.LOAD_ATTEMPTS)
+    with pytest.raises(RuntimeError, match="NaN"):
+        vst_adapter.load_arm({"path": "fuzz.vst3", "fixed": {}})
+
+
+def test_load_arm_keeps_a_healthy_first_instance(monkeypatch):
+    made = _fake_loader(monkeypatch, [False])
+    plugin, _ = vst_adapter.load_arm({"path": "x.vst3", "fixed": {}})
+    assert plugin is made[0] and vst_adapter._BROKEN == []

@@ -180,16 +180,16 @@ The level of distortion `i` must sound the same in every implementation (arm) �
 equivalence is what the cross-arm retrieval tests. Two files:
 
 - `experiments/disent_roster.yaml` — hand-edited: each arm's plugin, `drive_param`,
-  `fixed` params, `stratum` and `sweep: [min, max]` (the knob range to scan; required for
+  `fixed` params, `stratum`, `sweep: [min, max]` (the knob range to scan; required for
   the pedalboard backend and for knobs that go to −inf).
-- `experiments/disent_levels.yaml` — written by tools, never by hand: per arm `auto`
-  (what `calibrate` computed), `levels` (what `render` uses; ear adjustments go here) and
-  `unmatched` (1-based levels the arm can't reach). `parse_roster` refuses levels that
-  aren't strictly increasing or differ in count between arms.
+- `experiments/disent_levels.yaml` — written only by `calibrate`, never by hand: per arm
+  `levels` (what `render` uses) and `unmatched` (1-based levels the arm can't reach).
+  `parse_roster` refuses levels that aren't strictly increasing or differ in count
+  between arms.
 
 ```bash
 gefx disent calibrate                       # ~3.5 min, 8 processes; rewrites the levels file
-gefx disent tune --recording guitar.wav     # localhost page: sliders + A/B or L/R vs reference
+gefx disent tune --recording guitar.wav     # localhost page to listen: A/B or L/R vs reference
 gefx disent render                          # uses `levels`; copies roster + levels into the dataset
 ```
 
@@ -198,11 +198,15 @@ scored with **Rnonlin** (Tan, Moore, Zacharov & Mattila, JAES 2004 — gammatone
 cross-correlation between dry and wet; 1 = clean). The reference (`pedalboard-tanh`)
 spans `--ref-db 18.45 39` with levels **equally spaced in 1 − Rnonlin**, and each other
 arm gets the knob matching each level's Rnonlin. Levels outside an arm's reach go to the
-end of its knob and are flagged `unmatched` — the ear decides those. Curves start at each
-arm's cleanest knob (at very low gain BYOD-MXR gets *less* clean: noise, not drive).
+end of its knob and are flagged `unmatched`. Curves start at each arm's cleanest knob (at
+very low gain BYOD-MXR gets *less* clean: noise, not drive).
 
 Decisions already made — don't reopen without new evidence:
 
+- **Levels are always the automatic Rnonlin matching.** Manual adjustment by ear (sliders
+  and saving in `gefx disent tune`, and the Reaper JSFX) was dropped on 2026-09-27;
+  `unmatched` levels are accepted as they come out. `tune` stays as a **read-only**
+  listening page — it has no save route and must not get one back.
 - **Crest-factor drop was tried and rejected**: it saturates at high drive and is fooled
   by filtering after the clipper (BYOD read as half-scale; boosting the input doesn't
   help). Spectral descriptors (centroid, flatness) and % clipped samples were also worse.
@@ -214,36 +218,57 @@ Decisions already made — don't reopen without new evidence:
   top levels sounded identical. The weakest arm caps the range for everyone: a level some
   arm can't reach would leave a hole in the fully-crossed grid (`GridIndex` and
   `validate_pairing` require it).
-- The reference is never adjusted by ear in `tune`; it is the anchor of the dB unit that
-  the evaluation reports.
+- The reference is the anchor of the dB unit that the evaluation reports.
 
 **Adding a pedal**: find its drive parameter with `gefx inspect-plugin <vst3>`, add it to
-the roster with a `sweep`, run `calibrate`. It fits if its Rnonlin reaches ≥ 0.989 at the
-low end and ≤ 0.846 at the high end (the printed range); otherwise it gets `unmatched`
-levels. Then either accept by ear, drop the pedal, or lower `--ref-db` MAX — which
-changes every arm's levels, so do it deliberately. `calibrate` refuses to overwrite ear
-adjustments unless `--force`.
+the roster with a `sweep`, run `calibrate`. It fits if its Rnonlin reaches
+≥ 0.989 at the low end and ≤ 0.846 at the high end (the printed range); otherwise it gets
+`unmatched` levels. Then either accept them, drop the pedal, or lower `--ref-db` MAX —
+which changes every arm's levels, so do it deliberately.
 
-## Working from Windows (dual boot, same folder)
+Pedals evaluated on 2026-09-27:
 
-This repo lives on an NTFS partition shared with a Linux install; Windows sees the same
-working tree.
+- Added: `dm-rat` (knob `distortion`, `filter` at 0 = open, like the hardware) reaches
+  0.998–0.721.
+- Left out: ChowCentaur only reaches 0.930 (to be evaluated later at the levels it
+  reaches, not as a training arm); TAL-Bitcrusher is not a drive (`sample_rate` is
+  non-monotonic and inverted, `compand` stops at 0.931); TSE 808 is VST2-only, which
+  pedalboard can't load.
+- Dropped: VZtec Fuzz (Face voice, `gain` 50, knob `input_level`). Its cleanest point is
+  0.9821 whatever the gain or voice, so level 1 was `unmatched`; fitting it would need
+  `--ref-db` MIN ≥ 20.64 dB (≈21 dB off its flat top), which moves every arm's levels.
+  It is also slightly stateful across calls despite `reset=True`.
+- Plugin robustness kept from the Fuzz: the first instance of a plugin in a process can
+  come out NaN from sample 8192 of every call (the Fuzz did in ~half of the processes;
+  not concurrency or timing — an earlier "two instances at once" diagnosis was wrong).
+  `load_arm`'s probe catches it and loads another instance, keeping the broken one alive
+  in `_BROKEN` (freeing it first doesn't help). `LoadedArm.render` also raises on
+  non-finite output instead of writing it.
 
-- **Never create or modify `.venv`** — it is the Linux environment (TF + CUDA). Use
-  `.venv-win` (gitignored). Python ≥ 3.12. `pip install -e .` will probably fail on
-  `tensorflow[and-cuda]`; if so, `pip install -e . --no-deps` and install `numpy scipy
-  pandas pyyaml pedalboard pyloudnorm soundfile librosa scikit-learn pytest` by hand.
-  `calibrate`, `tune` and `render` don't use TensorFlow, and importing `gefx` doesn't
-  load it (`tests/test_import_hygiene.py`). Training stays on Linux.
-- Set `git config core.autocrlf false` and `git config core.filemode false` in this repo
-  before any git command, or every file will show as modified.
-- `plugins/real/` holds Linux VST3 builds. Windows needs Windows builds (a `.vst3` bundle
-  can carry both under `Contents/`). Parameter names and BYOD's `program` raw values can
-  differ between versions/OSes — `LoadedArm` fails loudly on a missing parameter; re-check
-  with `gefx inspect-plugin` and re-run `calibrate` after any plugin change.
-- `ProcessPoolExecutor` uses spawn on Windows; running through the `gefx` entry point is
-  fine.
+State as of 2026-09-27: 8 arms calibrated (the 7 original + `dm-rat`). `dm-rat` is
+dm-Rat v0.1.2 (github.com/davemollen/dm-Rat); it was calibrated with its Windows build
+and its Linux build (`plugins/real/dm-Rat.vst3/Contents/x86_64-linux/`) has not been run
+yet. Next steps on Linux:
 
-State as of 2026-09-26: the 7 arms above are calibrated and committed. Next step
-(on Windows): add more pedals, run `calibrate`, check `unmatched`, verify by ear with
-`tune`, then render the dataset there and train on Linux.
+1. `gefx inspect-plugin plugins/real/dm-Rat.vst3` must list `distortion`, `filter` and
+   `volume` (names can differ between builds; `LoadedArm` fails loudly if they do).
+2. Check it hits the targets at its stored levels — the two lines must agree to ~0.001
+   (BYOD, calibrated on Linux, matched its targets on Windows within 0.001). If they don't,
+   re-run `gefx disent calibrate` (all arms; it rewrites the levels file):
+   ```bash
+   python -c "
+   from pathlib import Path
+   from gefx.disent.arms import load_roster, load_levels
+   from gefx.disent.calibrate import arm_curve, load_segments
+   r = load_roster(); segs, sr = load_segments(Path('datasets/unprocessed_samples'), 8)
+   print('alvo  ', [round(t, 3) for t in load_levels()['targets']])
+   print('dm-rat', [round(v, 3) for v in arm_curve(r.arm('dm-rat'), segs, sr, r.arm('dm-rat').levels)[1]])
+   "
+   ```
+3. Run `pytest` — this session's changes (read-only `tune`, `load_arm` NaN retry, no
+   manual levels) were only tested on Windows, where the Keras tests can't run.
+4. Render everything into a new root (the old `datasets/disent` has the 7-arm roster):
+   `gefx disent render --output-root datasets/disent_v2`, then train.
+
+The repo's `.git/config` has `core.autocrlf=false` and `core.filemode=false`, set for the
+Windows side of the dual boot (no longer used); unset them if they get in the way.

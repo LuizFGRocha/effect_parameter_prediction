@@ -1,15 +1,11 @@
-"""Pareamento pelo Rnonlin e o servidor do pareamento de ouvido, sem plugin."""
+"""Pareamento pelo Rnonlin, sem plugin."""
 from __future__ import annotations
-
-import io
-import wave
 
 import numpy as np
 import pytest
 
 from gefx.disent.arms import Arm
 from gefx.disent.calibrate import arm_curve, arm_knobs, knob_for, rnonlin
-from gefx.disent.tune import slider_bounds, wav_bytes
 
 SR = 44100
 
@@ -77,13 +73,3 @@ def test_an_arm_that_reaches_nothing_spreads_over_the_whole_knob():
     values, unmatched = arm_knobs([0.0, 10.0], [0.0, 1.0], [2.0, 3.0, 4.0])
     assert values == pytest.approx([0.0, 5.0, 10.0])
     assert unmatched == [1, 2, 3]
-
-
-def test_each_slider_spans_its_neighbours():
-    assert slider_bounds([1.0, 2.0, 3.0], (0.0, 5.0)) == [(0.0, 2.0), (1.0, 3.0), (2.0, 5.0)]
-
-
-def test_wav_bytes_is_a_mono_16_bit_wav():
-    with wave.open(io.BytesIO(wav_bytes(_note(), SR))) as handle:
-        assert (handle.getnchannels(), handle.getsampwidth(), handle.getframerate()) == (1, 2, SR)
-        assert handle.getnframes() == _note().shape[0]

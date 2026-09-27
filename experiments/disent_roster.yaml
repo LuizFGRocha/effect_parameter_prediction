@@ -1,7 +1,7 @@
 # Roster do POC II: as implementacoes de distorcao. Editado a mao.
 #
 # Os niveis de drive de cada arm ficam em `experiments/disent_levels.yaml`, escrito
-# por `gefx disent calibrate` e ajustado de ouvido com `gefx disent tune`. Os knobs
+# so por `gefx disent calibrate` (pareamento pelo Rnonlin). Os knobs
 # estao na unidade que o pedalboard enxerga (`gefx inspect-plugin <vst3> --sweep
 # <param>`), que nem sempre e a que a interface do plugin mostra.
 #
@@ -94,3 +94,12 @@ arms:
     fixed: *byod_fixed
     raw_fixed: {program: 0.275}  # Big Muff (Russian)
     settle_seconds: 3.0
+
+  # O `filter` do Rat escurece para a direita, como no pedal; em 0 fica aberto.
+  dm-rat:
+    stratum: S3
+    path: plugins/real/dm-Rat.vst3
+    drive_param: distortion
+    sweep: [0.0, 100.0]
+    fixed: {filter: 0.0, volume: 50.0}
+

@@ -127,7 +127,7 @@ def _render_chunk(
                     tone_level=config.tone_level,
                     drive_knob=float(drive),
                     tone_cutoff_hz=float(cutoff),
-                    # Pareado de ouvido: o nivel vale o que a referencia vale nele.
+                    # Pareado pelo Rnonlin: o nivel vale o que a referencia vale nele.
                     drive_db_equivalente=float(reference_levels[config.drive_level]),
                     split=item.split,
                 ).as_row()

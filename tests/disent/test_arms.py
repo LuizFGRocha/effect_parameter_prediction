@@ -1,6 +1,8 @@
 """O roster como dado: o que o YAML precisa ter para o render nao gastar horas a toa."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -8,6 +10,7 @@ from gefx.disent.arms import (
     DEFAULT_ROSTER,
     TONE_CUTOFF_HZ,
     TONE_LEVELS,
+    LoadedArm,
     apply_tone,
     load_levels,
     load_roster,
@@ -53,7 +56,7 @@ def test_arms_with_different_level_counts_are_refused():
 
 
 def test_levels_out_of_order_are_refused():
-    # O ajuste de ouvido pode cruzar dois sliders vizinhos; o render nao aceita.
+    # Uma curva nao monotona pode inverter dois niveis vizinhos; o render nao aceita.
     with pytest.raises(ValueError, match="crescentes"):
         parse_roster(_data(), {**LEVELS, "outro": [0.1, 0.3, 0.2]})
 
@@ -102,7 +105,7 @@ def test_a_required_field_missing_is_refused(missing):
 
 def test_the_levels_file_round_trips(tmp_path):
     data = {"descriptor": "crest_drop_db", "targets": [1.0, 2.0, 3.0],
-            "arms": {key: {"auto": values, "levels": list(values)}
+            "arms": {key: {"levels": values, "unmatched": []}
                      for key, values in LEVELS.items()}}
     path = tmp_path / "levels.yaml"
     write_levels(path, data)
@@ -112,6 +115,25 @@ def test_the_levels_file_round_trips(tmp_path):
 def test_an_unknown_arm_is_refused_by_name():
     with pytest.raises(KeyError, match="nao esta no roster"):
         parse_roster(_data()).arm("z")
+
+
+def test_a_plugin_that_returns_nan_fails_instead_of_writing_it():
+    # Um plugin pode sair NaN sem erro (o Fuzz da VZtec saia); o render gravaria o wav assim.
+    loaded = LoadedArm.__new__(LoadedArm)
+    loaded.arm = parse_roster(_data()).arm("outro")
+    loaded.stereo = False
+    loaded.plugin = _NanPlugin()
+    with pytest.raises(RuntimeError, match="NaN"):
+        loaded.render(np.zeros((1, 64), dtype=np.float32), 44100, 0.5)
+
+
+class _NanPlugin:
+    parameters = {"gain": SimpleNamespace(min_value=0.0, max_value=1.0)}
+
+    def __call__(self, audio, sr, reset):
+        out = np.array(audio, dtype=np.float32)
+        out[:, 32:] = np.nan
+        return out
 
 
 # --- estagio de tone ----------------------------------------------------------
