@@ -44,3 +44,6 @@ addopts = ["-q", "--strict-markers"]
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["gefx*"]
+
+[tool.setuptools.package-data]
+"gefx.disent" = ["*.html"]

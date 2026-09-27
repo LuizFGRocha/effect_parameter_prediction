@@ -173,3 +173,77 @@ probe); some parameters are only addressable via their displayed string (`BY_DIS
   this repo's chain-key layout, and feeds `results/teste_artigo`. **It is not reproducible
   from code in this repo** — the script that produced it was never committed, and the raw
   download it came from has been deleted. Treat it as source data, not a derived artifact.
+
+## POC II drive levels (`gefx.disent`)
+
+The level of distortion `i` must sound the same in every implementation (arm) — that
+equivalence is what the cross-arm retrieval tests. Two files:
+
+- `experiments/disent_roster.yaml` — hand-edited: each arm's plugin, `drive_param`,
+  `fixed` params, `stratum` and `sweep: [min, max]` (the knob range to scan; required for
+  the pedalboard backend and for knobs that go to −inf).
+- `experiments/disent_levels.yaml` — written by tools, never by hand: per arm `auto`
+  (what `calibrate` computed), `levels` (what `render` uses; ear adjustments go here) and
+  `unmatched` (1-based levels the arm can't reach). `parse_roster` refuses levels that
+  aren't strictly increasing or differ in count between arms.
+
+```bash
+gefx disent calibrate                       # ~3.5 min, 8 processes; rewrites the levels file
+gefx disent tune --recording guitar.wav     # localhost page: sliders + A/B or L/R vs reference
+gefx disent render                          # uses `levels`; copies roster + levels into the dataset
+```
+
+How `calibrate` works (`gefx/disent/calibrate.py`): every arm's knob is swept and
+scored with **Rnonlin** (Tan, Moore, Zacharov & Mattila, JAES 2004 — gammatone band
+cross-correlation between dry and wet; 1 = clean). The reference (`pedalboard-tanh`)
+spans `--ref-db 18.45 39` with levels **equally spaced in 1 − Rnonlin**, and each other
+arm gets the knob matching each level's Rnonlin. Levels outside an arm's reach go to the
+end of its knob and are flagged `unmatched` — the ear decides those. Curves start at each
+arm's cleanest knob (at very low gain BYOD-MXR gets *less* clean: noise, not drive).
+
+Decisions already made — don't reopen without new evidence:
+
+- **Crest-factor drop was tried and rejected**: it saturates at high drive and is fooled
+  by filtering after the clipper (BYOD read as half-scale; boosting the input doesn't
+  help). Spectral descriptors (centroid, flatness) and % clipped samples were also worse.
+- Rnonlin was chosen because reference levels the user separated **by ear** had the most
+  regular steps in 1 − Rnonlin (CV 0.15–0.18 vs 0.21 in dB). Sanity check: `lsp-tanh`
+  (same curve and unit as the reference) lands within ~1 dB of it.
+- 18.45 dB is the first audibly distorted level (guitar at −26 LUFS); 39 dB keeps
+  `byod-bigmuff` (the weakest arm, Rnonlin floor 0.830) off its flat top — above that its
+  top levels sounded identical. The weakest arm caps the range for everyone: a level some
+  arm can't reach would leave a hole in the fully-crossed grid (`GridIndex` and
+  `validate_pairing` require it).
+- The reference is never adjusted by ear in `tune`; it is the anchor of the dB unit that
+  the evaluation reports.
+
+**Adding a pedal**: find its drive parameter with `gefx inspect-plugin <vst3>`, add it to
+the roster with a `sweep`, run `calibrate`. It fits if its Rnonlin reaches ≥ 0.989 at the
+low end and ≤ 0.846 at the high end (the printed range); otherwise it gets `unmatched`
+levels. Then either accept by ear, drop the pedal, or lower `--ref-db` MAX — which
+changes every arm's levels, so do it deliberately. `calibrate` refuses to overwrite ear
+adjustments unless `--force`.
+
+## Working from Windows (dual boot, same folder)
+
+This repo lives on an NTFS partition shared with a Linux install; Windows sees the same
+working tree.
+
+- **Never create or modify `.venv`** — it is the Linux environment (TF + CUDA). Use
+  `.venv-win` (gitignored). Python ≥ 3.12. `pip install -e .` will probably fail on
+  `tensorflow[and-cuda]`; if so, `pip install -e . --no-deps` and install `numpy scipy
+  pandas pyyaml pedalboard pyloudnorm soundfile librosa scikit-learn pytest` by hand.
+  `calibrate`, `tune` and `render` don't use TensorFlow, and importing `gefx` doesn't
+  load it (`tests/test_import_hygiene.py`). Training stays on Linux.
+- Set `git config core.autocrlf false` and `git config core.filemode false` in this repo
+  before any git command, or every file will show as modified.
+- `plugins/real/` holds Linux VST3 builds. Windows needs Windows builds (a `.vst3` bundle
+  can carry both under `Contents/`). Parameter names and BYOD's `program` raw values can
+  differ between versions/OSes — `LoadedArm` fails loudly on a missing parameter; re-check
+  with `gefx inspect-plugin` and re-run `calibrate` after any plugin change.
+- `ProcessPoolExecutor` uses spawn on Windows; running through the `gefx` entry point is
+  fine.
+
+State as of 2026-09-26: the 7 arms above are calibrated and committed. Next step
+(on Windows): add more pedals, run `calibrate`, check `unmatched`, verify by ear with
+`tune`, then render the dataset there and train on Linux.

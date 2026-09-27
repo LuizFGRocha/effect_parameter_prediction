@@ -6,7 +6,7 @@ Cadeia de cada render, a do POC I com o tone depois da nao-linearidade:
 
 O inicio do segmento de cada conteudo depende so de `seed` e do indice do
 conteudo, entao o mesmo `content_id` e o mesmo trecho em toda a grade. Os knobs
-de drive vem do roster, que e copiado para a raiz do dataset.
+de drive vem do arquivo de niveis; ele e o roster sao copiados para a raiz do dataset.
 """
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from gefx.audio import export_audio, load_audio_file, normalize_loudness
-from gefx.disent.arms import DEFAULT_ROSTER, Arm, LoadedArm, apply_tone, load_roster, tone_cutoff_hz
+from gefx.disent.arms import (DEFAULT_LEVELS, DEFAULT_ROSTER, Arm, LoadedArm, apply_tone,
+                              load_roster, tone_cutoff_hz)
 from gefx.disent.grid import Config, all_configs, render_name, split_contents
 from gefx.disent.sidecar import (
     EFFECT_FOLDER,
@@ -46,6 +47,7 @@ class RenderOptions:
     input_dir: Path = Path("datasets/unprocessed_samples")
     output_root: Path = Path("datasets/disent")
     roster: Path = DEFAULT_ROSTER
+    levels: Path = DEFAULT_LEVELS
     n_contents: int = 100
     segment_seconds: float = 2.0
     seed: int = 20260906
@@ -141,7 +143,7 @@ def _chunks(items: Sequence[ContentItem], n: int) -> List[List[ContentItem]]:
 def render(options: RenderOptions) -> Dict[str, int]:
     """Renderiza a grade inteira e escreve um sidecar por arm."""
     root = Path(options.output_root)
-    roster = load_roster(options.roster)
+    roster = load_roster(options.roster, options.levels)
     wanted = list(options.arms) if options.arms else roster.keys()
     arms = [roster.arm(key) for key in wanted]
 
@@ -152,6 +154,7 @@ def render(options: RenderOptions) -> Dict[str, int]:
 
     root.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(options.roster, root / "roster.yaml")
+    shutil.copyfile(options.levels, root / "levels.yaml")
     chunks = _chunks(items, options.workers)
     totals: Dict[str, int] = {}
     for spec in arms:
