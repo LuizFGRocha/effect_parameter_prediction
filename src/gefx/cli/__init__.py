@@ -103,6 +103,30 @@ def _cmd_cross_impl_eval(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_disent_calibrate(args: argparse.Namespace) -> None:
+    from gefx.disent.calibrate import calibrate
+
+    calibrate(
+        roster_path=Path(args.roster),
+        levels_path=Path(args.levels),
+        input_dir=Path(args.input_dir),
+        curves_csv=Path(args.curves),
+        points=args.points,
+        n_segments=args.segments,
+        force=args.force,
+        workers=args.workers,
+        reference_db=tuple(args.ref_db),
+        n_levels=args.n_levels,
+    )
+
+
+def _cmd_disent_tune(args: argparse.Namespace) -> None:
+    from gefx.disent.tune import Tuner, serve
+
+    serve(Tuner(Path(args.recording), Path(args.roster), Path(args.levels)),
+          port=args.port, open_browser=not args.no_browser)
+
+
 def _cmd_disent_render(args: argparse.Namespace) -> None:
     from gefx.disent.render import RenderOptions, render
 
@@ -111,6 +135,7 @@ def _cmd_disent_render(args: argparse.Namespace) -> None:
             input_dir=Path(args.input_dir),
             output_root=Path(args.output_root),
             roster=Path(args.roster),
+            levels=Path(args.levels),
             n_contents=args.contents,
             segment_seconds=args.segment_seconds,
             seed=args.seed,
@@ -378,6 +403,35 @@ def build_parser() -> argparse.ArgumentParser:
     disent = sub.add_parser("disent", help="POC II: recuperacao por um codigo de efeito desemaranhado.")
     disent_sub = disent.add_subparsers(dest="disent_command", required=True)
 
+    disent_calibrate = disent_sub.add_parser(
+        "calibrate", help="Niveis de drive de todos os arms, pareados pelo Rnonlin.")
+    disent_calibrate.add_argument("--roster", default="experiments/disent_roster.yaml")
+    disent_calibrate.add_argument("--levels", default="experiments/disent_levels.yaml",
+                                  help="Reescrito inteiro.")
+    disent_calibrate.add_argument("--input-dir", default="datasets/unprocessed_samples")
+    disent_calibrate.add_argument("--curves", default="results/disent/calibracao/curvas.csv")
+    disent_calibrate.add_argument("--points", type=int, default=33,
+                                  help="Posicoes do knob varridas por arm.")
+    disent_calibrate.add_argument("--segments", type=int, default=8)
+    disent_calibrate.add_argument("--workers", type=int, default=8)
+    disent_calibrate.add_argument("--ref-db", type=float, nargs=2, metavar=("MIN", "MAX"),
+                                  default=[18.45, 39.0],
+                                  help="Faixa da referencia em dB; niveis igualmente espacados "
+                                       "em Rnonlin.")
+    disent_calibrate.add_argument("--n-levels", type=int, default=8)
+    disent_calibrate.add_argument("--force", action="store_true",
+                                  help="Descarta ajustes de ouvido ja gravados.")
+    disent_calibrate.set_defaults(func=_cmd_disent_calibrate)
+
+    disent_tune = disent_sub.add_parser(
+        "tune", help="Pagina local para ajustar os niveis de ouvido, com A/B contra a referencia.")
+    disent_tune.add_argument("--recording", required=True, help="Sua gravacao de guitarra (wav).")
+    disent_tune.add_argument("--roster", default="experiments/disent_roster.yaml")
+    disent_tune.add_argument("--levels", default="experiments/disent_levels.yaml")
+    disent_tune.add_argument("--port", type=int, default=8765)
+    disent_tune.add_argument("--no-browser", action="store_true")
+    disent_tune.set_defaults(func=_cmd_disent_tune)
+
     disent_render = disent_sub.add_parser(
         "render", help="Renderiza a grade combinatoria conteudo x configuracao x arm."
     )
@@ -386,7 +440,9 @@ def build_parser() -> argparse.ArgumentParser:
     disent_render.add_argument("--input-dir", default="datasets/unprocessed_samples")
     disent_render.add_argument("--output-root", default="datasets/disent")
     disent_render.add_argument("--roster", default="experiments/disent_roster.yaml",
-                               help="Plugins e niveis de drive pareados de ouvido.")
+                               help="Os plugins de cada arm.")
+    disent_render.add_argument("--levels", default="experiments/disent_levels.yaml",
+                               help="Os knobs de drive de cada nivel (so `levels` e usado).")
     disent_render.add_argument("--contents", type=int, default=100,
                                help="Gravacoes distintas usadas como conteudo.")
     disent_render.add_argument("--segment-seconds", type=float, default=2.0)

@@ -1,15 +1,13 @@
-# Roster do POC II: as implementacoes de distorcao e os niveis de drive de cada uma.
+# Roster do POC II: as implementacoes de distorcao. Editado a mao.
 #
-# Os niveis sao pareados DE OUVIDO: o nivel i de todo arm deve soar com a mesma
-# quantidade de distorcao que o nivel i da referencia. Os valores de `levels` estao
-# na unidade que o pedalboard enxerga (`gefx inspect-plugin <vst3> --sweep <param>`),
-# que nem sempre e a que a interface do plugin mostra.
+# Os niveis de drive de cada arm ficam em `experiments/disent_levels.yaml`, escrito
+# por `gefx disent calibrate` e ajustado de ouvido com `gefx disent tune`. Os knobs
+# estao na unidade que o pedalboard enxerga (`gefx inspect-plugin <vst3> --sweep
+# <param>`), que nem sempre e a que a interface do plugin mostra.
 #
-# Condicoes do pareamento, as mesmas do render: entrada normalizada em -26 LUFS
-# antes do plugin, e saidas comparadas com a mesma loudness.
-#
-# Os valores abaixo sao os da calibracao por descritor que produziu o dataset
-# atual -- ponto de partida, a substituir pelos de ouvido.
+# `sweep: [min, max]` e a faixa do knob varrida na calibracao. Obrigatoria no
+# backend pedalboard e onde o parametro vai a -inf; nos outros, estreita-la so
+# melhora a resolucao.
 #
 # `stratum` vai para o sidecar e agrupa o leave-one-arm-out:
 #   S1 mesma forma de nao-linearidade e mesma unidade da referencia
@@ -25,14 +23,14 @@ arms:
     stratum: S1
     backend: pedalboard  # tanh(x * 10**(drive_db/20)); a faixa do POC I e [5, 40] dB
     drive_param: drive_db
-    levels: [5.0, 9.156494140625, 13.31298828125, 17.469482421875, 21.6259765625,
-             25.782470703125, 29.93896484375, 34.095458984375]
+    sweep: [0.0, 60.0]
 
   lsp-tanh:
     stratum: S1
     path: plugins/real/lsp-plugins.vst3
     plugin_name: Clipper Mono
     drive_param: input_gain_db
+    sweep: [0.0, 48.0]
     fixed: &lsp_fixed
       bypass: false
       clipper_enable: true
@@ -46,41 +44,36 @@ arms:
       clipper_dc_offset: 0.0
       clipper_sigmoid_pumping_db: 0.0
       clipper_sigmoid_function: Hyperbolic tangent
-    levels: [8.6484375, 10.8984375, 13.6875, 16.921875, 20.6484375, 24.6328125,
-             28.96875, 33.375]
 
   lsp-hardclip:
     stratum: S2
     path: plugins/real/lsp-plugins.vst3
     plugin_name: Clipper Mono
     drive_param: input_gain_db
+    sweep: [0.0, 48.0]
     fixed:
       <<: *lsp_fixed
       clipper_sigmoid_function: Hard clip
-    levels: [13.78125, 14.0625, 14.578125, 15.421875, 16.5, 18.1640625, 21.6796875,
-             28.125]
 
   lsp-arctan:
     stratum: S2
     path: plugins/real/lsp-plugins.vst3
     plugin_name: Clipper Mono
     drive_param: input_gain_db
+    sweep: [0.0, 48.0]
     fixed:
       <<: *lsp_fixed
       clipper_sigmoid_function: Arctangent
-    levels: [7.03125, 9.0, 11.6015625, 15.09375, 19.2890625, 23.6484375, 28.1015625,
-             32.625]
 
   lsp-sine:
     stratum: S2
     path: plugins/real/lsp-plugins.vst3
     plugin_name: Clipper Mono
     drive_param: input_gain_db
+    sweep: [0.0, 48.0]
     fixed:
       <<: *lsp_fixed
       clipper_sigmoid_function: Sine
-    levels: [10.125, 12.46875, 14.953125, 17.3203125, 20.0625, 23.2265625, 27.5390625,
-             32.34375]
 
   # O BYOD escolhe o circuito por `program`, so enderecavel pelo valor cru (k/40),
   # e a troca e assincrona: sem a espera sai silencio ou o circuito anterior.
@@ -88,18 +81,16 @@ arms:
     stratum: S3
     path: plugins/real/BYOD.vst3
     drive_param: in_gain
+    sweep: [-60.0, 18.0]
     fixed: &byod_fixed {dry_wet: 100.0, out_gain: 0.0, mode: Mono, oversampling_factor: 4.0}
     raw_fixed: {program: 0.425}  # MXR Distortion
     settle_seconds: 3.0
-    levels: [-17.4375, -15.7353515625, -13.74609375, -11.2236328125, -8.0859375,
-             -4.3330078125, 0.240234375, 5.1826171875]
 
   byod-bigmuff:
     stratum: S3
     path: plugins/real/BYOD.vst3
     drive_param: in_gain
+    sweep: [-60.0, 18.0]
     fixed: *byod_fixed
     raw_fixed: {program: 0.275}  # Big Muff (Russian)
     settle_seconds: 3.0
-    levels: [-8.59375, -6.8642578125, -4.865234375, -2.57421875, 0.2333984375,
-             3.669921875, 8.791015625, 18.0]

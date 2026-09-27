@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Pareamento de drive</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --muted: #6b6b70;
+          --line: #d8d8dc; --accent: #2f6fdf; --active: #e8f0ff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #ececf0; --bg: #17171a; --muted: #9a9aa2; --line: #34343a;
+            --accent: #7aa7ff; --active: #22304d; }
+  }
+  body { font: 14px/1.4 system-ui, sans-serif; color: var(--fg); background: var(--bg);
+         margin: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 12px; }
+  .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .ab { font-weight: 600; min-width: 170px; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid var(--line); padding: 6px; text-align: center; vertical-align: top; }
+  th.arm { text-align: left; white-space: nowrap; }
+  td.active { background: var(--active); outline: 2px solid var(--accent); }
+  input[type=range] { width: 110px; }
+  .val { font-variant-numeric: tabular-nums; }
+  .moved .val { color: var(--accent); font-weight: 600; }
+  td.unmatched { border: 2px dashed var(--muted); }
+  .tag { color: var(--muted); font-size: 11px; }
+  button { font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Pareamento de drive</h1>
+<p>▶ toca o nivel em loop. <b>Espaco</b> alterna A (referencia) / B (arm) no mesmo ponto;
+em "lado a lado", toca os dois juntos, um em cada ouvido, e <b>Espaco</b> troca os lados.
+<b>Esc</b> para. Solte o slider para renderizar; setas fazem passos finos.
+Duplo clique no valor volta ao automatico.
+Celulas tracejadas ("sem alvo"): o descritor satura antes do nivel, o valor e so um chute.</p>
+<div class="bar">
+  <span class="ab" id="ab">parado</span>
+  <label><input type="checkbox" id="split"> lado a lado</label>
+  <button id="save">Salvar niveis</button>
+  <span id="status"></span>
+</div>
+<table id="grid"></table>
+<script>
+const ctx = new AudioContext();
+let state, player = null, cell = null;
+const buffers = {};   // "arm|knob" -> AudioBuffer
+
+async function fetchRender(arm, knob) {
+  const key = arm + "|" + knob;
+  if (!buffers[key]) {
+    const res = await fetch(`/render?arm=${encodeURIComponent(arm)}&knob=${knob}`);
+    buffers[key] = await ctx.decodeAudioData(await res.arrayBuffer());
+  }
+  return buffers[key];
+}
+
+function stop() {
+  if (player) { player.a.stop(); player.b.stop(); }
+  player = null;
+  document.getElementById("ab").textContent = "parado";
+}
+
+function position() {
+  return player ? (ctx.currentTime - player.t0) % player.duration : 0;
+}
+
+function play(bufA, bufB, showB, offset) {
+  if (player) player.a.stop(), player.b.stop();
+  const make = (buf) => {
+    const src = ctx.createBufferSource(), gain = ctx.createGain(), pan = ctx.createStereoPanner();
+    src.buffer = buf; src.loop = true; src.connect(gain).connect(pan).connect(ctx.destination);
+    return [src, gain, pan];
+  };
+  const [a, ga, pa] = make(bufA), [b, gb, pb] = make(bufB);
+  const t = ctx.currentTime + 0.05;
+  a.start(t, offset); b.start(t, offset);
+  player = {a, b, ga, gb, pa, pb, t0: t - offset, duration: bufA.duration, showB};
+  setAB(showB);
+}
+
+// Alternado: `showB` escolhe quem toca. Lado a lado: os dois tocam, e `showB`
+// poe o arm na esquerda.
+function setAB(showB) {
+  player.showB = showB;
+  const now = ctx.currentTime, split = document.getElementById("split").checked;
+  player.ga.gain.setTargetAtTime(split || !showB ? 1 : 0, now, 0.005);
+  player.gb.gain.setTargetAtTime(split || showB ? 1 : 0, now, 0.005);
+  player.pa.pan.setValueAtTime(split ? (showB ? 1 : -1) : 0, now);
+  player.pb.pan.setValueAtTime(split ? (showB ? -1 : 1) : 0, now);
+  const ref = `referencia nivel ${cell.level + 1}`, arm = `${cell.arm} nivel ${cell.level + 1}`;
+  document.getElementById("ab").textContent = split
+    ? (showB ? `E: ${arm} | D: referencia` : `E: referencia | D: ${arm}`)
+    : (showB ? `B: ${arm}` : `A: ${ref}`);
+}
+
+async function start(arm, level, keepPosition) {
+  const ref = state.arms.find(a => a.key === state.reference);
+  const offset = keepPosition ? position() : 0;
+  const showB = keepPosition && player ? player.showB : arm !== state.reference;
+  document.querySelectorAll("td.active").forEach(td => td.classList.remove("active"));
+  cell = {arm, level};
+  document.getElementById(`c-${arm}-${level}`).classList.add("active");
+  const [A, B] = await Promise.all([
+    fetchRender(ref.key, ref.levels[level]),
+    fetchRender(arm, currentKnob(arm, level)),
+  ]);
+  play(A, B, showB, offset);
+}
+
+function currentKnob(arm, level) {
+  return state.arms.find(a => a.key === arm).levels[level];
+}
+
+function build() {
+  const grid = document.getElementById("grid");
+  const n = state.arms[0].levels.length;
+  let head = "<tr><th></th>";
+  for (let i = 0; i < n; i++) head += `<th>nivel ${i + 1}</th>`;
+  grid.innerHTML = head + "</tr>";
+  for (const arm of state.arms) {
+    const row = document.createElement("tr");
+    const isRef = arm.key === state.reference;
+    row.innerHTML = `<th class="arm">${arm.key}${isRef ? " (ref.)" : ""}</th>`;
+    arm.levels.forEach((knob, i) => {
+      const td = document.createElement("td");
+      td.id = `c-${arm.key}-${i}`;
+      const [lo, hi] = arm.bounds[i];
+      td.innerHTML = (isRef ? "" :
+          `<input type="range" min="${lo}" max="${hi}" step="${(hi - lo) / 400}" value="${knob}"><br>`)
+        + `<span class="val">${knob.toFixed(2)}</span> <button>▶</button>`
+        + (arm.unmatched.includes(i + 1) ? `<div class="tag">sem alvo</div>` : "");
+      if (arm.unmatched.includes(i + 1)) td.classList.add("unmatched");
+      td.querySelector("button").onclick = () => { ctx.resume(); start(arm.key, i, false); };
+      const slider = td.querySelector("input");
+      const label = td.querySelector(".val");
+      const mark = () => td.classList.toggle("moved", arm.auto && arm.levels[i] !== arm.auto[i]);
+      const commit = async () => {
+        if (cell && cell.arm === arm.key && cell.level === i && player) start(arm.key, i, true);
+      };
+      if (slider) {
+        slider.oninput = () => { arm.levels[i] = parseFloat(slider.value); label.textContent = arm.levels[i].toFixed(2); mark(); };
+        slider.onchange = commit;
+        label.ondblclick = () => {
+          if (!arm.auto) return;
+          arm.levels[i] = arm.auto[i]; slider.value = arm.auto[i];
+          label.textContent = arm.auto[i].toFixed(2); mark(); commit();
+        };
+      }
+      mark();
+      row.appendChild(td);
+    });
+    grid.appendChild(row);
+  }
+}
+
+document.getElementById("split").onchange = () => { if (player) setAB(player.showB); };
+
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && player) { e.preventDefault(); setAB(!player.showB); }
+  if (e.code === "Escape") stop();
+});
+
+document.getElementById("save").onclick = async () => {
+  const body = {};
+  for (const arm of state.arms) if (arm.key !== state.reference) body[arm.key] = arm.levels;
+  const res = await fetch("/save", {method: "POST", body: JSON.stringify(body)});
+  document.getElementById("status").textContent = res.ok ? "salvo" : "erro: " + await res.text();
+};
+
+fetch("/state").then(r => r.json()).then(s => { state = s; build(); });
+</script>
+</body>
+</html>

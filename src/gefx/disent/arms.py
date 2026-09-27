@@ -1,8 +1,10 @@
-"""Roster de implementacoes (arms) de distorcao do POC II, lido de um YAML.
+"""Roster de implementacoes (arms) de distorcao do POC II, lido de dois YAMLs.
 
-Cada arm expoe um unico knob de drive, e os valores dele em cada nivel sao
-pareados de ouvido contra a referencia (ver `experiments/disent_roster.yaml`). O
-roster e dado, nao codigo: trocar de plugin ou de maquina e editar o arquivo.
+- `experiments/disent_roster.yaml`: os plugins, editado a mao. Trocar de plugin
+  ou de maquina e editar o arquivo.
+- `experiments/disent_levels.yaml`: o knob de drive de cada arm em cada nivel.
+  Escrito pelas ferramentas: `gefx disent calibrate` grava `auto` (descritor) e
+  `gefx disent tune` ajusta `levels` de ouvido. So `levels` vai para o render.
 
 O tone e um estagio nosso, identico em todos os arms e aplicado depois da
 nao-linearidade, com os tones nativos em neutro: um fator exatamente
@@ -12,12 +14,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from pedalboard import Distortion, LowpassFilter, Pedalboard
 
 DEFAULT_ROSTER = Path("experiments/disent_roster.yaml")
+DEFAULT_LEVELS = Path("experiments/disent_levels.yaml")
 
 # Tone: passa-baixas de primeira ordem, corte log-espacado. Menos niveis que o
 # drive porque e so controle positivo.
@@ -34,7 +37,7 @@ class Arm:
     key: str
     stratum: str
     drive_param: str
-    levels: Tuple[float, ...]
+    levels: Tuple[float, ...] = ()
     backend: str = "vst"
     path: Optional[str] = None
     plugin_name: Optional[str] = None
@@ -44,6 +47,8 @@ class Arm:
     raw_fixed: Mapping[str, float] = field(default_factory=dict)
     # Espera depois de `raw_fixed`, para plugins que trocam de estado assincronamente.
     settle_seconds: float = 0.0
+    # Faixa do knob varrida na calibracao; sem ela, a do proprio parametro.
+    sweep: Optional[Tuple[float, float]] = None
 
     def plugin_spec(self) -> Dict[str, Any]:
         """Formato que `effects.vst_adapter.load_arm` espera."""
@@ -73,19 +78,23 @@ class Roster:
         return self.arm(self.reference).levels
 
 
-def parse_roster(data: Mapping[str, Any]) -> Roster:
-    """Valida o roster antes de qualquer render: um erro aqui custa segundos, la horas."""
+def parse_roster(data: Mapping[str, Any],
+                 levels: Optional[Mapping[str, Sequence[float]]] = None) -> Roster:
+    """Valida o roster antes de qualquer render: um erro aqui custa segundos, la horas.
+
+    Sem `levels`, os arms saem sem niveis: e o que a calibracao precisa.
+    """
     arms_data = data.get("arms") or {}
     if not arms_data:
         raise ValueError("roster sem arms")
     arms: List[Arm] = []
     for key, spec in arms_data.items():
         spec = dict(spec)
-        unknown = set(spec) - {"stratum", "backend", "drive_param", "levels", "path",
-                               "plugin_name", "fixed", "raw_fixed", "settle_seconds"}
+        unknown = set(spec) - {"stratum", "backend", "drive_param", "path", "plugin_name",
+                               "fixed", "raw_fixed", "settle_seconds", "sweep"}
         if unknown:
             raise ValueError(f"{key}: campos desconhecidos {sorted(unknown)}")
-        for required in ("stratum", "drive_param", "levels"):
+        for required in ("stratum", "drive_param"):
             if required not in spec:
                 raise ValueError(f"{key}: falta {required!r}")
         backend = spec.get("backend", "vst")
@@ -93,36 +102,79 @@ def parse_roster(data: Mapping[str, Any]) -> Roster:
             raise ValueError(f"{key}: backend {backend!r} desconhecido; ha {BACKENDS}")
         if backend == "vst" and not spec.get("path"):
             raise ValueError(f"{key}: arm VST3 sem `path`")
-        levels = tuple(float(value) for value in spec["levels"])
-        if len(levels) < 2:
-            raise ValueError(f"{key}: sao precisos ao menos 2 niveis")
+        if backend == "pedalboard" and "sweep" not in spec:
+            raise ValueError(f"{key}: arm pedalboard sem `sweep`")
+        sweep = spec.get("sweep")
+        if sweep is not None:
+            sweep = (float(sweep[0]), float(sweep[1]))
+            if not sweep[0] < sweep[1]:
+                raise ValueError(f"{key}: `sweep` deve ser [min, max] crescente")
         arms.append(Arm(
             key=str(key),
             stratum=str(spec["stratum"]),
             drive_param=str(spec["drive_param"]),
-            levels=levels,
+            levels=arm_levels(str(key), levels),
             backend=backend,
             path=spec.get("path"),
             plugin_name=spec.get("plugin_name"),
             fixed=dict(spec.get("fixed") or {}),
             raw_fixed={k: float(v) for k, v in (spec.get("raw_fixed") or {}).items()},
             settle_seconds=float(spec.get("settle_seconds", 0.0)),
+            sweep=sweep,
         ))
 
-    counts = {item.key: len(item.levels) for item in arms}
-    if len(set(counts.values())) != 1:
-        raise ValueError(f"todo arm precisa do mesmo numero de niveis: {counts}")
     reference = str(data.get("reference", ""))
-    if reference not in counts:
-        raise ValueError(f"referencia {reference!r} nao esta entre os arms {list(counts)}")
+    if reference not in [item.key for item in arms]:
+        raise ValueError(f"referencia {reference!r} nao esta entre os arms "
+                         f"{[item.key for item in arms]}")
+    if levels is not None:
+        counts = {item.key: len(item.levels) for item in arms}
+        if len(set(counts.values())) != 1:
+            raise ValueError(f"todo arm precisa do mesmo numero de niveis: {counts}")
     return Roster(reference=reference, arms=tuple(arms))
 
 
-def load_roster(path: Path = DEFAULT_ROSTER) -> Roster:
+def arm_levels(key: str, levels: Optional[Mapping[str, Sequence[float]]]) -> Tuple[float, ...]:
+    if levels is None:
+        return ()
+    if key not in levels:
+        raise ValueError(f"{key}: sem niveis no arquivo de niveis (rode `gefx disent calibrate`)")
+    values = tuple(float(value) for value in levels[key])
+    if len(values) < 2:
+        raise ValueError(f"{key}: sao precisos ao menos 2 niveis")
+    if any(b <= a for a, b in zip(values, values[1:])):
+        raise ValueError(f"{key}: os niveis devem ser estritamente crescentes: {values}")
+    return values
+
+
+def load_levels(path: Path = DEFAULT_LEVELS) -> Dict[str, Any]:
+    """O arquivo de niveis inteiro: `descriptor`, `targets` e, por arm, `auto` e `levels`."""
     import yaml
 
     with Path(path).open(encoding="utf-8") as handle:
-        return parse_roster(yaml.safe_load(handle))
+        return yaml.safe_load(handle)
+
+
+def write_levels(path: Path, data: Mapping[str, Any]) -> None:
+    import yaml
+
+    header = ("# Gerado por `gefx disent calibrate`. `auto` e o pareamento pelo descritor e\n"
+              "# nao se edita; `levels` e o que vai para o render, ajustado com `gefx disent tune`.\n")
+    text = yaml.safe_dump(dict(data), sort_keys=False, default_flow_style=None, width=4096)
+    Path(path).write_text(header + text, encoding="utf-8")
+
+
+def load_roster(path: Path = DEFAULT_ROSTER,
+                levels_path: Optional[Path] = DEFAULT_LEVELS) -> Roster:
+    """`levels_path=None` carrega so os plugins, sem niveis."""
+    import yaml
+
+    with Path(path).open(encoding="utf-8") as handle:
+        data = yaml.safe_load(handle)
+    if levels_path is None:
+        return parse_roster(data)
+    arms = load_levels(levels_path)["arms"]
+    return parse_roster(data, {key: spec["levels"] for key, spec in arms.items()})
 
 
 # --- estagio de tone compartilhado -------------------------------------------
