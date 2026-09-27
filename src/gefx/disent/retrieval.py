@@ -56,7 +56,10 @@ def retrieve(
     catalog_vectors: np.ndarray,
 ) -> pd.DataFrame:
     """Uma linha por consulta, com o que foi recuperado e o que era certo."""
-    if set(query_frame["content_id"]) & set(catalog_frame["content_id"]):
+    # Por gravacao, nao so por trecho: dois trechos da mesma execucao tambem vazam.
+    keys = [key for key in ("content_id", "source_audio_id")
+            if key in query_frame.columns and key in catalog_frame.columns]
+    if any(set(query_frame[key]) & set(catalog_frame[key]) for key in keys):
         raise ValueError(
             "consulta e catalogo compartilham conteudo: o acerto poderia vir de "
             "reconhecer a execucao, e nao o ajuste"

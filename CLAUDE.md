@@ -224,8 +224,16 @@ Decisions already made — don't reopen without new evidence:
   (in some, gain-dependent) made "tone level t" differ across arms. The grid is drive
   only (`d0`…`d7`, `config_index == drive_level`). Positive controls are same-arm
   retrieval (the diagonal) and `lsp-tanh`; content is an *invariance* check (a probe
-  on `z_e` should stay near chance), not a positive control. `render` uses all 400
-  recordings as content by default (was 100 × 40 configs).
+  on `z_e` should stay near chance), not a positive control.
+- **Content = 2 s segments, 5 per recording** (2026-09-27): all 400 Rossi recordings
+  are 11.5 s, so 5 consecutive non-overlapping segments fit inside the 0.5 s edge
+  margins. That is 2000 contents (`<recording>_s0`…`_s4`) with the same 2 s input, so
+  the POC I regressor (B1, trained on 2 s Spec) stays comparable — longer segments were
+  rejected for that reason and for the doubled input cost. The split is **by
+  recording** (`source_audio_id`): all segments of a performance share a split, and
+  `retrieve` refuses a query and catalog that share a recording. The segments measured
+  well (median 5% of frames 30 dB below the peak, 3% without an attack), so no
+  onset-based segment selection.
 
 **Adding a pedal**: find its drive parameter with `gefx inspect-plugin <vst3>`, add it to
 the roster with a `sweep`, run `calibrate`. It fits if its Rnonlin reaches
