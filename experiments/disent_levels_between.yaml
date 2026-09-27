@@ -1,0 +1,29 @@
+# Gerado por `gefx disent calibrate`; nao se edita. `levels` e o knob de cada
+# nivel; `unmatched`, os niveis (base 1) fora do alcance do arm, na ponta do knob.
+descriptor: rnonlin
+targets: [0.9788, 0.9584, 0.9379, 0.9173, 0.8969, 0.8763, 0.8558]
+arms:
+  pedalboard-tanh:
+    levels: [21.3978, 25.3786, 28.4693, 31.1224, 33.5244, 35.7585, 37.9232]
+    unmatched: []
+  lsp-tanh:
+    levels: [21.2025, 24.8089, 27.7876, 30.3594, 32.7284, 34.895, 37.0227]
+    unmatched: []
+  lsp-hardclip:
+    levels: [19.8249, 22.6475, 25.1728, 27.7847, 30.2539, 32.6633, 34.8908]
+    unmatched: []
+  lsp-arctan:
+    levels: [19.5853, 23.6202, 26.8788, 29.7018, 32.3074, 34.7294, 37.127]
+    unmatched: []
+  lsp-sine:
+    levels: [21.3897, 24.5707, 27.2841, 29.7158, 32.0261, 34.1662, 36.2089]
+    unmatched: []
+  byod-mxr:
+    levels: [-9.1623, -4.8971, -1.4229, 1.6114, 4.4508, 7.1584, 9.8514]
+    unmatched: []
+  byod-bigmuff:
+    levels: [-15.782, -9.473, -4.8476, -0.7268, 3.2409, 7.2624, 11.6041]
+    unmatched: []
+  dm-rat:
+    levels: [17.2301, 20.5698, 23.1864, 25.6113, 27.9857, 30.5033, 33.1915]
+    unmatched: []

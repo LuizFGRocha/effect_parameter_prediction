@@ -141,9 +141,22 @@ def _cmd_disent_render(args: argparse.Namespace) -> None:
             seed=args.seed,
             split_seed=args.split_seed,
             arms=args.arm,
+            splits=args.split,
             workers=args.workers,
         )
     )
+
+
+def _cmd_disent_between(args: argparse.Namespace) -> None:
+    from gefx.disent.between import between_study
+    from gefx.disent.calibrate import between_levels
+
+    if args.write_levels:
+        between_levels(Path(args.levels), Path(args.curves), Path(args.write_levels))
+        print(f"niveis intermediarios em {args.write_levels}")
+        return
+    print(between_study(Path(args.results_dir), Path(args.output_root), Path(args.between_root),
+                        runs=args.run or ("rnc", "supcon"), k=args.k).to_string(index=False))
 
 
 def _cmd_disent_cache(args: argparse.Namespace) -> None:
@@ -446,6 +459,9 @@ def build_parser() -> argparse.ArgumentParser:
     disent_render.add_argument("--segments-per-file", type=int, default=5,
                                help="Trechos consecutivos por gravacao; cada um e um conteudo.")
     disent_render.add_argument("--segment-seconds", type=float, default=2.0)
+    disent_render.add_argument("--split", action="append", default=None,
+                               choices=["train", "catalog", "query"],
+                               help="Repetivel. So estas particoes. Padrao: todas.")
     disent_render.add_argument("--seed", type=int, default=20260906)
     disent_render.add_argument("--split-seed", type=int, default=20260906)
     disent_render.add_argument("--workers", type=int, default=4)
@@ -513,6 +529,25 @@ def build_parser() -> argparse.ArgumentParser:
                                    "semente fixa so a inicializacao e duas execucoes "
                                    "identicas divergem. Custa ~20%% de velocidade.")
     disent_train.set_defaults(func=_cmd_disent_train)
+
+    disent_between = disent_sub.add_parser(
+        "between",
+        help="Consultas nos pontos medios entre niveis contra o catalogo da grade.",
+    )
+    disent_between.add_argument("--write-levels", default=None,
+                                help="So grava o arquivo de niveis intermediarios, para "
+                                     "`render --levels` (com --split query).")
+    disent_between.add_argument("--levels", default="experiments/disent_levels.yaml")
+    disent_between.add_argument("--curves", default="results/disent/calibracao/curvas.csv")
+    disent_between.add_argument("--results-dir", default="results/disent/encoder")
+    disent_between.add_argument("--output-root", default="datasets/disent",
+                                help="Dataset da grade, de onde sai o catalogo.")
+    disent_between.add_argument("--between-root", default="datasets/disent_entre",
+                                help="Dataset das consultas nos pontos medios.")
+    disent_between.add_argument("--run", action="append", default=None,
+                                help="Repetivel. Padrao: rnc e supcon.")
+    disent_between.add_argument("--k", type=int, default=10)
+    disent_between.set_defaults(func=_cmd_disent_between)
 
     disent_probe = disent_sub.add_parser(
         "probe",
