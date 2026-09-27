@@ -178,3 +178,12 @@ def test_leave_one_out_trains_on_the_dataset_it_evaluates(tmp_path, monkeypatch)
                             Path(config.output_dir).mkdir(parents=True, exist_ok=True)))
     modulo.leave_one_arm_out(tmp_path, tmp_path / "loo", verbose=False)
     assert raizes == [tmp_path] * 3
+
+
+def test_transfer_cost_leaves_out_the_centered_search(tmp_path):
+    """O custo e o da busca como esta; a centrada e outra pergunta."""
+    resumo = _resumo().assign(centrado=False)
+    centrada = resumo.assign(centrado=True, drive_exact=0.99)
+    custo = transfer_cost(pd.concat([resumo, centrada]), _metrics(tmp_path)).set_index("arm")
+    assert custo.loc["lsp-tanh", "custo_pontos"] == pytest.approx(2.2, abs=0.05)
+    assert int(custo.loc["lsp-tanh", "sementes"]) == 1

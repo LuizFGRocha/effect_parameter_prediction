@@ -21,6 +21,9 @@ PROBE_FACTORS: Dict[str, str] = {
 
 DEFAULT_FOLDS = 3
 
+#: Os fatores que devem sair sao sondados dentro de cada nivel (ver `linear_probes`).
+WITHIN = "drive_level"
+
 
 def _factor_labels(frame: pd.DataFrame, factor: str) -> np.ndarray:
     if factor not in frame.columns:
@@ -41,12 +44,19 @@ def linear_probes(
     factors: Sequence[str] = tuple(PROBE_FACTORS),
     folds: int = DEFAULT_FOLDS,
     seed: int = 0,
+    within: Optional[str] = WITHIN,
 ) -> Dict[str, Dict[str, float]]:
     """Acerto de uma regressao logistica por fator, com o acaso ao lado.
 
     Linear de proposito: pergunta se o fator esta legivel, nao se e recuperavel.
     A padronizacao fica dentro da validacao cruzada: com L2 de `C` fixo, sem ela
     a sonda mediria a escala do codigo junto com a legibilidade.
+
+    Os fatores que devem sair sao sondados dentro de cada valor de `within` (o
+    nivel de drive), e o acerto e a media entre eles. Sondados sobre tudo, o
+    nivel domina a variancia de `z_e` e a direcao do conteudo muda de nivel
+    para nivel: a sonda global dava 13% de conteudo onde, dentro de um nivel,
+    ele ainda se lia a ~50%.
     """
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import StratifiedKFold, cross_val_score
@@ -60,13 +70,17 @@ def linear_probes(
         classes = int(len(set(labels)))
         chance = 1.0 / classes
         partition = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
-        accuracy = float(
+        scope = within if within in frame.columns and factor != within else None
+        groups = (frame[scope].to_numpy() if scope else np.zeros(len(frame)))
+        accuracy = float(np.mean([
             cross_val_score(
                 make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000)),
-                codes, labels, cv=partition, n_jobs=folds,
+                codes[groups == group], labels[groups == group], cv=partition, n_jobs=folds,
             ).mean()
-        )
+            for group in np.unique(groups)
+        ]))
         out[factor] = {
+            "within": scope or "",
             "accuracy": accuracy,
             "chance": chance,
             "classes": classes,

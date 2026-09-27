@@ -114,3 +114,19 @@ def test_the_probe_is_invariant_to_the_scale_of_the_code():
     assert pequeno["drive_level"]["accuracy"] == pytest.approx(
         grande["drive_level"]["accuracy"], abs=1e-9
     )
+
+
+def test_a_factor_whose_direction_changes_with_the_level_is_read_within_the_level():
+    """O caso do conteudo em `z_e`: legivel dentro de cada nivel, mas numa direcao
+    que muda com o nivel. A sonda global o daria por removido."""
+    frame = _frame(n_arms=1, n_contents=4, n_drive=2, repeats=12)
+    content = frame["content_id"].str[1:].astype(float).to_numpy()
+    level = frame["drive_level"].to_numpy(dtype=float)
+    angle = content * np.pi / 2 + level * np.pi  # a direcao se inverte de um nivel ao outro
+    codes = np.stack([np.cos(angle), np.sin(angle), level * 10.0], axis=1)
+    codes += np.random.default_rng(0).normal(scale=0.05, size=codes.shape)
+    inside = linear_probes(codes, frame, factors=["content_id"])["content_id"]
+    overall = linear_probes(codes, frame, factors=["content_id"], within=None)["content_id"]
+    assert inside["within"] == "drive_level" and overall["within"] == ""
+    assert inside["accuracy"] == pytest.approx(1.0)
+    assert overall["accuracy"] < inside["accuracy"]

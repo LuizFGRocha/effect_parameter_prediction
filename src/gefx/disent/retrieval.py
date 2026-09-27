@@ -40,6 +40,21 @@ def nearest(queries: np.ndarray, catalog: np.ndarray,
     return picks, dists
 
 
+def center_by_arm(frame: pd.DataFrame, vectors: np.ndarray) -> np.ndarray:
+    """Tira de cada vetor a media do seu arm, sem rotulo de nivel.
+
+    Em `z_e` o pedal e quase so um deslocamento constante (a sonda do pedal cai
+    de 56% para o acaso depois disto). E a normalizacao de media por canal da
+    fala. Pressupoe que as linhas de cada arm cobrem os niveis por igual; com
+    so niveis altos, a media puxa para eles e a correcao vira vies.
+    """
+    out = np.array(vectors, dtype=np.float32, copy=True)
+    for arm in frame["arm"].unique():
+        rows = (frame["arm"] == arm).to_numpy()
+        out[rows] -= out[rows].mean(axis=0)
+    return out
+
+
 # --- a tarefa -----------------------------------------------------------------
 @dataclass(frozen=True)
 class RetrievalResult:
