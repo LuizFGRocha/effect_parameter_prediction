@@ -4,8 +4,11 @@ Cadeia de cada render, a do POC I:
 
     segmento -> normalize_loudness -> nao-linearidade do arm -> normalize_loudness
 
-O inicio do segmento de cada conteudo depende so de `seed` e do indice do
-conteudo, entao o mesmo `content_id` e o mesmo trecho em toda a grade. Os knobs
+Cada gravacao da `segments_per_file` conteudos: trechos consecutivos, sem
+sobreposicao, a partir de um deslocamento sorteado. O sorteio depende so de
+`seed` e do indice da gravacao, entao o mesmo `content_id` e o mesmo trecho em
+toda a grade. A particao e por gravacao: os trechos de uma execucao ficam todos
+no mesmo split, senao a busca poderia acertar reconhecendo a execucao. Os knobs
 de drive vem do arquivo de niveis; ele e o roster sao copiados para a raiz do dataset.
 """
 from __future__ import annotations
@@ -33,7 +36,7 @@ from gefx.disent.sidecar import (
 
 @dataclass(frozen=True)
 class ContentItem:
-    """Um conteudo: uma execucao concreta, ja com o trecho escolhido."""
+    """Um conteudo: um trecho de uma gravacao (`<gravacao>_s<k>`)."""
 
     content_id: str
     source_path: str
@@ -47,7 +50,8 @@ class RenderOptions:
     output_root: Path = Path("datasets/disent")
     roster: Path = DEFAULT_ROSTER
     levels: Path = DEFAULT_LEVELS
-    n_contents: int = 400
+    n_contents: int = 400  # gravacoes; cada uma da `segments_per_file` conteudos
+    segments_per_file: int = 5
     segment_seconds: float = 2.0
     seed: int = 20260906
     split_seed: int = 20260906
@@ -56,7 +60,7 @@ class RenderOptions:
 
 
 def content_items(options: RenderOptions) -> List[ContentItem]:
-    """Escolhe os conteudos e o trecho de cada um, de forma deterministica."""
+    """Escolhe as gravacoes e os trechos de cada uma, de forma deterministica."""
     paths = sorted(Path(options.input_dir).glob("*.wav"))
     if len(paths) < options.n_contents:
         raise ValueError(
@@ -72,14 +76,15 @@ def content_items(options: RenderOptions) -> List[ContentItem]:
         audio, sr = load_audio_file(path)
         frames = int(round(options.segment_seconds * sr))
         margin = int(round(0.5 * sr))  # mesmo descarte de bordas do POC I
-        highest = audio.shape[1] - margin - frames
-        if highest <= margin:
-            raise ValueError(f"{path} e curta demais para um segmento de {options.segment_seconds}s")
+        slack = audio.shape[1] - 2 * margin - options.segments_per_file * frames
+        if slack < 0:
+            raise ValueError(f"{path} e curta demais para {options.segments_per_file} "
+                             f"trechos de {options.segment_seconds}s")
         rng = np.random.default_rng(options.seed * 1000003 + index)
-        start = int(rng.integers(margin, highest + 1))
-        items.append(
-            ContentItem(path.stem, str(path), start, split_of[path.stem])
-        )
+        first = margin + int(rng.integers(0, slack + 1))
+        for k in range(options.segments_per_file):
+            items.append(ContentItem(f"{path.stem}_s{k}", str(path), first + k * frames,
+                                     split_of[path.stem]))
     return items
 
 
@@ -143,7 +148,8 @@ def render(options: RenderOptions) -> Dict[str, int]:
 
     items = content_items(options)
     configs = all_configs(roster.drive_levels)
-    print(f"{len(items)} conteudos x {len(configs)} configuracoes x {len(arms)} arms "
+    print(f"{len(items)} conteudos ({options.n_contents} gravacoes x "
+          f"{options.segments_per_file} trechos) x {len(configs)} configuracoes x {len(arms)} arms "
           f"= {len(items) * len(configs) * len(arms)} renders")
 
     root.mkdir(parents=True, exist_ok=True)

@@ -83,6 +83,13 @@ def test_retrieve_refuses_shared_content_between_query_and_catalog():
         retrieve(q, c, np.zeros((len(q), 3), np.float32), np.zeros((len(c), 3), np.float32))
 
 
+def test_retrieve_refuses_two_segments_of_the_same_recording():
+    q = _frame("a", ["r1_s0"], "query").assign(source_audio_id="r1.wav")
+    c = _frame("b", ["r1_s1"], "catalog").assign(source_audio_id="r1.wav")
+    with pytest.raises(ValueError, match="compartilham conteudo"):
+        retrieve(q, c, np.zeros((len(q), 3), np.float32), np.zeros((len(c), 3), np.float32))
+
+
 def test_retrieve_reports_what_was_asked_and_what_came_back():
     q = _frame("a", ["c1"], "query")
     c = _frame("b", ["c2"], "catalog")

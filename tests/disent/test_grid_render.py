@@ -38,8 +38,23 @@ def _options(folder, **overrides):
 
 def test_content_items_pick_the_requested_number(recordings):
     items = content_items(_options(recordings()))
-    assert len(items) == 8
-    assert len({item.content_id for item in items}) == 8
+    assert len(items) == 8 * 5
+    assert len({item.content_id for item in items}) == 8 * 5
+    assert len({item.source_path for item in items}) == 8
+
+
+def test_segments_of_a_recording_are_consecutive_and_share_the_split(recordings):
+    # Particao por gravacao: dois trechos da mesma execucao em splits diferentes
+    # deixariam a busca acertar reconhecendo a execucao.
+    frames = int(round(2.0 * SR))
+    items = content_items(_options(recordings()))
+    by_file = {}
+    for item in items:
+        by_file.setdefault(item.source_path, []).append(item)
+    for segments in by_file.values():
+        starts = [item.segment_start for item in segments]
+        assert [b - a for a, b in zip(starts, starts[1:])] == [frames] * 4
+        assert len({item.split for item in segments}) == 1
 
 
 def test_asking_for_more_content_than_available_is_refused(recordings):
@@ -77,7 +92,7 @@ def test_segment_stays_inside_the_recording_with_the_edge_margin(recordings):
 
 def test_a_recording_too_short_is_refused(recordings):
     with pytest.raises(ValueError, match="curta demais"):
-        content_items(_options(recordings(seconds=2.5), n_contents=3))
+        content_items(_options(recordings(seconds=10.5), n_contents=3))
 
 
 def test_every_content_lands_in_exactly_one_split(recordings):

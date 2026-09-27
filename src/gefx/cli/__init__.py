@@ -136,6 +136,7 @@ def _cmd_disent_render(args: argparse.Namespace) -> None:
             roster=Path(args.roster),
             levels=Path(args.levels),
             n_contents=args.contents,
+            segments_per_file=args.segments_per_file,
             segment_seconds=args.segment_seconds,
             seed=args.seed,
             split_seed=args.split_seed,
@@ -441,7 +442,9 @@ def build_parser() -> argparse.ArgumentParser:
     disent_render.add_argument("--levels", default="experiments/disent_levels.yaml",
                                help="Os knobs de drive de cada nivel (so `levels` e usado).")
     disent_render.add_argument("--contents", type=int, default=400,
-                               help="Gravacoes distintas usadas como conteudo.")
+                               help="Gravacoes usadas; a particao e por gravacao.")
+    disent_render.add_argument("--segments-per-file", type=int, default=5,
+                               help="Trechos consecutivos por gravacao; cada um e um conteudo.")
     disent_render.add_argument("--segment-seconds", type=float, default=2.0)
     disent_render.add_argument("--seed", type=int, default=20260906)
     disent_render.add_argument("--split-seed", type=int, default=20260906)
