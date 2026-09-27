@@ -72,8 +72,8 @@ def _run(root, nome, technique, drive_exact, mae_db, seed=1):
 def test_build_all_writes_what_there_is_data_for(tmp_path):
     _run(tmp_path, "random_encoder", "random_encoder", 0.31, 5.6)
     _run(tmp_path, "bn_only", "bn_only", 0.36, 4.8)
-    _run(tmp_path, "contrastive_aux", "contrastive_aux", 0.44, 3.8)
-    _run(tmp_path, "contrastive_aux_s2", "contrastive_aux", 0.43, 3.9, seed=2)
+    _run(tmp_path, "rnc", "rnc", 0.44, 3.8)
+    _run(tmp_path, "rnc_s2", "rnc", 0.43, 3.9, seed=2)
     nomes = {caminho.name for caminho in build_all(tmp_path)}
     assert nomes == {"escada.png", "por_arm.png"}
 
@@ -108,7 +108,7 @@ def test_the_diversity_curve_is_drawn_even_without_the_seen_reference(tmp_path):
 def test_the_curve_averages_the_seeds_and_still_shows_them(tmp_path):
     """A dispersao entre sementes e da ordem da excursao da curva. Uma linha
     media sozinha faria a curva parecer ter forma."""
-    _run(tmp_path, "contrastive_aux", "contrastive_aux", 0.44, 3.8)
+    _run(tmp_path, "rnc", "rnc", 0.44, 3.8)
     for pasta, deslocamento in (("diversidade", 0.0), ("diversidade_s2", 0.05)):
         (tmp_path / "encoder" / pasta).mkdir()
         dados = _curva()
@@ -122,6 +122,6 @@ def test_the_curve_averages_the_seeds_and_still_shows_them(tmp_path):
 def test_the_ladder_takes_the_baselines_from_what_retrieve_wrote(tmp_path):
     for nome in ("b0.json", "b1.json"):
         (tmp_path / nome).write_text(json.dumps(_metrics()), encoding="utf-8")
-    _run(tmp_path, "contrastive_aux", "contrastive_aux", 0.44, 3.8)
+    _run(tmp_path, "rnc", "rnc", 0.44, 3.8)
     nomes = {caminho.name for caminho in build_all(tmp_path)}
     assert {"baselines_por_arm.png", "escada.png", "por_arm.png"} <= nomes

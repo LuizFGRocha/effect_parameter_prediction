@@ -170,7 +170,7 @@ def arm_diversity_curve(
 
 def transfer_cost(
     loo: pd.DataFrame,
-    seen_metrics: Path = RESULTS_ROOT / "contrastive_aux" / "metrics.json",
+    seen_metrics: Path = RESULTS_ROOT / "rnc" / "metrics.json",
 ) -> pd.DataFrame:
     """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo
     no encoder treinado com todos."""

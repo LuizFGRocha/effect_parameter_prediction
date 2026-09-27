@@ -235,6 +235,39 @@ Decisions already made — don't reopen without new evidence:
   well (median 5% of frames 30 dB below the peak, 3% without an attack), so no
   onset-based segment selection.
 
+**Encoder loss: Rank-N-Contrast, with SupCon as a control** (2026-09-27). The user wants
+the method to rest on published code, so they can review it against the original and
+write less new code. Both losses in `losses.py` are translations of official code; keep
+them translations, don't "improve" them.
+
+- `rnc` (main technique, the default): `RnCLoss` from kaiwenzha/Rank-N-Contrast (Zha et
+  al., NeurIPS 2023; commit 6239bdf; **the repo declares no license**). Chosen because
+  drive is an *ordered* quantity (calibrated in 1 − Rnonlin, evaluated in dB): RnC puts
+  the order into the distances of `z_e`, which is what the nearest-neighbour search
+  reads; SupCon only makes 8 unordered clusters. When the positive has the anchor's
+  level, RnC's term *is* SupCon's, so the invariance to content and arm is kept. It also
+  bridges to POC I (regression). Deviations from the original: any `n_views` (we use 1);
+  the `for k` loop vectorised to [n, n, n] (a test checks it against the loop in
+  NumPy); a double `where` so the sqrt has no NaN gradient at distance 0; and
+  **temperature 0.1 instead of 2**, because our `z_e` is unit-norm (L2 distance in
+  [0, 2]) while the original's features aren't. The 0.1 is a guess to be checked.
+- `supcon` (control): `SupConLoss` from HobbitLong/SupContrast (commit 72fd989, BSD-2),
+  temperature 0.07. **If `rnc` works, the user intends to delete `supcon`** to keep the
+  code small.
+- The auxiliary drive regression (the old `contrastive_aux`) was **dropped**: our own
+  code with no published reference, and it measured as not distinguishable from pure
+  contrastive (44.0 vs 42.7% drive exact, +1.25 with by-content IC95 [−1.95; +4.41],
+  `documents/poc2_estado_2026-09-07.md`, old 40-config grid). RnC replaces it as the
+  way to get ordering.
+- Framing: Koo et al. 2023 (FXencoder, contrastive encoder that keeps only the effects)
+  for audio; Wang et al. §3.3.2 (grouped supervision, ML-VAE/DC-IGN) for DRL. The
+  time-average in the encoder is the "sequence-level factor" bias of FHVAE (Hsu et al.
+  2017/2018).
+- **FHVAE was evaluated and rejected as a base**: its code is TF 1.0/Python 2.7/Kaldi
+  (unusable here, ScalableFHVAE likewise and unlicensed); it is an unsupervised VAE
+  (a decoder = more code); and its sequence-level latent would take drive, arm and guitar
+  timbre together, since all are constant in time. DSVAE has the same objection.
+
 **Adding a pedal**: find its drive parameter with `gefx inspect-plugin <vst3>`, add it to
 the roster with a `sweep`, run `calibrate`. It fits if its Rnonlin reaches
 ≥ 0.989 at the low end and ≤ 0.846 at the high end (the printed range); otherwise it gets

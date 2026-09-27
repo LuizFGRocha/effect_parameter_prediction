@@ -1,6 +1,7 @@
 """Treino do encoder e os dois controles que separam aprendizado de arquitetura.
 
-- `contrastive_aux`: o encoder, contrastivo + regressao auxiliar sobre `z_e`;
+- `rnc`: o encoder, treinado com o Rank-N-Contrast (`losses.py`) sobre `z_e`;
+- `supcon`: o mesmo com o SupCon, que ignora a ordem dos niveis (controle);
 - `random_encoder`: a mesma rede sem nenhum passo, o que a arquitetura ja entrega;
 - `bn_only`: a rede sem treino com so as estatisticas moveis da BatchNorm
   calibradas, sem gradiente. Com zero passos elas ficam na inicializacao (0, 1),
@@ -23,13 +24,16 @@ import pandas as pd
 
 from gefx.config import git_revision
 from gefx.disent.features import FeatureStore, PixelStandardizer
-from gefx.disent.losses import DEFAULT_TEMPERATURE, total_loss
+from gefx.disent.losses import DEFAULT_TEMPERATURE, RNC_TEMPERATURE, rnc_loss, sup_con_loss
 from gefx.disent.model import EffectModel, EncoderConfig
 from gefx.disent.retrieval import retrieve_by_arm
 from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
 from gefx.disent.sidecar import split_frames
 
-TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "contrastive_aux")
+TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon", "rnc")
+
+#: A perda de cada tecnica treinada e a temperatura padrao dela.
+LOSSES = {"supcon": (sup_con_loss, DEFAULT_TEMPERATURE), "rnc": (rnc_loss, RNC_TEMPERATURE)}
 
 RESULTS_ROOT = Path("results/disent/encoder")
 
@@ -43,14 +47,14 @@ class TrainConfig:
 
     dataset_root: Path = Path("datasets/disent")
     feature: str = "Spec"
-    technique: str = "contrastive_aux"
+    technique: str = "rnc"
     arms: Optional[Tuple[str, ...]] = None
     steps: int = 4000
     configs_per_batch: int = 8
     views_per_config: int = 8
     learning_rate: float = 1e-3
-    temperature: float = DEFAULT_TEMPERATURE
-    aux_weight: float = 1.0
+    #: None = o padrao da perda da tecnica (`LOSSES`).
+    temperature: Optional[float] = None
     eval_every: int = 500
     embed_batch: int = 128
     seed: int = 20260908
@@ -73,28 +77,22 @@ class TrainConfig:
         return out
 
 
-# --- dados --------------------------------------------------------------------
-def aux_targets(frame: pd.DataFrame) -> np.ndarray:
-    """Nivel de drive em [0, 1], na escala do recorte e nao da grade cheia."""
-    values = frame["drive_level"].to_numpy(dtype=np.float32)
-    return (values / max(float(values.max()), 1.0)).reshape(-1, 1)
-
-
 # --- passo de treino ----------------------------------------------------------
-def make_step(model: EffectModel, optimizer, temperature: float, aux_weight: float):
+def make_step(model: EffectModel, optimizer, loss_fn, temperature: float):
     import tensorflow as tf
 
     variables = model.trainable_variables
 
     @tf.function(reduce_retracing=True)
-    def step(x, config_label, aux_target):
+    def step(x, config_label):
         with tf.GradientTape() as tape:
-            z_e, aux_prediction = model(x, training=True)
-            parts = total_loss(z_e, config_label, aux_prediction, aux_target,
-                               temperature, aux_weight)
-        gradients = tape.gradient(parts["total"], variables)
+            z_e = model(x, training=True)
+            # Uma vista por linha: [bsz, n_views=1, dim], como as duas perdas pedem.
+            # O rotulo e o nivel de drive (`config_index == drive_level`).
+            loss = loss_fn(z_e[:, None, :], config_label, temperature)
+        gradients = tape.gradient(loss, variables)
         optimizer.apply_gradients(zip(gradients, variables))
-        return parts
+        return loss
 
     return step
 
@@ -177,7 +175,6 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         )
 
     standardizer = PixelStandardizer.fit(stores["train"])
-    aux = aux_targets(index.frame)
 
     # O manifesto grava a config que rodou, nao a pedida: `load_run` depende disso.
     config = replace(
@@ -189,9 +186,12 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     steps = 0 if config.technique == "random_encoder" else config.steps
     if config.technique == "bn_only":
         step = make_bn_step(model)
-    else:
+    elif config.technique in LOSSES:
         optimizer = keras.optimizers.Adam(learning_rate=config.learning_rate)
-        step = make_step(model, optimizer, config.temperature, config.aux_weight)
+        loss_fn, default_temperature = LOSSES[config.technique]
+        if config.temperature is None:
+            config = replace(config, temperature=default_temperature)
+        step = make_step(model, optimizer, loss_fn, config.temperature)
 
     rng = np.random.default_rng(config.seed)
     history: List[Dict[str, float]] = []
@@ -206,21 +206,10 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         if config.technique == "bn_only":
             step(features)
         else:
-            parts = step(
-                features,
-                tf.constant(batch.config, dtype=tf.int32),
-                tf.constant(aux[batch.rows], dtype=tf.float32),
-            )
-            record = {name: float(value) for name, value in parts.items()}
-            record["step"] = number
-            history.append(record)
+            loss = float(step(features, tf.constant(batch.config, dtype=tf.int32)))
+            history.append({"loss": loss, "step": number})
             if verbose and (number == 1 or number % 100 == 0):
-                print(
-                    f"  passo {number:5d}/{steps}  total={record['total']:.4f}  "
-                    f"contrastive={record['contrastive']:.4f}  "
-                    f"aux_regression={record['aux_regression']:.4f}",
-                    flush=True,
-                )
+                print(f"  passo {number:5d}/{steps}  {config.technique}={loss:.4f}", flush=True)
 
         if config.eval_every and number % config.eval_every == 0 and number < steps:
             _, partial = evaluate(model, frames, stores, standardizer, config.embed_batch)
