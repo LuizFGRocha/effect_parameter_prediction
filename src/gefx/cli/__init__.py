@@ -113,7 +113,6 @@ def _cmd_disent_calibrate(args: argparse.Namespace) -> None:
         curves_csv=Path(args.curves),
         points=args.points,
         n_segments=args.segments,
-        force=args.force,
         workers=args.workers,
         reference_db=tuple(args.ref_db),
         n_levels=args.n_levels,
@@ -419,12 +418,11 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="Faixa da referencia em dB; niveis igualmente espacados "
                                        "em Rnonlin.")
     disent_calibrate.add_argument("--n-levels", type=int, default=8)
-    disent_calibrate.add_argument("--force", action="store_true",
-                                  help="Descarta ajustes de ouvido ja gravados.")
     disent_calibrate.set_defaults(func=_cmd_disent_calibrate)
 
     disent_tune = disent_sub.add_parser(
-        "tune", help="Pagina local para ajustar os niveis de ouvido, com A/B contra a referencia.")
+        "tune", help="Pagina local para ouvir os niveis de cada arm, com A/B contra a "
+                     "referencia. So escuta: nao altera os niveis.")
     disent_tune.add_argument("--recording", required=True, help="Sua gravacao de guitarra (wav).")
     disent_tune.add_argument("--roster", default="experiments/disent_roster.yaml")
     disent_tune.add_argument("--levels", default="experiments/disent_levels.yaml")

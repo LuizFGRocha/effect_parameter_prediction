@@ -9,10 +9,15 @@ Concentra as manhas descobertas na validacao e que precisam ser preservadas:
   uma sondagem mono.
 - Alguns parametros nao expoem faixa numerica e so sao enderecaveis pelo texto
   exibido (`BY_DISPLAY`).
+- A primeira instancia de alguns plugins num processo pode sair NaN a partir da
+  amostra 8192 de cada chamada, para sempre (o Fuzz da VZtec, em ~metade dos
+  processos, sem padrao de tempo ou de concorrencia). A sondagem do `load_arm`
+  pega isso; a instancia ruim fica viva em `_BROKEN` e carrega-se outra --
+  descarta-la antes nao adianta, a seguinte tende a sair ruim tambem.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 import numpy as np
 
@@ -21,6 +26,10 @@ import numpy as np
 BY_DISPLAY = {"node_1_delay": "ms", "node_1_feedback": "%"}
 
 _WARNED: Set[str] = set()
+
+# Instancias que sairam NaN na sondagem: mantidas vivas de proposito (ver o docstring).
+_BROKEN: List[Any] = []
+LOAD_ATTEMPTS = 3
 
 
 def _warn_once(message: str) -> None:
@@ -70,8 +79,18 @@ def load_arm(spec: Dict[str, Any], sr: int = 44100) -> Tuple[Any, bool]:
     """Carrega o plugin, fixa os parametros neutros e devolve (plugin, estereo).
 
     Gasta aqui a primeira chamada de processamento, que sairia com os parametros
-    antigos, e descobre de passagem se o plugin exige entrada estereo.
+    antigos, descobre de passagem se o plugin exige entrada estereo e troca uma
+    instancia que sai NaN por outra.
     """
+    for _ in range(LOAD_ATTEMPTS):
+        plugin, stereo, finite = _load_once(spec, sr)
+        if finite:
+            return plugin, stereo
+        _BROKEN.append(plugin)
+    raise RuntimeError(f"{spec['path']}: {LOAD_ATTEMPTS} instancias seguidas sairam NaN")
+
+
+def _load_once(spec: Dict[str, Any], sr: int) -> Tuple[Any, bool, bool]:
     from pedalboard import load_plugin
 
     kwargs = {"plugin_name": spec["plugin_name"]} if spec.get("plugin_name") else {}
@@ -79,6 +98,7 @@ def load_arm(spec: Dict[str, Any], sr: int = 44100) -> Tuple[Any, bool]:
     for name, value in spec["fixed"].items():
         set_parameter(plugin, name, value)
 
+    # 0,25 s passa das 8192 amostras em que o NaN aparece (ver o docstring).
     dummy = np.random.default_rng(0).standard_normal((1, int(0.25 * sr))).astype(np.float32) * 0.05
     try:
         plugin(dummy, sr, reset=True)
@@ -86,8 +106,8 @@ def load_arm(spec: Dict[str, Any], sr: int = 44100) -> Tuple[Any, bool]:
     except ValueError:
         dummy = np.repeat(dummy, 2, axis=0)
         stereo = True
-    plugin(dummy, sr, reset=True)
-    return plugin, stereo
+    out = plugin(dummy, sr, reset=True)
+    return plugin, stereo, bool(np.all(np.isfinite(out)))
 
 
 def process_mono(plugin, stereo: bool, segment: np.ndarray, sr: int) -> np.ndarray:

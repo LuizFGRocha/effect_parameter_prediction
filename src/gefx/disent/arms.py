@@ -3,8 +3,8 @@
 - `experiments/disent_roster.yaml`: os plugins, editado a mao. Trocar de plugin
   ou de maquina e editar o arquivo.
 - `experiments/disent_levels.yaml`: o knob de drive de cada arm em cada nivel.
-  Escrito pelas ferramentas: `gefx disent calibrate` grava `auto` (descritor) e
-  `gefx disent tune` ajusta `levels` de ouvido. So `levels` vai para o render.
+  Escrito so por `gefx disent calibrate`, pareando os arms pelo Rnonlin; nao se
+  edita a mao.
 
 O tone e um estagio nosso, identico em todos os arms e aplicado depois da
 nao-linearidade, com os tones nativos em neutro: um fator exatamente
@@ -148,7 +148,7 @@ def arm_levels(key: str, levels: Optional[Mapping[str, Sequence[float]]]) -> Tup
 
 
 def load_levels(path: Path = DEFAULT_LEVELS) -> Dict[str, Any]:
-    """O arquivo de niveis inteiro: `descriptor`, `targets` e, por arm, `auto` e `levels`."""
+    """O arquivo de niveis inteiro: `descriptor`, `targets` e, por arm, `levels` e `unmatched`."""
     import yaml
 
     with Path(path).open(encoding="utf-8") as handle:
@@ -158,8 +158,8 @@ def load_levels(path: Path = DEFAULT_LEVELS) -> Dict[str, Any]:
 def write_levels(path: Path, data: Mapping[str, Any]) -> None:
     import yaml
 
-    header = ("# Gerado por `gefx disent calibrate`. `auto` e o pareamento pelo descritor e\n"
-              "# nao se edita; `levels` e o que vai para o render, ajustado com `gefx disent tune`.\n")
+    header = ("# Gerado por `gefx disent calibrate`; nao se edita. `levels` e o knob de cada\n"
+              "# nivel; `unmatched`, os niveis (base 1) fora do alcance do arm, na ponta do knob.\n")
     text = yaml.safe_dump(dict(data), sort_keys=False, default_flow_style=None, width=4096)
     Path(path).write_text(header + text, encoding="utf-8")
 
@@ -249,4 +249,9 @@ class LoadedArm:
         from gefx.effects.vst_adapter import process_mono, set_parameter
 
         set_parameter(self.plugin, self.arm.drive_param, float(drive_knob))
-        return process_mono(self.plugin, self.stereo, segment, sr)
+        wet = process_mono(self.plugin, self.stereo, segment, sr)
+        if not np.all(np.isfinite(wet)):
+            # Sem isto o NaN vira um wav corrompido ou um Rnonlin NaN, sem erro. A
+            # sondagem do `load_arm` ja troca a instancia que nasce assim.
+            raise RuntimeError(f"{self.arm.key}: o plugin devolveu NaN/inf (knob {drive_knob})")
+        return wet

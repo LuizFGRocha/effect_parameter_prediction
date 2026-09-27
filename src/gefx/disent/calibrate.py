@@ -22,7 +22,9 @@ alcance (acima disso os niveis dele caem na parte plana da curva e soam iguais).
    da referencia nas duas pontas de `reference_db`;
 3. o knob de cada alvo sai por interpolacao na curva. Alvos fora do alcance do
    arm, acima ou abaixo, vao para a ponta do knob e sao marcados em `unmatched`:
-   ali quem decide e o ouvido.
+   ali o arm distorce menos (ou mais) do que o nivel pede.
+
+Os niveis que saem daqui sao os do render; nao ha ajuste manual.
 """
 from __future__ import annotations
 
@@ -33,7 +35,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from gefx.audio import load_audio_file, normalize_loudness
-from gefx.disent.arms import Arm, LoadedArm, load_levels, load_roster, write_levels
+from gefx.disent.arms import Arm, LoadedArm, load_roster, write_levels
 
 DESCRIPTOR = "rnonlin"
 DEFAULT_REFERENCE_DB: Tuple[float, float] = (18.45, 39.0)
@@ -190,19 +192,12 @@ def calibrate(
     curves_csv: Path,
     points: int = DEFAULT_SWEEP_POINTS,
     n_segments: int = 8,
-    force: bool = False,
     workers: int = 8,
     reference_db: Tuple[float, float] = DEFAULT_REFERENCE_DB,
     n_levels: int = 8,
 ) -> Dict[str, List[float]]:
     roster = load_roster(roster_path, levels_path=None)
     ref = roster.reference
-    data = load_levels(levels_path) if levels_path.exists() else {"arms": {}}
-    for key, spec in data["arms"].items():
-        edited = key != ref and spec.get("auto") is not None and spec["auto"] != spec["levels"]
-        if edited and not force:
-            raise ValueError(f"{key} tem ajustes de ouvido em {levels_path}; "
-                             "use --force para descarta-los")
 
     segments, sr = load_segments(input_dir, n_segments)
     others = [arm for arm in roster.arms if arm.key != ref]
@@ -219,13 +214,13 @@ def calibrate(
     print(f"referencia: {reference_levels} dB, Rnonlin {1 - targets[0]:.3f} a "
           f"{1 - targets[-1]:.3f}")
     arms: Dict[str, Dict[str, object]] = {
-        ref: {"auto": reference_levels, "levels": list(reference_levels), "unmatched": []},
+        ref: {"levels": reference_levels, "unmatched": []},
     }
     for arm in others:
         knobs, curve = curves[arm.key]
         values, unmatched = arm_knobs(knobs, 1 - curve, targets)
         values = [round(v, 4) for v in values]
-        arms[arm.key] = {"auto": values, "levels": list(values), "unmatched": unmatched}
+        arms[arm.key] = {"levels": values, "unmatched": unmatched}
         aviso = f"  [aviso] niveis {unmatched} fora do alcance" if unmatched else ""
         print(f"  {arm.key:16s} Rnonlin {curve.max():.3f} a {curve.min():.3f}{aviso}")
 
