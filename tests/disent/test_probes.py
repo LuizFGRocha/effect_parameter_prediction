@@ -84,7 +84,7 @@ def test_probe_study_refuses_a_directory_without_runs(tmp_path):
 def test_probe_study_gives_one_row_per_run_and_factor(tmp_path, monkeypatch):
     from gefx.disent import probes
 
-    for nome in ("contrastive_aux", "random_encoder"):
+    for nome in ("supcon", "random_encoder"):
         (tmp_path / nome).mkdir()
         (tmp_path / nome / "run.json").write_text("{}", encoding="utf-8")
     frame = _frame()
@@ -96,7 +96,7 @@ def test_probe_study_gives_one_row_per_run_and_factor(tmp_path, monkeypatch):
             {"config": {"technique": run_dir.name}}, frame, codes),
     )
     table = probe_study(tmp_path, tmp_path)
-    assert list(table["run"].unique()) == ["contrastive_aux", "random_encoder"]
+    assert list(table["run"].unique()) == ["random_encoder", "supcon"]
     assert len(table) == 2 * len(PROBE_FACTORS)
     assert set(table["factor"]) == set(PROBE_FACTORS)
 

@@ -121,7 +121,8 @@ COLOR_CEILING = "#55a868"
 TECHNIQUE_LABEL = {
     "random_encoder": "encoder\nnão treinado",
     "bn_only": "não treinado\n+ BatchNorm calibrada",
-    "contrastive_aux": "encoder treinado\n(contrastivo + aux.)",
+    "supcon": "encoder treinado\n(SupCon)",
+    "rnc": "encoder treinado\n(Rank-N-Contrast)",
 }
 
 
@@ -133,7 +134,7 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
     execucoes = tabela[tabela["technique"] != "baseline"]
     names = [name for name in TECHNIQUES if name in set(execucoes["technique"])]
     posicoes = np.arange(len(names))
-    cores = [COLOR_LEARNED if name == "contrastive_aux" else COLOR_RANDOM for name in names]
+    cores = [COLOR_LEARNED if name in ("rnc", "supcon") else COLOR_RANDOM for name in names]
     rotulos = [TECHNIQUE_LABEL.get(name, name) for name in names]
 
     fig, (left, right) = plt.subplots(1, 2, figsize=(13, 5.5))
@@ -238,7 +239,7 @@ def build_all(results_dir: Path = Path("results/disent"),
     if b0.exists() and b1.exists():
         grava("baselines_por_arm.png", plot_baselines_by_arm, carrega(b0), carrega(b1))
 
-    treinado = encoder_dir / "contrastive_aux" / "metrics.json"
+    treinado = encoder_dir / "rnc" / "metrics.json"
     if not treinado.exists():
         return escritos
     metricas = carrega(treinado)

@@ -12,10 +12,6 @@ from typing import Dict, Tuple
 
 DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
 
-#: O nivel de drive, normalizado em [0, 1], que a cabeca auxiliar regride.
-N_AUX = 1
-
-
 @dataclass
 class EncoderConfig:
     """Forma da rede. Vai inteira para o `run.json`, como no POC I."""
@@ -81,41 +77,29 @@ def build_encoder(config: EncoderConfig):
 
 
 class EffectModel:
-    """Encoder mais a cabeca auxiliar de treino.
+    """O encoder, com salvar e carregar os pesos.
 
     Um recipiente de submodelos `keras.Model`, nao uma `keras.Model`: o laco de
     treino e customizado.
     """
 
     def __init__(self, encoder_config: EncoderConfig) -> None:
-        from keras import layers, models
-
         self.encoder_config = encoder_config
         self.encoder = build_encoder(encoder_config)
-
-        effect_in = layers.Input(shape=(encoder_config.effect_dim,), name="aux_in")
-        self.aux_head = models.Model(
-            effect_in,
-            layers.Dense(N_AUX, activation="sigmoid", name="aux_out")(
-                layers.Dense(64, activation="relu", name="aux_hidden")(effect_in)
-            ),
-            name="aux_head",
-        )
 
     def encode(self, x, training: bool = False):
         return self.encoder(x, training=training)
 
-    def __call__(self, x, training: bool = True) -> Tuple[object, object]:
-        """`(z_e, predicao auxiliar)`."""
-        z_e = self.encode(x, training=training)
-        return z_e, self.aux_head(z_e, training=training)
+    def __call__(self, x, training: bool = True):
+        """`z_e`."""
+        return self.encode(x, training=training)
 
     @property
     def trainable_variables(self):
         return [v for part in self.parts().values() for v in part.trainable_variables]
 
     def parts(self) -> Dict[str, object]:
-        return {"encoder": self.encoder, "aux_head": self.aux_head}
+        return {"encoder": self.encoder}
 
     def save_weights(self, directory: Path) -> None:
         directory = Path(directory)

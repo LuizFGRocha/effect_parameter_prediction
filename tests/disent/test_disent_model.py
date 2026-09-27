@@ -1,4 +1,4 @@
-"""O encoder: espectrograma -> `z_e` na esfera, e a cabeca auxiliar ao lado."""
+"""O encoder: espectrograma -> `z_e` na esfera."""
 from __future__ import annotations
 
 import numpy as np
@@ -25,21 +25,10 @@ def test_the_effect_code_lives_on_the_unit_sphere():
     assert np.allclose(np.linalg.norm(np.asarray(z_e), axis=1), 1.0, atol=1e-5)
 
 
-def test_encode_is_independent_of_the_aux_head():
-    """A busca usa `encode`; a cabeca auxiliar so existe no treino."""
+def test_the_forward_pass_is_the_effect_code():
     model = EffectModel(SMALL)
-    x = _batch(3)
-    before = np.asarray(model.encode(x))
-    for weight in model.aux_head.trainable_variables:
-        weight.assign(weight + 1.0)
-    assert np.array_equal(before, np.asarray(model.encode(x)))
-
-
-def test_the_forward_pass_gives_the_code_and_the_drive_level_in_the_unit_interval():
-    z_e, aux = EffectModel(SMALL)(_batch(), training=False)
-    assert z_e.shape == (4, SMALL.effect_dim)
-    assert aux.shape == (4, 1)
-    assert np.all((np.asarray(aux) >= 0.0) & (np.asarray(aux) <= 1.0))
+    x = _batch()
+    assert np.array_equal(np.asarray(model(x, training=False)), np.asarray(model.encode(x)))
 
 
 def test_weights_round_trip_through_disk(tmp_path):
