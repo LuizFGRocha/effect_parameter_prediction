@@ -18,7 +18,7 @@ import pandas as pd
 
 from gefx.disent.train import RESULTS_ROOT
 
-DEFAULT_ROOT = Path("datasets/disent")
+DEFAULT_ROOT = Path("datasets/disent_v2")
 DEFAULT_OUTPUT = RESULTS_ROOT / "loo"
 
 
@@ -99,7 +99,7 @@ def leave_one_arm_out(
             if verbose:
                 print(f"[{held_out} fora, semente {semente}]", flush=True)
             if not (run_dir / "run.json").exists():
-                train(TrainConfig(arms=tuple(seen), steps=steps,
+                train(TrainConfig(dataset_root=root, arms=tuple(seen), steps=steps,
                                   seed=semente, eval_every=0, output_dir=run_dir),
                       verbose=False)
             rows.extend(_evaluate_held_out(run_dir, root, held_out, seen,
@@ -150,7 +150,7 @@ def arm_diversity_curve(
             print(f"[k={k}] {', '.join(treinados)}", flush=True)
         if not (run_dir / "run.json").exists():
             # Quem pontua e o arm retirado, contra o catalogo fixo, logo abaixo.
-            train(TrainConfig(arms=tuple(treinados), steps=steps,
+            train(TrainConfig(dataset_root=root, arms=tuple(treinados), steps=steps,
                               seed=seed, eval_every=0, evaluate_at_end=False,
                               output_dir=run_dir), verbose=False)
         novas = _evaluate_held_out(

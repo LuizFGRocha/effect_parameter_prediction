@@ -88,7 +88,7 @@ def load_run(run_dir: Path):
 
 def embed_run(
     run_dir: Path,
-    dataset_root: Path = Path("datasets/disent"),
+    dataset_root: Path = Path("datasets/disent_v2"),
     split: str = "catalog",
     feature: str = "Spec",
 ):
@@ -107,7 +107,7 @@ def embed_run(
 
 def probe_study(
     results_dir: Path,
-    dataset_root: Path = Path("datasets/disent"),
+    dataset_root: Path = Path("datasets/disent_v2"),
     runs: Optional[Sequence[str]] = None,
     split: str = "catalog",
     folds: int = DEFAULT_FOLDS,

@@ -161,3 +161,20 @@ def test_the_transfer_cost_averages_the_seeds_and_shows_the_spread(tmp_path):
     assert custo.loc["lsp-tanh", "sementes"] == 2
     assert custo.loc["lsp-tanh", "inedito"] == pytest.approx(0.541)
     assert custo.loc["lsp-tanh", "amplitude_pontos"] == pytest.approx(2.0, abs=0.05)
+
+
+def test_leave_one_out_trains_on_the_dataset_it_evaluates(tmp_path, monkeypatch):
+    """Sem isto o treino caia no dataset padrao e a avaliacao no pedido."""
+    from gefx.disent import loo as modulo
+
+    for arm in ("a", "b", "c"):
+        (tmp_path / arm).mkdir()
+        (tmp_path / arm / "metadata.csv").write_text("")
+    raizes = []
+    monkeypatch.setattr(modulo, "_evaluate_held_out", lambda *a, **k: [])
+    monkeypatch.setattr("gefx.disent.train.train",
+                        lambda config, verbose=True: (
+                            raizes.append(config.dataset_root),
+                            Path(config.output_dir).mkdir(parents=True, exist_ok=True)))
+    modulo.leave_one_arm_out(tmp_path, tmp_path / "loo", verbose=False)
+    assert raizes == [tmp_path] * 3

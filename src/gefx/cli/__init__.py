@@ -449,7 +449,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_render.add_argument("--arm", action="append", default=None,
                                help="Repetivel. Padrao: todos os arms do roster.")
     disent_render.add_argument("--input-dir", default="datasets/unprocessed_samples")
-    disent_render.add_argument("--output-root", default="datasets/disent")
+    disent_render.add_argument("--output-root", default="datasets/disent_v2")
     disent_render.add_argument("--roster", default="experiments/disent_roster.yaml",
                                help="Os plugins de cada arm.")
     disent_render.add_argument("--levels", default="experiments/disent_levels.yaml",
@@ -473,8 +473,8 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="b0: vizinho mais proximo no Spec padronizado, a "
                                       "entrada do encoder. b1: regressor do POC I, sem "
                                       "retreino.")
-    disent_retrieve.add_argument("--output-root", default="datasets/disent")
-    disent_retrieve.add_argument("--results-dir", default="results/disent",
+    disent_retrieve.add_argument("--output-root", default="datasets/disent_v2")
+    disent_retrieve.add_argument("--results-dir", default="results/disent/v2",
                                  help="Grava <results-dir>/<baseline>.{csv,json}, onde "
                                       "a escada e as figuras os procuram.")
     disent_retrieve.add_argument("--arm", action="append", default=None,
@@ -483,7 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     disent_plots = disent_sub.add_parser(
         "plots", help="Figuras dos baselines e do encoder, do que ja esta gravado.")
-    disent_plots.add_argument("--results-dir", default="results/disent",
+    disent_plots.add_argument("--results-dir", default="results/disent/v2",
                               help="Baselines na raiz, o encoder em <results-dir>/encoder.")
     disent_plots.add_argument("--out-dir", default=None,
                               help="Padrao: <results-dir>/figuras.")
@@ -492,7 +492,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_cache = disent_sub.add_parser(
         "cache", help="Extrai o cache de features de cada arm."
     )
-    disent_cache.add_argument("--output-root", default="datasets/disent")
+    disent_cache.add_argument("--output-root", default="datasets/disent_v2")
     disent_cache.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
     disent_cache.add_argument("--arm", action="append", default=None)
     disent_cache.add_argument("--rebuild", action="store_true")
@@ -502,9 +502,9 @@ def build_parser() -> argparse.ArgumentParser:
         "train",
         help="Treina o encoder (supcon) ou roda um dos controles sem treino.",
     )
-    disent_train.add_argument("--output-root", default="datasets/disent",
+    disent_train.add_argument("--output-root", default="datasets/disent_v2",
                               help="Raiz do dataset do POC II.")
-    disent_train.add_argument("--results-dir", default="results/disent/encoder")
+    disent_train.add_argument("--results-dir", default="results/disent/v2/encoder")
     disent_train.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
     disent_train.add_argument("--technique", action="append", default=None,
                               choices=["supcon", "random_encoder", "bn_only"],
@@ -537,10 +537,10 @@ def build_parser() -> argparse.ArgumentParser:
                                      "`render --levels` (com --split query).")
     disent_between.add_argument("--levels", default="experiments/disent_levels.yaml")
     disent_between.add_argument("--curves", default="results/disent/calibracao/curvas.csv")
-    disent_between.add_argument("--results-dir", default="results/disent/encoder")
-    disent_between.add_argument("--output-root", default="datasets/disent",
+    disent_between.add_argument("--results-dir", default="results/disent/v2/encoder")
+    disent_between.add_argument("--output-root", default="datasets/disent_v2",
                                 help="Dataset da grade, de onde sai o catalogo.")
-    disent_between.add_argument("--between-root", default="datasets/disent_entre",
+    disent_between.add_argument("--between-root", default="datasets/disent_v2_entre",
                                 help="Dataset das consultas nos pontos medios.")
     disent_between.add_argument("--run", action="append", default=None,
                                 help="Repetivel. Padrao: supcon.")
@@ -551,8 +551,8 @@ def build_parser() -> argparse.ArgumentParser:
         "probe",
         help="Sondas lineares sobre o z_e: que fatores o codigo ainda deixa ler.",
     )
-    disent_probe.add_argument("--results-dir", default="results/disent/encoder")
-    disent_probe.add_argument("--output-root", default="datasets/disent")
+    disent_probe.add_argument("--results-dir", default="results/disent/v2/encoder")
+    disent_probe.add_argument("--output-root", default="datasets/disent_v2")
     disent_probe.add_argument("--run", action="append", default=None,
                               help="Repetivel. Padrao: toda execucao em --results-dir.")
     disent_probe.add_argument("--split", default="catalog",
@@ -564,8 +564,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     disent_loo = disent_sub.add_parser(
         "loo", help="Leave-one-arm-out: a transferencia para implementacao inedita.")
-    disent_loo.add_argument("--output-root", default="datasets/disent")
-    disent_loo.add_argument("--results-dir", default="results/disent/encoder/loo")
+    disent_loo.add_argument("--output-root", default="datasets/disent_v2")
+    disent_loo.add_argument("--results-dir", default="results/disent/v2/encoder/loo")
     disent_loo.add_argument("--steps", type=int, default=4000)
     disent_loo.add_argument("--seed", type=int, default=20260908)
     disent_loo.add_argument("--extra-seed", type=int, action="append", default=None,
@@ -578,14 +578,14 @@ def build_parser() -> argparse.ArgumentParser:
         "diversity",
         help="B2 e B3: treina com 1, 2, ... N-1 implementacoes e mede a transferencia.",
     )
-    disent_diversity.add_argument("--output-root", default="datasets/disent")
+    disent_diversity.add_argument("--output-root", default="datasets/disent_v2")
     disent_diversity.add_argument("--results-dir",
-                                  default="results/disent/encoder/diversidade")
+                                  default="results/disent/v2/encoder/diversidade")
     disent_diversity.add_argument("--held-out", required=True,
                                   help="O arm que nunca entra no treino.")
     disent_diversity.add_argument("--steps", type=int, default=4000)
     disent_diversity.add_argument("--seed", type=int, default=20260908)
-    disent_diversity.add_argument("--reuse", default="results/disent/encoder/loo",
+    disent_diversity.add_argument("--reuse", default="results/disent/v2/encoder/loo",
                                   help="Diretorio do leave-one-out: o ultimo ponto da "
                                        "curva e a mesma execucao e nao e retreinado.")
     disent_diversity.set_defaults(func=_cmd_disent_diversity)
@@ -593,7 +593,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_validate = disent_sub.add_parser(
         "validate", help="Confere que a grade esta cruzada e pareada entre os arms."
     )
-    disent_validate.add_argument("--output-root", default="datasets/disent")
+    disent_validate.add_argument("--output-root", default="datasets/disent_v2")
     disent_validate.set_defaults(func=_cmd_disent_validate)
 
     # gefx inspect-plugin
