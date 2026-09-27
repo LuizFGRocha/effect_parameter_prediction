@@ -35,7 +35,7 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
                        extra: Optional[Dict[str, object]] = None) -> List[Dict[str, object]]:
     from gefx.disent.probes import load_run
     from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.retrieval import retrieve_by_arm
+    from gefx.disent.retrieval import center_by_arm, retrieve_by_arm
     from gefx.disent.sidecar import split_frames
     from gefx.disent.train import embed
 
@@ -53,19 +53,24 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
     for label, arms in (("transferencia", [held_out]), ("vistos", list(seen))):
         queries = frames["query"][frames["query"]["arm"].isin(arms)].reset_index(drop=True)
         z_query = embed(model, FeatureStore(root, queries, "Spec"), standardizer, batch)
-        # Na transferencia o arm retirado ja esta fora do catalogo.
-        result = retrieve_by_arm(queries, catalog, z_query, z_catalog,
-                                 same_arm=(held_out not in pool and label == "transferencia"))
-        overall = result.metrics["overall"]
-        rows.append({
-            "arm_retirado": held_out,
-            "estrato": str(frames["query"].loc[frames["query"]["arm"] == held_out,
-                                               "stratum"].iloc[0]),
-            "condicao": label, **(extra or {}),
-            "drive_exact": float(overall["drive_level"]["exact"]),
-            "within_one": float(overall["drive_level"]["within_one"]),
-            "mae_db": float(overall["mae_db"]), "n": int(overall["n"]),
-        })
+        # `centrado`: cada arm menos a propria media (`center_by_arm`), inclusive o
+        # retirado, cuja media sai das consultas dele, sem rotulo.
+        for centered in (False, True):
+            zq, zc = ((center_by_arm(queries, z_query), center_by_arm(catalog, z_catalog))
+                      if centered else (z_query, z_catalog))
+            # Na transferencia o arm retirado ja esta fora do catalogo.
+            result = retrieve_by_arm(queries, catalog, zq, zc,
+                                     same_arm=(held_out not in pool and label == "transferencia"))
+            overall = result.metrics["overall"]
+            rows.append({
+                "arm_retirado": held_out,
+                "estrato": str(frames["query"].loc[frames["query"]["arm"] == held_out,
+                                                   "stratum"].iloc[0]),
+                "condicao": label, "centrado": centered, **(extra or {}),
+                "drive_exact": float(overall["drive_level"]["exact"]),
+                "within_one": float(overall["drive_level"]["within_one"]),
+                "mae_db": float(overall["mae_db"]), "n": int(overall["n"]),
+            })
     return rows
 
 
@@ -105,8 +110,9 @@ def leave_one_arm_out(
             rows.extend(_evaluate_held_out(run_dir, root, held_out, seen,
                                            extra={"seed": semente}))
             if verbose:
-                for row in rows[-2:]:
-                    print(f"  {row['condicao']:14s} {row['drive_exact']*100:5.1f}%  "
+                for row in rows[-4:]:
+                    print(f"  {row['condicao']:14s} {'centrado' if row['centrado'] else '':8s} "
+                          f"{row['drive_exact']*100:5.1f}%  "
                           f"{row['mae_db']:5.2f} dB", flush=True)
             pd.DataFrame(rows).to_csv(output_dir / "resumo.csv", index=False)
     return pd.DataFrame(rows)
@@ -162,10 +168,18 @@ def arm_diversity_curve(
         rows.extend(novas)
         if verbose:
             for row in novas:
-                print(f"  {row['condicao']:14s} {row['drive_exact']*100:5.1f}%  "
+                print(f"  {row['condicao']:14s} {'centrado' if row['centrado'] else '':8s} "
+                      f"{row['drive_exact']*100:5.1f}%  "
                       f"{row['mae_db']:5.2f} dB", flush=True)
         pd.DataFrame(rows).to_csv(output_dir / "resumo.csv", index=False)
     return pd.DataFrame(rows)
+
+
+def centered_rows(table: pd.DataFrame) -> pd.Series:
+    """Linhas da busca com `center_by_arm`; resumos antigos nao tem a coluna."""
+    if "centrado" not in table.columns:
+        return pd.Series(False, index=table.index)
+    return table["centrado"].astype(str).str.lower() == "true"
 
 
 def transfer_cost(
@@ -175,7 +189,7 @@ def transfer_cost(
     """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo
     no encoder treinado com todos."""
     reference = json.loads(Path(seen_metrics).read_text(encoding="utf-8"))["per_query_arm"]
-    transferencia = loo[loo["condicao"] == "transferencia"]
+    transferencia = loo[(loo["condicao"] == "transferencia") & ~centered_rows(loo)]
     rows: List[Dict[str, object]] = []
     for arm, grupo in transferencia.groupby("arm_retirado", sort=False):
         arm = str(arm)

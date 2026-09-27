@@ -320,6 +320,9 @@ def plot_diversity_curve(curva: pd.DataFrame, chance: float, out_path: Path,
     O catalogo e o mesmo em todos os pontos; a anotacao marca onde entra um estrato
     novo.
     """
+    from gefx.disent.loo import centered_rows
+
+    curva = curva[~centered_rows(curva)]  # a curva e a da busca como esta
     pontos = curva[curva["condicao"] == "transferencia"]
     transferencia = pontos.groupby(["k", "estratos"], as_index=False)["drive_exact"].mean()
     transferencia = transferencia.sort_values("k")

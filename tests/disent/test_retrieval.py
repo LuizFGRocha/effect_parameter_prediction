@@ -179,3 +179,13 @@ def test_retrieve_by_arm_refuses_vectors_that_do_not_match_the_tables():
     with pytest.raises(ValueError, match="desalinhados"):
         retrieve_by_arm(queries, catalog, np.zeros((1, 3), np.float32),
                         np.zeros((len(catalog), 3), np.float32))
+
+
+def test_center_by_arm_removes_a_constant_offset_per_arm():
+    from gefx.disent.retrieval import center_by_arm
+
+    frame = pd.DataFrame({"arm": ["a", "a", "b", "b"]})
+    vectors = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [0.0, 1.0]])
+    shifted = vectors + np.array([[5.0, 5.0], [5.0, 5.0], [-3.0, 2.0], [-3.0, 2.0]])
+    assert np.allclose(center_by_arm(frame, shifted), center_by_arm(frame, vectors))
+    assert np.allclose(center_by_arm(frame, shifted)[:2].mean(axis=0), 0.0)
