@@ -15,7 +15,6 @@ from gefx.disent.plots import (
     TECHNIQUE_LABEL,
     build_all,
     ordered_arms,
-    plot_baselines_by_arm,
     plot_diversity_curve,
 )
 from gefx.disent.train import TECHNIQUES
@@ -47,12 +46,6 @@ def _metrics():
     }
 
 
-def test_baselines_figure_is_written(tmp_path):
-    destino = tmp_path / "baselines.png"
-    plot_baselines_by_arm(_metrics(), _metrics(), destino)
-    assert destino.exists() and destino.stat().st_size > 0
-
-
 def test_every_technique_has_a_label():
     assert set(TECHNIQUE_LABEL) == set(TECHNIQUES)
 
@@ -75,13 +68,7 @@ def test_build_all_writes_what_there_is_data_for(tmp_path):
     _run(tmp_path, "supcon", "supcon", 0.44, 3.8)
     _run(tmp_path, "supcon_s2", "supcon", 0.43, 3.9, seed=2)
     nomes = {caminho.name for caminho in build_all(tmp_path)}
-    assert nomes == {"escada.png", "por_arm.png"}
-
-
-def test_build_all_adds_the_baselines_when_retrieve_wrote_them(tmp_path):
-    for nome in ("b0.json", "b1.json"):
-        (tmp_path / nome).write_text(json.dumps(_metrics()), encoding="utf-8")
-    assert {c.name for c in build_all(tmp_path)} == {"baselines_por_arm.png"}
+    assert nomes == {"escada.png"}
 
 
 def test_build_all_of_an_empty_directory_writes_nothing(tmp_path):
@@ -124,4 +111,15 @@ def test_the_ladder_takes_the_baselines_from_what_retrieve_wrote(tmp_path):
         (tmp_path / nome).write_text(json.dumps(_metrics()), encoding="utf-8")
     _run(tmp_path, "supcon", "supcon", 0.44, 3.8)
     nomes = {caminho.name for caminho in build_all(tmp_path)}
-    assert {"baselines_por_arm.png", "escada.png", "por_arm.png"} <= nomes
+    assert nomes == {"escada.png"}
+
+
+def test_the_transfer_cost_figure_is_written(tmp_path):
+    from gefx.disent.plots import plot_transfer_cost
+
+    custo = pd.DataFrame({"arm": ARMS, "estrato": [STRATA[a] for a in ARMS],
+                          "visto": [0.7, 0.69, 0.68, 0.69], "inedito": [0.65, 0.6, 0.3, 0.32],
+                          "custo_pontos": [-5, -9, -38, -37]})
+    alvo = tmp_path / "custo.png"
+    plot_transfer_cost(custo, 0.125, alvo)
+    assert alvo.stat().st_size > 0
