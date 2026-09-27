@@ -210,7 +210,7 @@ def plot_by_arm(metrics: Dict[str, object], out_path: Path) -> None:
     _save(fig, out_path)
 
 
-def build_all(results_dir: Path = Path("results/disent"),
+def build_all(results_dir: Path = Path("results/disent/v2"),
               out_dir: Optional[Path] = None) -> List[Path]:
     """Todas as figuras que tiverem dado em disco.
 

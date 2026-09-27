@@ -47,7 +47,7 @@ class ContentItem:
 @dataclass
 class RenderOptions:
     input_dir: Path = Path("datasets/unprocessed_samples")
-    output_root: Path = Path("datasets/disent")
+    output_root: Path = Path("datasets/disent_v2")
     roster: Path = DEFAULT_ROSTER
     levels: Path = DEFAULT_LEVELS
     n_contents: int = 400  # gravacoes; cada uma da `segments_per_file` conteudos

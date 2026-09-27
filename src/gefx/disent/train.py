@@ -31,7 +31,7 @@ from gefx.disent.sidecar import split_frames
 
 TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon")
 
-RESULTS_ROOT = Path("results/disent/encoder")
+RESULTS_ROOT = Path("results/disent/v2/encoder")
 
 #: Arquivos de `gefx disent retrieve`, ao lado de `RESULTS_ROOT`.
 BASELINES: Dict[str, str] = {"B0": "b0.json", "B1": "b1.json"}
@@ -41,7 +41,7 @@ BASELINES: Dict[str, str] = {"B0": "b0.json", "B1": "b1.json"}
 class TrainConfig:
     """Tudo o que define uma execucao. Vai inteiro para o `run.json`."""
 
-    dataset_root: Path = Path("datasets/disent")
+    dataset_root: Path = Path("datasets/disent_v2")
     feature: str = "Spec"
     technique: str = "supcon"
     arms: Optional[Tuple[str, ...]] = None
