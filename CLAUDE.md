@@ -235,30 +235,34 @@ Decisions already made — don't reopen without new evidence:
   well (median 5% of frames 30 dB below the peak, 3% without an attack), so no
   onset-based segment selection.
 
-**Encoder loss: Rank-N-Contrast, with SupCon as a control** (2026-09-27). The user wants
-the method to rest on published code, so they can review it against the original and
-write less new code. Both losses in `losses.py` are translations of official code; keep
-them translations, don't "improve" them.
+**Encoder loss: SupCon only** (2026-09-27, technique `supcon`). The user wants the
+method to rest on published code, so they can review it against the original and write
+less new code.
 
-- `rnc` (main technique, the default): `RnCLoss` from kaiwenzha/Rank-N-Contrast (Zha et
-  al., NeurIPS 2023; commit 6239bdf; **the repo declares no license**). Chosen because
-  drive is an *ordered* quantity (calibrated in 1 − Rnonlin, evaluated in dB): RnC puts
-  the order into the distances of `z_e`, which is what the nearest-neighbour search
-  reads; SupCon only makes 8 unordered clusters. When the positive has the anchor's
-  level, RnC's term *is* SupCon's, so the invariance to content and arm is kept. It also
-  bridges to POC I (regression). Deviations from the original: any `n_views` (we use 1);
-  the `for k` loop vectorised to [n, n, n] (a test checks it against the loop in
-  NumPy); a double `where` so the sqrt has no NaN gradient at distance 0; and
-  **temperature 0.1 instead of 2**, because our `z_e` is unit-norm (L2 distance in
-  [0, 2]) while the original's features aren't. The 0.1 is a guess to be checked.
-- `supcon` (control): `SupConLoss` from HobbitLong/SupContrast (commit 72fd989, BSD-2),
-  temperature 0.07. **If `rnc` works, the user intends to delete `supcon`** to keep the
-  code small.
+- `losses.py` is a line-by-line TensorFlow translation of `SupConLoss` from the official
+  repo (HobbitLong/SupContrast, commit 72fd989, BSD-2), temperature 0.07, with the
+  original's English comments; only `mask` and `contrast_mode='one'` are left out. Keep
+  it a translation; don't "improve" it.
 - The auxiliary drive regression (the old `contrastive_aux`) was **dropped**: our own
-  code with no published reference, and it measured as not distinguishable from pure
-  contrastive (44.0 vs 42.7% drive exact, +1.25 with by-content IC95 [−1.95; +4.41],
-  `documents/poc2_estado_2026-09-07.md`, old 40-config grid). RnC replaces it as the
-  way to get ordering.
+  code with no published reference, and not distinguishable from pure contrastive
+  (44.0 vs 42.7% drive exact, +1.25 with by-content IC95 [−1.95; +4.41],
+  `documents/poc2_estado_2026-09-07.md`, old 40-config grid).
+- **Rank-N-Contrast was tried and removed** (Zha et al. 2023, kaiwenzha/Rank-N-Contrast,
+  ported in commit 08b264f, removed after). Rationale for trying: drive is ordered and
+  RnC puts that order into the distances of `z_e`. On `disent_v2` (one seed each, commit
+  08b264f) it **tied** SupCon everywhere, with IC95 resampled by recording:
+  - on the grid: 68.4 vs 68.2% drive exact, 0.89 vs 0.88 dB (diff +0.26 pt,
+    [−1.05; +1.61]); errors ≥ 2 levels 1.5 vs 1.8%;
+  - between levels (`gefx disent between`, queries at the 7 midpoints): right neighbour
+    92.2 vs 91.7%, k-NN error 1.23 vs 1.22 dB (diff [−0.031; +0.038]). Both are below
+    half a step (1.47 dB), and neighbours split ~44/48% between the two adjacent levels:
+    **SupCon's `z_e` is already ordered**, because adjacent levels sound alike;
+  - but RnC left twice the content readable by a linear probe (27.0 vs 13.3%).
+  It also needed a temperature deviation (0.1 instead of 2, our `z_e` is unit-norm) and
+  its repo has no license. Don't bring it back without new evidence.
+- Probe finding for the report, independent of the loss: the arm is *more* readable
+  from trained `z_e` (~56%) than from the untrained encoder (43%), chance 12.5%, even
+  though cross-arm retrieval works well — `z_e` is not arm-invariant.
 - Framing: Koo et al. 2023 (FXencoder, contrastive encoder that keeps only the effects)
   for audio; Wang et al. §3.3.2 (grouped supervision, ML-VAE/DC-IGN) for DRL. The
   time-average in the encoder is the "sequence-level factor" bias of FHVAE (Hsu et al.

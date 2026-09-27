@@ -7,9 +7,9 @@ acerto exato; mede-se:
 
 - `neighbor`: o nivel recuperado e um dos dois vizinhos do ponto medio (acaso 2/8);
 - `err_nn_db`: erro em dB do vizinho mais proximo (o minimo possivel e meio degrau);
-- `err_knn_db`: erro em dB da media dos `k` vizinhos mais proximos. E onde a ordem
-  de `z_e` deve aparecer: num espaco ordenado, os vizinhos de um ponto medio se
-  dividem entre os dois niveis ao lado dele.
+- `err_knn_db`: erro em dB da media dos `k` vizinhos mais proximos. Mede a ordem
+  de `z_e`: num espaco ordenado, os vizinhos de um ponto medio se dividem entre
+  os dois niveis ao lado dele, e o erro cai abaixo de meio degrau.
 
 O B1 (regressor do POC I) entra pela saida continua dele, sem busca.
 """
@@ -70,7 +70,7 @@ def between_study(
     results_dir: Path,
     grid_root: Path,
     between_root: Path,
-    runs: Sequence[str] = ("rnc", "supcon"),
+    runs: Sequence[str] = ("supcon",),
     k: int = DEFAULT_K,
     with_b1: bool = True,
 ) -> pd.DataFrame:

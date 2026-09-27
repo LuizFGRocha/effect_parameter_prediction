@@ -1,7 +1,6 @@
 """Treino do encoder e os dois controles que separam aprendizado de arquitetura.
 
-- `rnc`: o encoder, treinado com o Rank-N-Contrast (`losses.py`) sobre `z_e`;
-- `supcon`: o mesmo com o SupCon, que ignora a ordem dos niveis (controle);
+- `supcon`: o encoder, treinado com o SupCon (`losses.py`) sobre `z_e`;
 - `random_encoder`: a mesma rede sem nenhum passo, o que a arquitetura ja entrega;
 - `bn_only`: a rede sem treino com so as estatisticas moveis da BatchNorm
   calibradas, sem gradiente. Com zero passos elas ficam na inicializacao (0, 1),
@@ -24,16 +23,13 @@ import pandas as pd
 
 from gefx.config import git_revision
 from gefx.disent.features import FeatureStore, PixelStandardizer
-from gefx.disent.losses import DEFAULT_TEMPERATURE, RNC_TEMPERATURE, rnc_loss, sup_con_loss
+from gefx.disent.losses import DEFAULT_TEMPERATURE, sup_con_loss
 from gefx.disent.model import EffectModel, EncoderConfig
 from gefx.disent.retrieval import retrieve_by_arm
 from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
 from gefx.disent.sidecar import split_frames
 
-TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon", "rnc")
-
-#: A perda de cada tecnica treinada e a temperatura padrao dela.
-LOSSES = {"supcon": (sup_con_loss, DEFAULT_TEMPERATURE), "rnc": (rnc_loss, RNC_TEMPERATURE)}
+TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon")
 
 RESULTS_ROOT = Path("results/disent/encoder")
 
@@ -47,14 +43,13 @@ class TrainConfig:
 
     dataset_root: Path = Path("datasets/disent")
     feature: str = "Spec"
-    technique: str = "rnc"
+    technique: str = "supcon"
     arms: Optional[Tuple[str, ...]] = None
     steps: int = 4000
     configs_per_batch: int = 8
     views_per_config: int = 8
     learning_rate: float = 1e-3
-    #: None = o padrao da perda da tecnica (`LOSSES`).
-    temperature: Optional[float] = None
+    temperature: float = DEFAULT_TEMPERATURE
     eval_every: int = 500
     embed_batch: int = 128
     seed: int = 20260908
@@ -78,7 +73,7 @@ class TrainConfig:
 
 
 # --- passo de treino ----------------------------------------------------------
-def make_step(model: EffectModel, optimizer, loss_fn, temperature: float):
+def make_step(model: EffectModel, optimizer, temperature: float):
     import tensorflow as tf
 
     variables = model.trainable_variables
@@ -87,9 +82,9 @@ def make_step(model: EffectModel, optimizer, loss_fn, temperature: float):
     def step(x, config_label):
         with tf.GradientTape() as tape:
             z_e = model(x, training=True)
-            # Uma vista por linha: [bsz, n_views=1, dim], como as duas perdas pedem.
+            # Uma vista por linha: [bsz, n_views=1, dim], como o SupConLoss pede.
             # O rotulo e o nivel de drive (`config_index == drive_level`).
-            loss = loss_fn(z_e[:, None, :], config_label, temperature)
+            loss = sup_con_loss(z_e[:, None, :], config_label, temperature)
         gradients = tape.gradient(loss, variables)
         optimizer.apply_gradients(zip(gradients, variables))
         return loss
@@ -186,12 +181,9 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     steps = 0 if config.technique == "random_encoder" else config.steps
     if config.technique == "bn_only":
         step = make_bn_step(model)
-    elif config.technique in LOSSES:
+    else:
         optimizer = keras.optimizers.Adam(learning_rate=config.learning_rate)
-        loss_fn, default_temperature = LOSSES[config.technique]
-        if config.temperature is None:
-            config = replace(config, temperature=default_temperature)
-        step = make_step(model, optimizer, loss_fn, config.temperature)
+        step = make_step(model, optimizer, config.temperature)
 
     rng = np.random.default_rng(config.seed)
     history: List[Dict[str, float]] = []

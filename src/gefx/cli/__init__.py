@@ -156,7 +156,7 @@ def _cmd_disent_between(args: argparse.Namespace) -> None:
         print(f"niveis intermediarios em {args.write_levels}")
         return
     print(between_study(Path(args.results_dir), Path(args.output_root), Path(args.between_root),
-                        runs=args.run or ("rnc", "supcon"), k=args.k).to_string(index=False))
+                        runs=args.run or ("supcon",), k=args.k).to_string(index=False))
 
 
 def _cmd_disent_cache(args: argparse.Namespace) -> None:
@@ -217,7 +217,7 @@ def _write_table(tabela, destino: Path) -> None:
 def _cmd_disent_train(args: argparse.Namespace) -> None:
     from gefx.disent.train import RESULTS_ROOT, TECHNIQUES, TrainConfig, compare, train
 
-    escolhidas = list(dict.fromkeys(args.technique or ["rnc"]))
+    escolhidas = list(dict.fromkeys(args.technique or ["supcon"]))
     desconhecidas = [nome for nome in escolhidas if nome not in TECHNIQUES]
     if desconhecidas:
         raise SystemExit(f"tecnica desconhecida: {desconhecidas}. Ha {list(TECHNIQUES)}")
@@ -500,16 +500,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     disent_train = disent_sub.add_parser(
         "train",
-        help="Treina o encoder (rnc ou supcon) ou roda um dos controles sem treino.",
+        help="Treina o encoder (supcon) ou roda um dos controles sem treino.",
     )
     disent_train.add_argument("--output-root", default="datasets/disent",
                               help="Raiz do dataset do POC II.")
     disent_train.add_argument("--results-dir", default="results/disent/encoder")
     disent_train.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
     disent_train.add_argument("--technique", action="append", default=None,
-                              choices=["rnc", "supcon", "random_encoder", "bn_only"],
-                              help="Repetivel. Padrao: rnc. supcon: a perda sem ordem "
-                                   "dos niveis, como controle. random_encoder: "
+                              choices=["supcon", "random_encoder", "bn_only"],
+                              help="Repetivel. Padrao: supcon. random_encoder: "
                                    "zero passos. bn_only: so calibra a BatchNorm, sem "
                                    "gradiente.")
     disent_train.add_argument("--arm", action="append", default=None,
@@ -518,8 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_train.add_argument("--configs-per-batch", type=int, default=8)
     disent_train.add_argument("--views-per-config", type=int, default=8)
     disent_train.add_argument("--learning-rate", type=float, default=1e-3)
-    disent_train.add_argument("--temperature", type=float, default=None,
-                              help="Padrao: o da perda (rnc 0.1, supcon 0.07).")
+    disent_train.add_argument("--temperature", type=float, default=0.07)
     disent_train.add_argument("--eval-every", type=int, default=500,
                               help="0 desliga a avaliacao intermediaria.")
     disent_train.add_argument("--seed", type=int, default=20260908,
@@ -545,7 +543,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_between.add_argument("--between-root", default="datasets/disent_entre",
                                 help="Dataset das consultas nos pontos medios.")
     disent_between.add_argument("--run", action="append", default=None,
-                                help="Repetivel. Padrao: rnc e supcon.")
+                                help="Repetivel. Padrao: supcon.")
     disent_between.add_argument("--k", type=int, default=10)
     disent_between.set_defaults(func=_cmd_disent_between)
 
