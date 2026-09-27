@@ -56,6 +56,8 @@ class RenderOptions:
     seed: int = 20260906
     split_seed: int = 20260906
     arms: Optional[Sequence[str]] = None
+    #: So estas particoes (os niveis intermediarios so precisam das consultas).
+    splits: Optional[Sequence[str]] = None
     workers: int = 4
 
 
@@ -147,6 +149,8 @@ def render(options: RenderOptions) -> Dict[str, int]:
     arms = [roster.arm(key) for key in wanted]
 
     items = content_items(options)
+    if options.splits:
+        items = [item for item in items if item.split in options.splits]
     configs = all_configs(roster.drive_levels)
     print(f"{len(items)} conteudos ({options.n_contents} gravacoes x "
           f"{options.segments_per_file} trechos) x {len(configs)} configuracoes x {len(arms)} arms "

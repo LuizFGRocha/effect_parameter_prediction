@@ -35,7 +35,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from gefx.audio import load_audio_file, normalize_loudness
-from gefx.disent.arms import Arm, LoadedArm, load_roster, write_levels
+from gefx.disent.arms import Arm, LoadedArm, load_levels, load_roster, write_levels
 
 DESCRIPTOR = "rnonlin"
 DEFAULT_REFERENCE_DB: Tuple[float, float] = (18.45, 39.0)
@@ -241,3 +241,33 @@ def _write_curves(path: Path, curves: Dict[str, Tuple[np.ndarray, np.ndarray]]) 
         {"arm": key, "knob": float(k), DESCRIPTOR: float(v)}
         for key, (knobs, curve) in curves.items() for k, v in zip(knobs, curve)
     ]).to_csv(path, index=False)
+
+
+def between_levels(levels_path: Path, curves_csv: Path, out_path: Path) -> Dict[str, List[float]]:
+    """Os pontos medios entre niveis vizinhos, pelas curvas que `calibrate` gravou.
+
+    Para testar configuracoes fora da grade: os niveis sao equidistantes em
+    1 - Rnonlin, entao o ponto medio de dois alvos e o alvo do meio, e cada arm
+    recebe o knob dele pelo mesmo pareamento. Grava um arquivo de niveis com um
+    nivel a menos, que o `render` le como qualquer outro.
+    """
+    import pandas as pd
+
+    data = load_levels(levels_path)
+    targets = np.asarray(data["targets"], dtype=np.float64)
+    middle = list(1 - (targets[:-1] + targets[1:]) / 2)
+    curves = pd.read_csv(curves_csv)
+    arms: Dict[str, Dict[str, object]] = {}
+    for key in data["arms"]:
+        curve = curves[curves["arm"] == key]
+        if curve.empty:
+            raise KeyError(f"{key} nao tem curva em {curves_csv}: rode `calibrate`")
+        values, unmatched = arm_knobs(curve["knob"].to_numpy(), 1 - curve[DESCRIPTOR].to_numpy(),
+                                      middle)
+        arms[key] = {"levels": [round(v, 4) for v in values], "unmatched": unmatched}
+    write_levels(out_path, {
+        "descriptor": DESCRIPTOR,
+        "targets": [round(1 - float(t), 4) for t in middle],
+        "arms": arms,
+    })
+    return {key: spec["levels"] for key, spec in arms.items()}  # type: ignore[misc]
