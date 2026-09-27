@@ -193,7 +193,7 @@ def plot_transfer_cost(custo: pd.DataFrame, chance: float, out_path: Path) -> No
     ax.bar(posicoes + largura / 2, dados["inedito"] * 100, largura,
            color=COLOR_CEILING, label="implementação inédita")
     for x, (visto, inedito) in enumerate(zip(dados["visto"], dados["inedito"])):
-        ax.annotate(f"{(inedito - visto) * 100:+.1f}",
+        ax.annotate(f"{(inedito - visto) * 100:+.1f}".replace(".", ","),
                     xy=(x, max(visto, inedito) * 100), xytext=(0, 4),
                     textcoords="offset points", ha="center", fontsize=9)
     ax.axhline(chance * 100, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
@@ -243,17 +243,19 @@ def plot_diversity_curve(curva: pd.DataFrame, chance: float, out_path: Path,
                    label="o mesmo arm, visto no treino")
 
     for _, linha in transferencia.iterrows():
-        ax.annotate(f"{linha['drive_exact'] * 100:.1f}%",
+        ax.annotate(_pct(linha["drive_exact"]),
                     xy=(linha["k"], linha["drive_exact"] * 100), xytext=(0, 8),
                     textcoords="offset points", ha="center", fontsize=9)
-    rotulos = [
-        f"{int(linha['k'])}\n{int(linha['estratos'])} estrato"
-        + ("s" if int(linha["estratos"]) > 1 else "")
-        for _, linha in transferencia.iterrows()
-    ]
+    # O arm que entra em cada ponto: e ele, e nao a contagem, que explica os saltos.
+    entra = {int(k): str(arms).split("|")[-1] for k, arms
+             in pontos.groupby("k")["arms_treinados"].first().items()} \
+        if "arms_treinados" in pontos.columns else {}
+    rotulos = [f"{int(linha['k'])}\n+ {_short(entra[int(linha['k'])])}"
+               if int(linha["k"]) in entra else str(int(linha["k"]))
+               for _, linha in transferencia.iterrows()]
     ax.set_xticks(transferencia["k"])
     ax.set_xticklabels(rotulos, fontsize=8)
-    ax.set_xlabel("implementações no treino (catálogo fixo em todos os pontos)")
+    ax.set_xlabel("implementações no treino, e a que entra em cada ponto (catálogo fixo)")
     ax.set_ylabel("acerto exato do nível de drive (%)")
     ax.set_ylim(0, max(curva["drive_exact"].max() * 100 * 1.15, 50))
     ax.set_title("Diversidade de implementação no treino compra transferência?")
