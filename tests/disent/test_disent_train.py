@@ -73,7 +73,7 @@ def _dataset(tmp_path, seed=0):
     return tmp_path
 
 
-def _config(tmp_path, technique="rnc", **kwargs):
+def _config(tmp_path, technique="supcon", **kwargs):
     from gefx.disent.model import EncoderConfig
 
     defaults = dict(
@@ -131,8 +131,7 @@ def test_a_run_writes_every_artifact_that_makes_it_reproducible(tmp_path):
                  "standardizer.npz"):
         assert (out / name).exists(), name
     assert (out / "weights" / "encoder.weights.h5").exists()
-    assert manifest["config"]["technique"] == "rnc"
-    assert manifest["config"]["temperature"] == pytest.approx(0.1)
+    assert manifest["config"]["technique"] == "supcon"
     assert manifest["splits"]["train"] == len(ARMS) * 3 * 4
     assert set(manifest["summary"]) == {"drive_exact", "mae_db",
                                         "same_arm_drive_exact"}
@@ -143,12 +142,6 @@ def test_the_history_records_the_loss_at_every_step(tmp_path):
     history = json.loads((tmp_path / "out" / "history.json").read_text())
     assert [row["step"] for row in history] == [1, 2, 3]
     assert all(np.isfinite(row["loss"]) for row in history)
-
-
-def test_the_supcon_control_trains_with_its_own_temperature(tmp_path):
-    manifest = train_module.train(_config(tmp_path, technique="supcon", steps=2),
-                                  verbose=False)
-    assert manifest["config"]["temperature"] == pytest.approx(0.07)
 
 
 def test_the_untrained_control_really_skips_optimization(tmp_path):

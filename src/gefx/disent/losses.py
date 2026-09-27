@@ -1,9 +1,4 @@
-"""As perdas do encoder, cada uma traduzida do codigo oficial do artigo.
-
-- `rnc_loss`: Rank-N-Contrast (Zha et al. 2023), a perda principal. O drive e
-  ordenado, e ela poe essa ordem nas distancias de `z_e`.
-- `sup_con_loss`: o contrastivo supervisionado (Khosla et al. 2020), que trata os
-  niveis como classes sem ordem. Fica como controle: se o RnC for melhor, sai.
+"""A perda do encoder: o contrastivo supervisionado (SupCon) de Khosla et al. (2020).
 
 `sup_con_loss` e a traducao para TensorFlow do `SupConLoss` do repositorio oficial,
 https://github.com/HobbitLong/SupContrast/blob/72fd9894f39023906308a21ec404b3b01527b8f5/losses.py
@@ -16,6 +11,10 @@ mesmo nivel, em outro conteudo e em outra implementacao (o amostrador sorteia os
 dois de forma independente): e isso que tira conteudo e implementacao de `z_e`.
 O uso para separar efeito de conteudo em audio segue o FXencoder de Koo et al.
 (2023), que treina por contraste um codificador que guarda so os efeitos.
+
+Os niveis entram como classes sem ordem, e ainda assim `z_e` sai ordenado (os
+niveis vizinhos soam parecidos): o Rank-N-Contrast, que impoe a ordem, empatou
+com ele na grade e entre os niveis, e foi removido.
 """
 from __future__ import annotations
 
@@ -83,71 +82,3 @@ def sup_con_loss(features, labels, temperature: float = DEFAULT_TEMPERATURE,
 
     return loss
 
-
-# --- Rank-N-Contrast ----------------------------------------------------------
-#: O original usa 2 sobre features sem normalizar. Nosso `z_e` fica na esfera
-#: (a busca e por cosseno), onde a distancia L2 vai de 0 a 2: com 2, os logits
-#: ficariam em [-1, 0] e quase nao haveria contraste. 0.1 e da ordem do 0.07 do
-#: SupCon, que tambem trabalha na esfera. E um desvio do original; conferir.
-RNC_TEMPERATURE = 0.1
-
-
-def rnc_loss(features, labels, temperature: float = RNC_TEMPERATURE):
-    """`RnCLoss(label_diff='l1', feature_sim='l2').forward(features, labels)`.
-
-    Traducao para TensorFlow do Rank-N-Contrast (Zha et al., NeurIPS 2023),
-    https://github.com/kaiwenzha/Rank-N-Contrast/blob/6239bdfc42181e25d5e570a4d96aaafd04f2b573/loss.py
-    (o repositorio nao declara licenca). Dois desvios, ambos de forma e nao de
-    conta:
-
-    - o original junta exatamente 2 vistas; aqui, `n_views` quaisquer, como no
-      SupCon (usamos 1: as vistas sao linhas diferentes do batch);
-    - o laco `for k in range(n - 1)` virou uma conta com um eixo a mais
-      ([n, n, n]), porque o tamanho do batch nao e fixo dentro do `tf.function`.
-      O teste compara com o laco transcrito em NumPy.
-
-    Para cada ancora i e cada outra amostra j (o "positivo"), os negativos sao
-    as amostras k cujo rotulo esta ao menos tao longe do de i quanto o de j.
-    Com j do mesmo nivel que i, os negativos sao todos: e o termo do SupCon.
-
-    Args:
-        features: [bsz, n_views, feat_dim].
-        labels: [bsz, label_dim] (ou [bsz]).
-    Returns:
-        A loss scalar.
-    """
-    import tensorflow as tf
-
-    n_views = features.shape[1]
-    features = tf.concat(tf.unstack(features, axis=1), axis=0)  # [n_views*bs, feat_dim]
-    labels = tf.cast(tf.reshape(labels, [tf.shape(labels)[0], -1]), features.dtype)
-    labels = tf.tile(labels, [n_views, 1])  # [n_views*bs, label_dim]
-
-    # LabelDifference('l1')
-    label_diffs = tf.reduce_sum(tf.abs(labels[:, None, :] - labels[None, :, :]), axis=-1)
-    # FeatureSimilarity('l2'): -||f_i - f_j||. A raiz tem gradiente infinito em 0
-    # (a diagonal); o `where` duplo a evita sem mudar nenhum valor.
-    squared = tf.reduce_sum(tf.square(features[:, None, :] - features[None, :, :]), axis=-1)
-    positive = squared > 0.0
-    distance = tf.where(positive, tf.sqrt(tf.where(positive, squared, tf.ones_like(squared))),
-                        tf.zeros_like(squared))
-    logits = -distance / temperature
-    logits_max = tf.reduce_max(logits, axis=1, keepdims=True)
-    logits = logits - tf.stop_gradient(logits_max)
-    exp_logits = tf.exp(logits)
-
-    n = tf.shape(logits)[0]  # n = n_views*bs
-
-    # remove diagonal
-    off_diagonal = 1.0 - tf.eye(n, dtype=logits.dtype)  # [i, j]: j != i
-
-    # neg_mask[i, j, k] = label_diffs[i, k] >= label_diffs[i, j], com k != i
-    neg_mask = tf.cast(label_diffs[:, None, :] >= label_diffs[:, :, None], logits.dtype)
-    neg_mask = neg_mask * off_diagonal[:, None, :]
-    denominator = tf.reduce_sum(neg_mask * exp_logits[:, None, :], axis=-1)  # [i, j]
-    # Na diagonal (j == i) o denominador nunca e zero, mas o termo e descartado.
-    pos_log_probs = logits - tf.math.log(denominator)
-    n_pairs = tf.cast(n * (n - 1), logits.dtype)
-    loss = -tf.reduce_sum(pos_log_probs * off_diagonal) / n_pairs
-
-    return loss
