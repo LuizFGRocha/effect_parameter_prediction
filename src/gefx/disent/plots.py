@@ -17,8 +17,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-POC1_MAE_DB = 1.28  # erro do POC I dentro da propria implementacao
-
 COLOR_B0 = "#8c8c8c"
 COLOR_B1 = "#1f77b4"
 COLOR_CHANCE = "#c44e52"
@@ -58,61 +56,6 @@ def _short(key: str) -> str:
     return key.replace("pedalboard-", "pb-")
 
 
-# --- 1. B0 x B1 por arm -------------------------------------------------------
-def plot_baselines_by_arm(
-    b0_metrics: Dict[str, object],
-    b1_metrics: Dict[str, object],
-    out_path: Path,
-) -> None:
-    """Acerto exato e erro em dB dos dois baselines, arm a arm, com o acaso e o passo da grade."""
-    arms = ordered_arms(list(b0_metrics["per_query_arm"]), b0_metrics["strata"])
-    passo = grid_step_db(b0_metrics)
-    b0 = [b0_metrics["per_query_arm"][a]["drive_level"]["exact"] * 100 for a in arms]
-    b1 = [b1_metrics["per_query_arm"][a]["drive_level"]["exact"] * 100 for a in arms]
-    b0_db = [b0_metrics["per_query_arm"][a]["mae_db"] for a in arms]
-    b1_db = [b1_metrics["per_query_arm"][a]["mae_db"] for a in arms]
-    chance = b0_metrics["per_query_arm"][arms[0]]["drive_level"]["chance"] * 100
-
-    positions = np.arange(len(arms))
-    width = 0.38
-    fig, (top, bottom) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-
-    top.bar(positions - width / 2, b0, width, label="B0 — vizinho mais próximo",
-            color=COLOR_B0)
-    top.bar(positions + width / 2, b1, width, label="B1 — regressor do POC I",
-            color=COLOR_B1)
-    top.axhline(chance, color=COLOR_CHANCE, linestyle="--", linewidth=1.2)
-    top.annotate(f"acaso\n({chance:.1f}%)", xy=(-1.3, chance), xytext=(2, -6),
-                 textcoords="offset points", ha="left", color=COLOR_CHANCE,
-                 fontsize=9)
-    # Margem a esquerda para as anotacoes das linhas de referencia.
-    top.set_xlim(-1.35, len(arms) - 0.4)
-    top.set_ylim(0, max(max(b0), max(b1)) * 1.18)
-    top.set_ylabel("acerto exato do nível de drive (%)")
-    top.set_title(f"Baselines por implementação — "
-                  f"{b0_metrics['alphabet']['drive_level']} níveis de drive")
-    top.legend(loc="upper left")
-
-    bottom.bar(positions - width / 2, b0_db, width, color=COLOR_B0)
-    bottom.bar(positions + width / 2, b1_db, width, color=COLOR_B1)
-    bottom.axhline(passo, color=COLOR_CHANCE, linestyle="--", linewidth=1.2)
-    bottom.annotate(f"um degrau\nda grade\n({passo:.2f} dB)",
-                    xy=(-1.3, passo), xytext=(2, 5),
-                    textcoords="offset points", ha="left",
-                    color=COLOR_CHANCE, fontsize=9)
-    bottom.axhline(POC1_MAE_DB, color="#555555", linestyle=":", linewidth=1.2)
-    bottom.annotate(f"POC I, na própria\nimplementação\n({POC1_MAE_DB} dB)",
-                    xy=(-1.3, POC1_MAE_DB), xytext=(2, 5),
-                    textcoords="offset points", ha="left",
-                    color="#555555", fontsize=9)
-    bottom.set_ylim(0, max(b0_db) * 1.12)
-    bottom.set_ylabel("erro médio (dB equivalentes)")
-    bottom.set_xticks(positions)
-    bottom.set_xticklabels([_short(a) for a in arms], rotation=25, ha="right")
-
-    _save(fig, out_path)
-
-
 # --- a escada ------------------------------------------------------------------
 COLOR_LEARNED = "#4c72b0"
 COLOR_RANDOM = "#937860"
@@ -147,9 +90,9 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
                 eixo.plot([x] * len(valores), valores, "o", color="k", markersize=4,
                           alpha=0.6, zorder=3)
         eixo.bar(posicoes, medias, color=cores)
-        # Rotulo dentro da barra: por cima, cairia nas linhas de referencia.
+        # Rotulo no pe da barra: no topo, cairia nas sementes e nas linhas de referencia.
         for x, valor in zip(posicoes, medias):
-            eixo.annotate(formato.format(valor), xy=(x, valor), xytext=(0, -14),
+            eixo.annotate(formato.format(valor).replace(".", ","), xy=(x, 0), xytext=(0, 6),
                           textcoords="offset points", ha="center", fontsize=9,
                           color="white", fontweight="bold")
         eixo.set_xticks(posicoes)
@@ -165,7 +108,7 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
             left.axhline(valor * 100, color=cor, linestyle=estilo, linewidth=1.4,
                          label=f"{texto} ({_pct(valor)})")
     left.set_ylabel("acerto exato do nível de drive (%)")
-    left.set_ylim(0, 75)
+    left.set_ylim(0, max(execucoes["drive_exact"].max() * 100 * 1.15, 50))
     left.set_title("Recuperação entre implementações")
     left.legend(fontsize=8, loc="upper left")
 
@@ -175,7 +118,7 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
             right.axhline(valor, color=cor, linestyle=estilo, linewidth=1.4,
                           label=f"{texto} ({_db(valor)})")
     right.axhline(passo_db, color="k", linestyle=":", linewidth=1.2,
-                  label=f"um degrau da grade ({passo_db:.2f} dB)")
+                  label=f"um degrau da grade ({_db(passo_db)})")
     right.set_ylabel("erro médio (dB equivalentes)")
     right.set_ylim(0, max(tabela["mae_db"].max(), passo_db) * 1.15)
     right.set_title("Distância do ajuste certo")
@@ -184,35 +127,10 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
     _save(fig, out_path)
 
 
-def plot_by_arm(metrics: Dict[str, object], out_path: Path) -> None:
-    """Acerto por implementacao consultada, com a media e o acaso."""
-    por_arm = metrics["per_query_arm"]  # type: ignore[index]
-    arms = ordered_arms(por_arm, metrics["strata"])  # type: ignore[arg-type]
-    valores = [por_arm[arm]["drive_level"]["exact"] * 100 for arm in arms]
-    acaso = 100.0 / metrics["alphabet"]["drive_level"]  # type: ignore[index]
-    media = float(np.mean(valores))
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar([_short(arm) for arm in arms], valores, color=COLOR_LEARNED)
-    for indice, valor in enumerate(valores):
-        ax.annotate(f"{valor:.1f}", xy=(indice, valor), xytext=(0, -14),
-                    textcoords="offset points", ha="center", fontsize=9,
-                    color="white", fontweight="bold")
-    ax.axhline(acaso, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
-               label=f"acaso ({acaso:.1f}%)")
-    ax.axhline(media, color="k", linestyle="--", linewidth=1.3,
-               label=f"média ({media:.1f}%)")
-    ax.set_ylabel("acerto exato do nível de drive (%)")
-    ax.set_ylim(0, max(valores) * 1.3)
-    ax.set_title("Por implementação consultada — encoder treinado")
-    ax.legend(fontsize=8)
-
-    _save(fig, out_path)
-
-
 def build_all(results_dir: Path = Path("results/disent/v2"),
               out_dir: Optional[Path] = None) -> List[Path]:
-    """Todas as figuras que tiverem dado em disco.
+    """As tres figuras do relatorio, as que tiverem dado em disco: a escada, o
+    custo de transferencia (leave-one-arm-out) e a curva de diversidade.
 
     Baselines em `<results_dir>/b0.json` e `b1.json` (de `gefx disent retrieve`);
     o encoder em `<results_dir>/encoder/`.
@@ -234,10 +152,6 @@ def build_all(results_dir: Path = Path("results/disent/v2"),
         desenha(*dados, alvo)
         escritos.append(alvo)
 
-    b0, b1 = results_dir / "b0.json", results_dir / "b1.json"
-    if b0.exists() and b1.exists():
-        grava("baselines_por_arm.png", plot_baselines_by_arm, carrega(b0), carrega(b1))
-
     treinado = encoder_dir / "supcon" / "metrics.json"
     if not treinado.exists():
         return escritos
@@ -246,7 +160,6 @@ def build_all(results_dir: Path = Path("results/disent/v2"),
 
     grava("escada.png", plot_ladder, compare(encoder_dir, baselines_dir=results_dir),
           grid_step_db(metricas))
-    grava("por_arm.png", plot_by_arm, metricas)
 
     custo = encoder_dir / "loo" / "custo_de_transferencia.csv"
     if custo.exists():
@@ -268,47 +181,29 @@ def build_all(results_dir: Path = Path("results/disent/v2"),
 
 # --- leave-one-arm-out ---------------------------------------------------------
 def plot_transfer_cost(custo: pd.DataFrame, chance: float, out_path: Path) -> None:
-    """Visto x inedito, arm por arm, agrupado pelo estrato do roster."""
+    """Visto x inedito, arm por arm, com o custo em pontos em cima de cada par."""
     ordem = ordered_arms(custo["arm"], dict(zip(custo["arm"], custo["estrato"])))
     dados = custo.set_index("arm").loc[ordem]
     posicoes = np.arange(len(ordem))
     largura = 0.38
 
-    fig, (left, right) = plt.subplots(1, 2, figsize=(13, 5.5),
-                                      gridspec_kw={"width_ratios": [2.2, 1]})
-    left.bar(posicoes - largura / 2, dados["visto"] * 100, largura,
-             color=COLOR_B1, label="implementação vista no treino")
-    left.bar(posicoes + largura / 2, dados["inedito"] * 100, largura,
-             color=COLOR_CEILING, label="implementação inédita")
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    ax.bar(posicoes - largura / 2, dados["visto"] * 100, largura,
+           color=COLOR_B1, label="implementação vista no treino")
+    ax.bar(posicoes + largura / 2, dados["inedito"] * 100, largura,
+           color=COLOR_CEILING, label="implementação inédita")
     for x, (visto, inedito) in enumerate(zip(dados["visto"], dados["inedito"])):
-        left.annotate(f"{(inedito - visto) * 100:+.1f}",
-                      xy=(x, max(visto, inedito) * 100), xytext=(0, 4),
-                      textcoords="offset points", ha="center", fontsize=9)
-    left.axhline(chance * 100, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
-                 label=f"acaso ({_pct(chance)})")
-    left.set_xticks(posicoes)
-    left.set_xticklabels([f"{_short(a)}\n{dados['estrato'][a]}" for a in ordem], fontsize=8)
-    left.set_ylabel("acerto exato do nível de drive (%)")
-    left.set_ylim(0, 65)
-    left.set_title("Custo de nunca ter ouvido a implementação")
-    left.legend(fontsize=8, loc="upper right")
-
-    por_estrato = dados.groupby("estrato")["custo_pontos"].mean()
-    cores = [COLOR_CEILING if v >= -1 else COLOR_B1 if v > -5 else COLOR_CHANCE
-             for v in por_estrato]
-    right.bar(por_estrato.index, por_estrato.values, color=cores)
-    right.axhline(0, color="k", linewidth=1)
-    for x, valor in enumerate(por_estrato.values):
-        right.annotate(f"{valor:+.1f}", xy=(x, valor),
-                       xytext=(0, 4 if valor >= 0 else -14),
-                       textcoords="offset points", ha="center", fontsize=10)
-    # Folga para os rotulos das barras extremas.
-    right.set_ylim(min(por_estrato.min() * 1.35, -1.0), max(por_estrato.max() * 1.8, 1.0))
-    right.set_ylabel("custo médio (pontos de acerto)")
-    right.set_title("Por estrato do roster")
-    right.set_xticks(range(len(por_estrato)))
-    right.set_xticklabels(list(por_estrato.index), fontsize=9)
-
+        ax.annotate(f"{(inedito - visto) * 100:+.1f}",
+                    xy=(x, max(visto, inedito) * 100), xytext=(0, 4),
+                    textcoords="offset points", ha="center", fontsize=9)
+    ax.axhline(chance * 100, color=COLOR_CHANCE, linestyle=":", linewidth=1.3,
+               label=f"acaso ({_pct(chance)})")
+    ax.set_xticks(posicoes)
+    ax.set_xticklabels([_short(a) for a in ordem], rotation=25, ha="right", fontsize=8)
+    ax.set_ylabel("acerto exato do nível de drive (%)")
+    ax.set_ylim(0, dados[["visto", "inedito"]].to_numpy().max() * 100 * 1.2)
+    ax.set_title("Custo de nunca ter ouvido a implementação")
+    ax.legend(fontsize=8, loc="lower left")
     _save(fig, out_path)
 
 
@@ -360,7 +255,7 @@ def plot_diversity_curve(curva: pd.DataFrame, chance: float, out_path: Path,
     ax.set_xticklabels(rotulos, fontsize=8)
     ax.set_xlabel("implementações no treino (catálogo fixo em todos os pontos)")
     ax.set_ylabel("acerto exato do nível de drive (%)")
-    ax.set_ylim(0, 60)
+    ax.set_ylim(0, max(curva["drive_exact"].max() * 100 * 1.15, 50))
     ax.set_title("Diversidade de implementação no treino compra transferência?")
     # Embaixo: a metade inferior fica vazia (acaso de 12,5%).
     ax.legend(fontsize=8, loc="lower left")
