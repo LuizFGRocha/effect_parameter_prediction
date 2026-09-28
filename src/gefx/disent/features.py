@@ -1,17 +1,21 @@
-"""Cache de features do dataset do POC II, sobre `data/cache.py`.
+"""Cache de features do dataset do POC II, com a extracao de `data/cache.py`.
 
 A ordem do cache (alfabetica) nao e a do sidecar: as features sao sempre
 casadas as linhas por nome de arquivo, e sobra ou falta e erro.
+
+O cache e um `.npy` por arm, e nao o `.npz` do POC I: os caches nao cabem juntos
+na RAM, e o `np.load(..., mmap_mode="r")` mapeia um `.npy` direto do disco.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
-from gefx.data.cache import ensure_feature_cache
+from gefx.data.cache import build_cache, file_names_cache_file
 from gefx.disent.sidecar import EFFECT_FOLDER, arm_dirs, read_sidecar
 
 
@@ -19,47 +23,22 @@ def arm_feature_folder(root: Path, arm: str) -> Path:
     return Path(root) / arm / EFFECT_FOLDER
 
 
+def cache_file(root: Path, arm: str, feature_name: str) -> Path:
+    return arm_feature_folder(root, arm) / f"{feature_name}.npy"
+
+
 def ensure_arm_cache(
     root: Path, arm: str, feature_name: str, rebuild: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
-    """(features, nomes) daquele arm, extraindo na primeira vez."""
-    return ensure_feature_cache(arm_feature_folder(root, arm), feature_name, force_rebuild=rebuild)
-
-
-def align_to_frame(
-    features: np.ndarray, file_names: Sequence[str], frame: pd.DataFrame
-) -> np.ndarray:
-    """Reordena as features para a ordem das linhas de `frame`, casando por nome de arquivo."""
-    position = {str(name): index for index, name in enumerate(file_names)}
-    wanted = [str(name) for name in frame["file_name"]]
-
-    missing = [name for name in wanted if name not in position]
-    if missing:
-        raise ValueError(
-            f"{len(missing)} linhas do sidecar sem feature em cache "
-            f"(ex.: {missing[:3]}). Reconstrua o cache."
-        )
-    return features[np.array([position[name] for name in wanted], dtype=np.int64)]
-
-
-def load_features(
-    root: Path,
-    frame: pd.DataFrame,
-    feature_name: str,
-    rebuild: bool = False,
-) -> np.ndarray:
-    """Features alinhadas linha a linha com `frame`, que pode misturar arms, todas em RAM."""
-    out: Optional[np.ndarray] = None
-    for arm in sorted(frame["arm"].unique()):
-        rows = frame["arm"] == arm
-        features, names = ensure_arm_cache(root, arm, feature_name, rebuild=rebuild)
-        aligned = align_to_frame(features, names, frame[rows])
-        if out is None:
-            out = np.empty((len(frame), *aligned.shape[1:]), dtype=aligned.dtype)
-        out[np.flatnonzero(rows.to_numpy())] = aligned
-    if out is None:
-        raise ValueError("frame vazio")
-    return out
+) -> Tuple[np.memmap, np.ndarray]:
+    """(features em memmap, nomes) daquele arm, extraindo na primeira vez."""
+    folder = arm_feature_folder(root, arm)
+    path = cache_file(root, arm, feature_name)
+    if rebuild or not path.exists() or not file_names_cache_file(folder).exists():
+        features, names = build_cache(folder, feature_name)
+        np.save(path, features)
+        file_names_cache_file(folder).write_text(json.dumps(names.tolist(), indent=2),
+                                                 encoding="utf-8")
+    return open_cache_memmap(root, arm, feature_name)
 
 
 def build_all_caches(
@@ -88,49 +67,6 @@ def build_all_caches(
 
 
 # --- acesso sem carregar tudo -------------------------------------------------
-# Os caches nao cabem juntos na RAM. Como `np.savez` nao comprime, o `.npy`
-# dentro do zip esta cru em disco e pode ser mapeado direto.
-NPZ_MEMBER = "arr_0.npy"
-_LOCAL_HEADER = "<IHHHHHIIIHH"
-_LOCAL_HEADER_SIZE = 30
-
-
-def npy_member_offset(path: Path, member: str = NPZ_MEMBER):
-    """(deslocamento, shape, dtype, ordem) do membro cru de um `.npz` sem compressao.
-
-    O indice central aponta para o cabecalho local, e nao para os dados: entre
-    os dois ficam o nome e o campo extra, cujos tamanhos so o cabecalho local tem.
-    """
-    import struct
-    import zipfile
-
-    path = Path(path)
-    with zipfile.ZipFile(path) as archive:
-        info = archive.getinfo(member)
-    if info.compress_type != zipfile.ZIP_STORED:
-        raise ValueError(
-            f"{path}: o membro {member!r} esta comprimido; o mapeamento de memoria "
-            "so vale para `np.savez` (sem compressao)"
-        )
-
-    with path.open("rb") as handle:
-        handle.seek(info.header_offset)
-        signature, *_, name_length, extra_length = struct.unpack(
-            _LOCAL_HEADER, handle.read(_LOCAL_HEADER_SIZE))
-        if signature != 0x04034B50:
-            raise ValueError(f"{path}: cabecalho local do zip invalido")
-        handle.seek(info.header_offset + _LOCAL_HEADER_SIZE + name_length + extra_length)
-        version = np.lib.format.read_magic(handle)
-        readers = {
-            (1, 0): np.lib.format.read_array_header_1_0,
-            (2, 0): np.lib.format.read_array_header_2_0,
-        }
-        if version not in readers:
-            raise ValueError(f"{path}: versao de .npy nao suportada: {version}")
-        shape, fortran, dtype = readers[version](handle)
-        return handle.tell(), shape, dtype, fortran
-
-
 def open_cache_memmap(
     root: Path, arm: str, feature_name: str
 ) -> Tuple[np.memmap, np.ndarray]:
@@ -138,25 +74,19 @@ def open_cache_memmap(
 
     Exige o cache ja construido por `gefx disent cache`.
     """
-    import json
-
-    folder = arm_feature_folder(root, arm)
-    npz = folder / f"{feature_name}.npz"
-    names_file = folder / "file_names.json"
-    if not npz.exists() or not names_file.exists():
+    path = cache_file(root, arm, feature_name)
+    names_file = file_names_cache_file(path.parent)
+    if not path.exists() or not names_file.exists():
         raise FileNotFoundError(
-            f"cache ausente em {folder}. Rode `gefx disent cache --feature {feature_name}`."
+            f"cache ausente em {path.parent}. Rode `gefx disent cache --feature {feature_name}`."
         )
 
-    offset, shape, dtype, fortran = npy_member_offset(npz)
-    if fortran:
-        raise ValueError(f"{npz}: array em ordem Fortran, nao suportado")
-    memmap = np.memmap(npz, dtype=dtype, mode="r", offset=offset, shape=shape)
-
+    memmap = np.load(path, mmap_mode="r")
+    shape = memmap.shape
     names = np.asarray(json.loads(names_file.read_text(encoding="utf-8")), dtype=object)
     if len(names) != shape[0]:
         raise ValueError(
-            f"{folder}: cache com {shape[0]} linhas e file_names.json com {len(names)}"
+            f"{path.parent}: cache com {shape[0]} linhas e file_names.json com {len(names)}"
         )
     return memmap, names
 
@@ -165,9 +95,8 @@ class FeatureStore:
     """Features de varios arms, alinhadas as linhas de um `frame`, sob demanda.
 
     Guarda um memmap por arm e a tabela linha-do-frame -> (arm, linha-do-cache).
-    `take` materializa so as linhas pedidas, que e o tamanho do batch. Substitui
-    `load_features` quando o conjunto nao cabe na memoria; a semantica de
-    alinhamento e a mesma -- casamento por nome de arquivo, sobra ou falta e erro.
+    `take` materializa so as linhas pedidas, que e o tamanho do batch. O
+    alinhamento e por nome de arquivo; sobra ou falta e erro.
     """
 
     def __init__(self, root: Path, frame: pd.DataFrame, feature_name: str = "Spec") -> None:
@@ -236,8 +165,9 @@ class FeatureStore:
 class PixelStandardizer:
     """Media e desvio por pixel do espectrograma, acumulados numa passada.
 
-    O equivalente de `training/scaling.py` sem materializar o treino. Ajustado
-    so no treino e persistido com a execucao.
+    A conta e a `StandardScaler` do sklearn, a mesma de `training/scaling.py`,
+    alimentada por `partial_fit` em blocos para nao materializar o treino.
+    Ajustado so no treino e persistido com a execucao, em `.npz`.
     """
 
     def __init__(self, mean: np.ndarray, std: np.ndarray, n: int) -> None:
@@ -248,20 +178,18 @@ class PixelStandardizer:
     @classmethod
     def fit(cls, store: "FeatureStore", rows=None, chunk: int = 256,
             floor: float = 1e-6) -> "PixelStandardizer":
+        from sklearn.preprocessing import StandardScaler
+
         rows = np.arange(len(store)) if rows is None else np.asarray(rows, dtype=np.int64)
         if not len(rows):
             raise ValueError("nao ha linhas para ajustar a padronizacao")
-        total = np.zeros(store.feature_shape, dtype=np.float64)
-        total_sq = np.zeros(store.feature_shape, dtype=np.float64)
+        scaler = StandardScaler()
         for _, block in store.stream(rows, chunk=chunk):
-            block = block.astype(np.float64)
-            total += block.sum(axis=0)
-            total_sq += (block ** 2).sum(axis=0)
-        mean = total / len(rows)
-        variance = np.maximum(total_sq / len(rows) - mean ** 2, 0.0)
+            scaler.partial_fit(block.reshape(len(block), -1))
+        shape = store.feature_shape
         # Pixels constantes (silencio nas bandas altas) teriam desvio zero.
-        std = np.maximum(np.sqrt(variance), floor)
-        return cls(mean.astype(np.float32), std.astype(np.float32), len(rows))
+        std = np.maximum(np.sqrt(scaler.var_), floor)
+        return cls(scaler.mean_.reshape(shape), std.reshape(shape), len(rows))
 
     def transform(self, features: np.ndarray) -> np.ndarray:
         """Padroniza e acrescenta o eixo de canal, como espera a Conv2D."""

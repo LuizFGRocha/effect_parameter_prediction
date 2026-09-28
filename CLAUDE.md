@@ -169,6 +169,12 @@ probe); some parameters are only addressable via their displayed string (`BY_DIS
 - Feature caches live inside the dataset directory, so copying a dataset copies stale
   caches with it. `datasets/default` is ~98 GB, of which ~57 GB is cache (`Spec.npz`
   alone is 41 GB).
+- The POC II caches are `<arm>/distortion/<feature>.npy` (not the POC I `.npz`), opened
+  with `np.load(..., mmap_mode="r")` because the arms' caches don't fit in RAM together.
+  `datasets/disent_v2` and `disent_v2_entre` were converted on 2026-09-28 and their old
+  `Spec.npz` files deleted after checking shape and dtype against the `.npy`. An older dataset that
+  only has the `.npz` converts without re-extracting (`np.savez` doesn't compress):
+  `unzip -p Spec.npz arr_0.npy > Spec.npy`.
 - `datasets/other_dataset_structured` is the reference paper's data restructured into
   this repo's chain-key layout, and feeds `results/teste_artigo`. **It is not reproducible
   from code in this repo** — the script that produced it was never committed, and the raw
@@ -213,6 +219,15 @@ Decisions already made — don't reopen without new evidence:
 - Rnonlin was chosen because reference levels the user separated **by ear** had the most
   regular steps in 1 − Rnonlin (CV 0.15–0.18 vs 0.21 in dB). Sanity check: `lsp-tanh`
   (same curve and unit as the reference) lands within ~1 dB of it.
+- **The gammatone bank is `scipy.signal.gammatone` in FIR form** (100 ms of taps) since
+  2026-09-28, replacing our own Holdsworth implementation. The Rnonlin loop itself stays
+  ours: there is no published code for it. Over the 8 arms × 8 stored levels × 8
+  segments the new Rnonlin is within 0.0005 of the old one (the tolerance accepted for
+  the Linux dm-Rat build was 0.001), and a full `calibrate` with it moved the knobs by
+  ≤ 0.014 dB (BYOD-bigmuff level 1: 0.21 dB, on the flat part of its curve). So
+  `experiments/disent_levels.yaml` and `datasets/disent_v2` were **kept**, not
+  recalibrated or re-rendered. The pyfar `GammatoneBands` (Hohmann 2002) was also
+  measured and rejected: up to 0.0016 off, plus heavy dependencies.
 - 18.45 dB is the first audibly distorted level (guitar at −26 LUFS); 39 dB keeps
   `byod-bigmuff` (the weakest arm, Rnonlin floor 0.830) off its flat top — above that its
   top levels sounded identical. The weakest arm caps the range for everyone: a level some
@@ -242,7 +257,23 @@ less new code.
 - `losses.py` is a line-by-line TensorFlow translation of `SupConLoss` from the official
   repo (HobbitLong/SupContrast, commit 72fd989, BSD-2), temperature 0.07, with the
   original's English comments; only `mask` and `contrast_mode='one'` are left out. Keep
-  it a translation; don't "improve" it.
+  it a translation; don't "improve" it. `test_disent_losses.py` pins it to values the
+  official PyTorch code gave on the same inputs (difference ~1e-7), so reviewing the
+  translation is that test passing.
+- The sampler is the P×K batch of Hermans et al. 2017 (P drive levels × K views); the
+  retrieval search is `sklearn.neighbors.NearestNeighbors` (cosine, exact) since
+  2026-09-28. Versus our old search, 8 of 25,600 picks changed on `supcon` seed 1
+  (float32 near-ties): 68.18 → 68.17% drive exact. Runs evaluated before that date used
+  the old search.
+- Confidence intervals by recording: `scipy.stats.bootstrap(..., paired=True)` over
+  per-recording means (valid because every recording has the same number of queries in
+  the crossed grid). It reproduced RnC vs SupCon, +0.26 [−1.05; +1.57]; don't write our
+  own grouped bootstrap again.
+- Migrating to PyTorch (+ pytorch-metric-learning, whose `SupConLoss` and
+  `AccuracyCalculator` match ours numerically) was evaluated on 2026-09-28 and **not
+  done**: it would cut ~200 lines but require re-running every POC II result and keeping
+  two frameworks (TF stays for POC I and B1). `nmichlo/disent` doesn't fit at all
+  (VAE-only frameworks, 64×64 encoders, no P×K sampler, and the DCI/MIG metrics we cut).
 - The auxiliary drive regression (the old `contrastive_aux`) was **dropped**: our own
   code with no published reference, and not distinguishable from pure contrastive
   (44.0 vs 42.7% drive exact, +1.25 with by-content IC95 [−1.95; +4.41],

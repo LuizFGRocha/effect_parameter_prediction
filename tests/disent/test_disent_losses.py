@@ -1,9 +1,11 @@
 """A perda do encoder, o SupCon traduzido do repositorio oficial.
 
-O que estes testes protegem sao propriedades, nao valores: a perda tem de descer
-quando as classes se separam e tratar ancoras sem positivo como o original.
-Fixar valores numericos aqui amarraria o treino a uma versao do TensorFlow sem
-dizer nada sobre estar certo.
+`test_the_translation_gives_the_values_of_the_original` prende a traducao ao
+original: os valores esperados sairam do `SupConLoss` do repositorio oficial
+(HobbitLong/SupContrast, commit 72fd989), rodado em PyTorch nas mesmas entradas.
+Revisar a traducao se resume a este teste passar; a tolerancia (1e-5 relativo)
+fica folgada para a diferenca de arredondamento em float32 entre os dois
+frameworks, que foi de 1e-7. Os demais testes protegem propriedades.
 """
 from __future__ import annotations
 
@@ -20,6 +22,32 @@ def _normalize(x):
 
 def _one_view(x):
     return _normalize(x)[:, None, :]
+
+
+def _unit_features(seed, shape):
+    z = np.random.default_rng(seed).standard_normal(shape).astype(np.float32)
+    return tf.constant(z / np.linalg.norm(z, axis=-1, keepdims=True))
+
+
+@pytest.mark.parametrize(
+    "seed, shape, labels, temperature, base_temperature, original",
+    [
+        # uma vista por linha, 4 classes x 4: o formato do treino
+        (0, (16, 1, 8), [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3], 0.07, 0.07,
+         9.643486976623535),
+        # duas vistas por linha: o caminho que desempilha as vistas
+        (1, (8, 2, 8), [0, 0, 1, 1, 2, 2, 3, 3], 0.07, 0.07, 10.859750747680664),
+        # a ultima ancora nao tem positivo: o caso de borda que o original trata
+        (2, (7, 1, 8), [0, 0, 1, 1, 2, 2, 3], 0.07, 0.07, 7.837521076202393),
+        # temperatura diferente da base: o fator temperature / base_temperature
+        (3, (16, 1, 8), [0, 1, 2, 3] * 4, 0.1, 0.07, 9.653303146362305),
+    ],
+)
+def test_the_translation_gives_the_values_of_the_original(
+        seed, shape, labels, temperature, base_temperature, original):
+    value = sup_con_loss(_unit_features(seed, shape), tf.constant(labels),
+                         temperature, base_temperature)
+    assert float(value) == pytest.approx(original, rel=1e-5)
 
 
 def test_the_loss_is_lower_when_the_classes_are_separated():

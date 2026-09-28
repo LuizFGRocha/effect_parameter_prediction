@@ -1,5 +1,9 @@
 """Amostrador de batches balanceados por configuracao sobre a grade cruzada.
 
+O batch e o "P x K" de Hermans, Beyer e Leibe (2017, In Defense of the Triplet
+Loss for Person Re-Identification): P classes, K exemplos de cada. Aqui a classe
+e o nivel de drive, e cada exemplo sorteia conteudo e implementacao.
+
 `GridIndex` recusa uma grade com buracos: cada vista sorteada (conteudo,
 implementacao) de uma configuracao tem de existir em disco.
 """
@@ -114,10 +118,12 @@ def class_balanced_batch(
     configs_per_batch: int = 8,
     views_per_config: int = 8,
 ) -> Batch:
-    """`P` configuracoes x `K` vistas, cada vista com conteudo e arm sorteados.
+    """`P` configuracoes x `K` vistas (o batch P x K de Hermans et al. 2017), cada
+    vista com conteudo e arm sorteados de forma independente.
 
     Montado por classe porque o contrastivo so produz termo para ancoras com algum
-    positivo no batch.
+    positivo no batch. Os conteudos de uma configuracao saem sem reposicao; os
+    arms, com reposicao.
     """
     n_contents, n_configs, n_arms = index.shape
     if configs_per_batch > n_configs:

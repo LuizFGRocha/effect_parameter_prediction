@@ -12,6 +12,10 @@ from typing import Dict, Tuple
 
 DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
 
+#: Onde cada execucao grava os pesos do encoder, relativo a pasta dela.
+WEIGHTS_FILE = Path("weights") / "encoder.weights.h5"
+
+
 @dataclass
 class EncoderConfig:
     """Forma da rede. Vai inteira para o `run.json`, como no POC I."""
@@ -67,47 +71,13 @@ def build_trunk(config: EncoderConfig):
 
 
 def build_encoder(config: EncoderConfig):
-    """Tronco + projecao para `z_e`, L2-normalizado."""
+    """Tronco + projecao para `z_e`, L2-normalizado.
+
+    O treino usa este `keras.Model` direto; os pesos vao para `WEIGHTS_FILE`.
+    """
     from keras import layers, models
 
     trunk = build_trunk(config)
     z_e = layers.Dense(config.effect_dim, name="effect_dense")(trunk.output)
     z_e = layers.UnitNormalization(name="effect_code")(z_e)
     return models.Model(trunk.input, z_e, name="encoder")
-
-
-class EffectModel:
-    """O encoder, com salvar e carregar os pesos.
-
-    Um recipiente de submodelos `keras.Model`, nao uma `keras.Model`: o laco de
-    treino e customizado.
-    """
-
-    def __init__(self, encoder_config: EncoderConfig) -> None:
-        self.encoder_config = encoder_config
-        self.encoder = build_encoder(encoder_config)
-
-    def encode(self, x, training: bool = False):
-        return self.encoder(x, training=training)
-
-    def __call__(self, x, training: bool = True):
-        """`z_e`."""
-        return self.encode(x, training=training)
-
-    @property
-    def trainable_variables(self):
-        return [v for part in self.parts().values() for v in part.trainable_variables]
-
-    def parts(self) -> Dict[str, object]:
-        return {"encoder": self.encoder}
-
-    def save_weights(self, directory: Path) -> None:
-        directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        for name, part in self.parts().items():
-            part.save_weights(directory / f"{name}.weights.h5")
-
-    def load_weights(self, directory: Path) -> None:
-        directory = Path(directory)
-        for name, part in self.parts().items():
-            part.load_weights(directory / f"{name}.weights.h5")

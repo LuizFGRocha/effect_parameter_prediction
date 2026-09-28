@@ -7,8 +7,6 @@ Concentra as manhas descobertas na validacao e que precisam ser preservadas:
   entao ela e gasta com silencio no `load_arm`.
 - Alguns plugins exigem entrada estereo; isso e detectado pelo `ValueError` de
   uma sondagem mono.
-- Alguns parametros nao expoem faixa numerica e so sao enderecaveis pelo texto
-  exibido (`BY_DISPLAY`).
 - A primeira instancia de alguns plugins num processo pode sair NaN a partir da
   amostra 8192 de cada chamada, para sempre (o Fuzz da VZtec, em ~metade dos
   processos, sem padrao de tempo ou de concorrencia). A sondagem do `load_arm`
@@ -20,10 +18,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Set, Tuple
 
 import numpy as np
-
-# Parametro -> unidade em que a conversao entrega o numero, para os que so
-# aceitam ser escolhidos pelo texto exibido.
-BY_DISPLAY = {"node_1_delay": "ms", "node_1_feedback": "%"}
 
 _WARNED: Set[str] = set()
 
@@ -38,31 +32,13 @@ def _warn_once(message: str) -> None:
         print(f"\n      [aviso] {message}")
 
 
-def display_as(text: Any, unit: str) -> float:
-    """'200.00 ms' -> 200.0 quando unit='ms'; '1.50 s' -> 1500.0; '35%' -> 35.0."""
-    text = str(text).strip()
-    number = float("".join(c for c in text if c.isdigit() or c in ".-") or "nan")
-    if unit == "ms" and text.endswith("s") and not text.endswith("ms"):
-        number *= 1000.0
-    return number
-
-
-def _raw_for_display(param, value: float, unit: str) -> float:
-    values = [display_as(candidate, unit) for candidate in param.valid_values]
-    return int(np.argmin(np.abs(np.asarray(values) - value))) / (len(values) - 1)
-
-
 def set_parameter(plugin, name: str, value: Any) -> None:
-    """Escreve um parametro, tratando faixa, clamp e enderecamento por texto."""
+    """Escreve um parametro, tratando faixa e clamp."""
     if name not in plugin.parameters:
         print(f"      [aviso] {name!r} nao existe neste plugin")
         return
 
     param = plugin.parameters[name]
-    if name in BY_DISPLAY and isinstance(value, (int, float)):
-        param.raw_value = _raw_for_display(param, float(value), BY_DISPLAY[name])
-        return
-
     lo, hi = param.min_value, param.max_value
     if isinstance(value, (int, float)) and isinstance(lo, (int, float)):
         clamped = min(max(float(value), lo), hi)

@@ -66,7 +66,7 @@ def _dataset(tmp_path, seed=0):
             + frame["drive_level"].to_numpy(dtype=np.float32)[:, None, None]
             + 0.05 * arm_index
         )
-        np.savez(folder / "Spec.npz", features)
+        np.save(folder / "Spec.npy", features)
         (folder / "file_names.json").write_text(
             json.dumps(list(frame["file_name"])), encoding="utf-8"
         )
@@ -92,10 +92,6 @@ def _config(tmp_path, technique="supcon", **kwargs):
     )
     defaults.update(kwargs)
     return TrainConfig(**defaults)
-
-
-def _encoder_weights(model):
-    return [np.array(v) for v in model.encoder.weights]
 
 
 # --- configuracao -------------------------------------------------------------
@@ -155,24 +151,21 @@ def test_the_untrained_control_really_skips_optimization(tmp_path):
 def test_the_batchnorm_control_moves_only_the_moving_statistics(tmp_path, monkeypatch):
     """`bn_only` so vale como controle se nenhum peso treinavel mudar. Se mudar,
     ele passa a medir aprendizado e a diferenca para o encoder treinado some."""
-    from gefx.disent import model as model_module
-
     vistos = []
-    original = model_module.EffectModel
+    original = train_module.build_encoder
 
-    class Espiao(original):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            vistos.append(self)
-            self.inicial = {v.path: np.array(v) for v in self.encoder.weights}
+    def espiao(config):
+        modelo = original(config)
+        vistos.append((modelo, {v.path: np.array(v) for v in modelo.weights}))
+        return modelo
 
-    monkeypatch.setattr(train_module, "EffectModel", Espiao)
+    monkeypatch.setattr(train_module, "build_encoder", espiao)
     manifest = train_module.train(_config(tmp_path, technique="bn_only", steps=5),
                                   verbose=False)
-    modelo = vistos[0]
-    treinaveis = {v.path for v in modelo.encoder.trainable_weights}
-    mudaram = {v.path for v in modelo.encoder.weights
-               if not np.array_equal(np.array(v), modelo.inicial[v.path])}
+    modelo, inicial = vistos[0]
+    treinaveis = {v.path for v in modelo.trainable_weights}
+    mudaram = {v.path for v in modelo.weights
+               if not np.array_equal(np.array(v), inicial[v.path])}
     assert mudaram, "a BatchNorm nao foi calibrada"
     assert not mudaram & treinaveis
     assert all("moving" in path for path in mudaram)
@@ -205,18 +198,18 @@ def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_pa
 
 def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):
     from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.model import EffectModel
+    from gefx.disent.model import build_encoder
     from gefx.disent.train import embed
 
     config = _config(tmp_path)
     frame = split_frames(config.dataset_root)["catalog"]
     store = FeatureStore(config.dataset_root, frame, "Spec")
     standardizer = PixelStandardizer.fit(store)
-    model = EffectModel(config.encoder)
+    model = build_encoder(config.encoder)
 
     codes = embed(model, store, standardizer, batch=8)
     assert codes.shape == (len(frame), config.encoder.effect_dim)
-    direto = model.encode(standardizer.transform(store.take(np.arange(3))))
+    direto = model(standardizer.transform(store.take(np.arange(3))), training=False)
     assert np.allclose(codes[:3], np.asarray(direto), atol=1e-6)
 
 

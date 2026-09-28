@@ -190,14 +190,8 @@ def set_global_seeds(seed: int, deterministic: bool = False) -> None:
 
     `deterministic=True` liga tambem os kernels deterministicos do TensorFlow;
     sem isso o seed sozinho nao garante duas runs identicas na GPU.
+    O `set_random_seed` da Keras ja semeia `random` e `numpy` junto com o TF.
     """
-    import random
-
-    import numpy as np
-
-    random.seed(seed)
-    np.random.seed(seed)
-
     import keras
     import tensorflow as tf
 

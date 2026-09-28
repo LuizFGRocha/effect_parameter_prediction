@@ -28,6 +28,7 @@ Os niveis que saem daqui sao os do render; nao ha ajuste manual.
 """
 from __future__ import annotations
 
+import functools
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -43,6 +44,7 @@ DEFAULT_SWEEP_POINTS = 33
 FRAME_S = 0.030
 MAX_LAG_S = 0.001
 BAND_HZ: Tuple[float, float] = (50.0, 16000.0)
+GAMMATONE_S = 0.1  # duracao do FIR; em 100 ms a resposta de 50 Hz ja caiu a ~2e-5 do pico
 
 
 # --- Rnonlin -------------------------------------------------------------------
@@ -54,20 +56,23 @@ def erb_space(lo: float = BAND_HZ[0], hi: float = BAND_HZ[1]) -> np.ndarray:
     return (10 ** (np.arange(erb_n(lo), erb_n(hi), 1.0) / 21.4) - 1) / 4.37e-3
 
 
+@functools.lru_cache(maxsize=None)
+def _gammatone_taps(fc: float, sr: int) -> np.ndarray:
+    from scipy.signal import gammatone
+
+    return gammatone(fc, "fir", numtaps=int(GAMMATONE_S * sr), fs=sr)[0]
+
+
 def gammatone_band(x: np.ndarray, fc: float, sr: int) -> np.ndarray:
-    """Gammatone de 4a ordem: desloca a banda para 0 Hz, 4 polos reais, volta.
+    """Gammatone de 4a ordem (Patterson et al. 1992), o FIR do `scipy.signal`.
 
-    O `scipy.signal.gammatone` em forma b/a diverge abaixo de ~160 Hz.
+    FIR e nao b/a: a forma b/a do scipy diverge abaixo de ~160 Hz. O comprimento
+    tem de ser passado, porque o padrao (15 ms) corta a banda de 50 Hz antes do
+    pico da resposta (~16 ms).
     """
-    from scipy.signal import lfilter
+    from scipy.signal import fftconvolve
 
-    erb = 24.7 * (4.37e-3 * fc + 1)
-    a = np.exp(-2 * np.pi * 1.019 * erb / sr)
-    shift = np.exp(-2j * np.pi * fc * np.arange(len(x)) / sr)
-    z = x * shift
-    for _ in range(4):
-        z = lfilter([1 - a], [1, -a], z)
-    return np.real(z * np.conj(shift))
+    return fftconvolve(x, _gammatone_taps(float(fc), sr))[: len(x)]
 
 
 def _align(dry: np.ndarray, wet: np.ndarray) -> np.ndarray:

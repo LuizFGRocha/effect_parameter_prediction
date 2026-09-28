@@ -20,23 +20,13 @@ LEVEL_AXES: Tuple[str, ...] = ("drive_level",)
 
 
 def nearest(queries: np.ndarray, catalog: np.ndarray,
-            chunk: int = 1024) -> Tuple[np.ndarray, np.ndarray]:
-    """Indice e distancia de cosseno do item de catalogo mais proximo de cada consulta."""
-    queries = np.asarray(queries, dtype=np.float32)
-    catalog = np.asarray(catalog, dtype=np.float32)
-    if queries.shape[1] != catalog.shape[1]:
-        raise ValueError(
-            f"dimensoes incompativeis: {queries.shape[1]} e {catalog.shape[1]}"
-        )
-    catalog = catalog / (np.linalg.norm(catalog, axis=1, keepdims=True) + 1e-12)
-    picks = np.empty(len(queries), dtype=np.int64)
-    dists = np.empty(len(queries), dtype=np.float32)
-    for start in range(0, len(queries), chunk):
-        block = queries[start : start + chunk]
-        block = block / (np.linalg.norm(block, axis=1, keepdims=True) + 1e-12)
-        similarity = block @ catalog.T
-        picks[start : start + chunk] = similarity.argmax(axis=1)
-        dists[start : start + chunk] = 1.0 - similarity.max(axis=1)
+            k: int = 1) -> Tuple[np.ndarray, np.ndarray]:
+    """Indices `(n, k)` dos `k` itens de catalogo mais proximos de cada consulta, do
+    mais proximo ao mais distante, e as distancias de cosseno. Busca exata do sklearn."""
+    from sklearn.neighbors import NearestNeighbors
+
+    search = NearestNeighbors(n_neighbors=k, metric="cosine", algorithm="brute")
+    dists, picks = search.fit(catalog).kneighbors(queries)
     return picks, dists
 
 
@@ -80,6 +70,7 @@ def retrieve(
             "reconhecer a execucao, e nao o ajuste"
         )
     picks, dists = nearest(query_vectors, catalog_vectors)
+    picks, dists = picks[:, 0], dists[:, 0]
     hit = catalog_frame.iloc[picks]
     out = pd.DataFrame(
         {

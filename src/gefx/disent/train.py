@@ -24,7 +24,7 @@ import pandas as pd
 from gefx.config import git_revision
 from gefx.disent.features import FeatureStore, PixelStandardizer
 from gefx.disent.losses import DEFAULT_TEMPERATURE, sup_con_loss
-from gefx.disent.model import EffectModel, EncoderConfig
+from gefx.disent.model import WEIGHTS_FILE, EncoderConfig, build_encoder
 from gefx.disent.retrieval import retrieve_by_arm
 from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
 from gefx.disent.sidecar import split_frames
@@ -73,7 +73,7 @@ class TrainConfig:
 
 
 # --- passo de treino ----------------------------------------------------------
-def make_step(model: EffectModel, optimizer, temperature: float):
+def make_step(model, optimizer, temperature: float):
     import tensorflow as tf
 
     variables = model.trainable_variables
@@ -92,13 +92,13 @@ def make_step(model: EffectModel, optimizer, temperature: float):
     return step
 
 
-def make_bn_step(model: EffectModel):
+def make_bn_step(model):
     """Passo para frente em modo de treino: so as medias moveis da BatchNorm mudam."""
     import tensorflow as tf
 
     @tf.function(reduce_retracing=True)
     def step(x):
-        model.encode(x, training=True)
+        model(x, training=True)
 
     return step
 
@@ -107,10 +107,10 @@ def make_bn_step(model: EffectModel):
 def embed(model, store: FeatureStore, standardizer: PixelStandardizer,
           batch: int = 128) -> np.ndarray:
     """`z_e` de todas as linhas do `store`, na ordem do `frame`."""
-    out = np.empty((len(store), model.encoder_config.effect_dim), dtype=np.float32)
+    out = np.empty((len(store), model.output_shape[-1]), dtype=np.float32)
     for block, features in store.stream(np.arange(len(store)), chunk=batch):
         out[block] = np.asarray(
-            model.encode(standardizer.transform(features), training=False))
+            model(standardizer.transform(features), training=False))
     return out
 
 
@@ -176,7 +176,7 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         config,
         encoder=replace(config.encoder, input_shape=(*stores["train"].feature_shape, 1)),
     )
-    model = EffectModel(config.encoder)
+    model = build_encoder(config.encoder)
 
     steps = 0 if config.technique == "random_encoder" else config.steps
     if config.technique == "bn_only":
@@ -223,7 +223,8 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
 
     out_dir = config.resolved_output()
     out_dir.mkdir(parents=True, exist_ok=True)
-    model.save_weights(out_dir / "weights")
+    (out_dir / WEIGHTS_FILE).parent.mkdir(exist_ok=True)
+    model.save_weights(out_dir / WEIGHTS_FILE)
     standardizer.save(out_dir / "standardizer.npz")
     (out_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
     if metrics is not None:

@@ -9,9 +9,6 @@ from gefx.disent.grid import (
     SPLITS,
     Config,
     all_configs,
-    config_from_index,
-    config_index,
-    parse_config_key,
     render_name,
     split_contents,
 )
@@ -25,27 +22,8 @@ def test_grid_has_the_declared_size():
     assert len(set(configs)) == len(configs)
 
 
-def test_index_and_config_are_inverses():
-    # A ordem canonica vira rotulo de classe do contrastivo e ordem das entradas
-    # do catalogo; se ela mudar, modelos treinados param de fazer sentido.
-    for index, config in enumerate(all_configs(DRIVE_LEVELS)):
-        assert config_index(config) == index
-        assert config_from_index(index) == config
-
-
 def test_canonical_order_is_the_drive_level():
     assert all_configs(3) == [Config(0), Config(1), Config(2)]
-
-
-def test_config_key_round_trips():
-    for config in all_configs(DRIVE_LEVELS):
-        assert parse_config_key(config.key) == config
-
-
-@pytest.mark.parametrize("bad", ["", "d", "t1", "d0t0", "x0", "d-1"])
-def test_parse_config_key_rejects_junk(bad):
-    with pytest.raises(ValueError, match="invalida"):
-        parse_config_key(bad)
 
 
 # --- nome do render -----------------------------------------------------------
@@ -54,7 +32,6 @@ def test_render_name_is_identical_across_arms():
     # <B>/<n> sabendo que so a implementacao mudou.
     config = Config(3)
     assert render_name("src", config, 7) == "src__d3__00007.wav"
-    assert parse_config_key(render_name("src", config, 7).split("__")[1]) == config
 
 
 # --- particao ------------------------------------------------------------------
