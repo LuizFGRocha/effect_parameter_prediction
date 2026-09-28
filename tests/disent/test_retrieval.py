@@ -41,6 +41,14 @@ def test_nearest_is_cosine_and_ignores_the_norm():
     assert dists[0, 0] == pytest.approx(0.0, abs=1e-6)
 
 
+def test_nearest_can_be_euclidean_for_a_scalar_code():
+    """Numa dimensao o cosseno so ve o sinal: 0.2 e 0.9 seriam o mesmo ponto."""
+    catalog = np.array([[0.2], [0.9]], dtype=np.float32)
+    assert nearest(np.array([[0.85]], dtype=np.float32), catalog)[1][0, 0] == pytest.approx(0.0, abs=1e-6)
+    picks, _ = nearest(np.array([[0.85]], dtype=np.float32), catalog, metric="euclidean")
+    assert picks[0, 0] == 1
+
+
 def test_nearest_rejects_mismatched_dimensions():
     with pytest.raises(ValueError):
         nearest(np.zeros((2, 3), np.float32), np.zeros((2, 4), np.float32))

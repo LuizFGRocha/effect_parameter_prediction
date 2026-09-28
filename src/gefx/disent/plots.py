@@ -65,6 +65,7 @@ TECHNIQUE_LABEL = {
     "random_encoder": "encoder\nnão treinado",
     "bn_only": "não treinado\n+ BatchNorm calibrada",
     "supcon": "encoder treinado\n(SupCon)",
+    "regressao": "mesmo tronco,\nsaída escalar (MSE)",
 }
 
 
