@@ -19,13 +19,16 @@ from gefx.disent.sidecar import EFFECT_FOLDER, read_dataset, split_frames
 LEVEL_AXES: Tuple[str, ...] = ("drive_level",)
 
 
-def nearest(queries: np.ndarray, catalog: np.ndarray,
-            k: int = 1) -> Tuple[np.ndarray, np.ndarray]:
+def nearest(queries: np.ndarray, catalog: np.ndarray, k: int = 1,
+            metric: str = "cosine") -> Tuple[np.ndarray, np.ndarray]:
     """Indices `(n, k)` dos `k` itens de catalogo mais proximos de cada consulta, do
-    mais proximo ao mais distante, e as distancias de cosseno. Busca exata do sklearn."""
+    mais proximo ao mais distante, e as distancias. Busca exata do sklearn.
+
+    Cosseno para `z_e`, que vive na esfera; `euclidean` para o controle escalar,
+    em que o cosseno so enxergaria o sinal."""
     from sklearn.neighbors import NearestNeighbors
 
-    search = NearestNeighbors(n_neighbors=k, metric="cosine", algorithm="brute")
+    search = NearestNeighbors(n_neighbors=k, metric=metric, algorithm="brute")
     dists, picks = search.fit(catalog).kneighbors(queries)
     return picks, dists
 
@@ -59,6 +62,7 @@ def retrieve(
     catalog_frame: pd.DataFrame,
     query_vectors: np.ndarray,
     catalog_vectors: np.ndarray,
+    metric: str = "cosine",
 ) -> pd.DataFrame:
     """Uma linha por consulta, com o que foi recuperado e o que era certo."""
     # Por gravacao, nao so por trecho: dois trechos da mesma execucao tambem vazam.
@@ -69,7 +73,7 @@ def retrieve(
             "consulta e catalogo compartilham conteudo: o acerto poderia vir de "
             "reconhecer a execucao, e nao o ajuste"
         )
-    picks, dists = nearest(query_vectors, catalog_vectors)
+    picks, dists = nearest(query_vectors, catalog_vectors, metric=metric)
     picks, dists = picks[:, 0], dists[:, 0]
     hit = catalog_frame.iloc[picks]
     out = pd.DataFrame(
@@ -133,6 +137,7 @@ def retrieve_by_arm(
     query_vectors: np.ndarray,
     catalog_vectors: np.ndarray,
     same_arm: bool = False,
+    metric: str = "cosine",
 ) -> RetrievalResult:
     """A tarefa do POC II sobre uma representacao qualquer das duas particoes.
 
@@ -159,6 +164,7 @@ def retrieve_by_arm(
                 catalog.iloc[c_where].reset_index(drop=True),
                 query_vectors[q_where],
                 catalog_vectors[c_where],
+                metric,
             )
         )
     predictions = pd.concat(parts, ignore_index=True)
@@ -216,7 +222,7 @@ def baseline_b0(
 POC1_MODEL_DIR = Path("results/second_main_run/Spec/distortion")
 
 
-def _nearest_level(values: np.ndarray, ladder: np.ndarray) -> np.ndarray:
+def nearest_level(values: np.ndarray, ladder: np.ndarray) -> np.ndarray:
     """Nivel da escada mais proximo de cada valor continuo."""
     return np.abs(np.asarray(values)[:, None] - np.asarray(ladder)[None, :]).argmin(axis=1)
 
@@ -275,7 +281,7 @@ def baseline_b1(
             "retrieved_file": "",
             "distance": np.nan,
             "true_drive_level": queries["drive_level"].to_numpy(),
-            "pred_drive_level": _nearest_level(drive_db, ladder),
+            "pred_drive_level": nearest_level(drive_db, ladder),
             "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
             "pred_drive_db": drive_db,
         }

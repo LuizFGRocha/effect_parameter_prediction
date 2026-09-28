@@ -4,7 +4,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gefx.disent.model import EncoderConfig, build_encoder
+from gefx.disent.model import (
+    REGRESSION,
+    EncoderConfig,
+    build_encoder,
+    build_model,
+    build_regressor,
+)
 
 SMALL = EncoderConfig(input_shape=(32, 24, 1), filters=(8, 16), trunk_units=16,
                       effect_dim=4)
@@ -50,3 +56,24 @@ def test_a_manifest_with_fields_this_encoder_does_not_have_is_refused():
     """Um `run.json` do encoder de dois blocos nao pode recarregar em silencio."""
     with pytest.raises(TypeError):
         EncoderConfig.from_dict({**SMALL.as_dict(), "content_dim": 64})
+
+
+def test_the_regressor_gives_one_drive_value_in_the_unit_interval():
+    drive = np.asarray(build_regressor(SMALL)(_batch(8)))
+    assert drive.shape == (8, 1)
+    assert np.all((drive >= 0) & (drive <= 1))
+
+
+def test_the_regressor_shares_the_trunk_and_changes_only_the_head():
+    """O controle escalar so vale se a unica diferenca for a cabeca."""
+    def body(model, head):
+        return [(layer.name, layer.count_params()) for layer in model.layers
+                if layer.name not in head]
+
+    assert (body(build_encoder(SMALL), {"effect_dense", "effect_code"})
+            == body(build_regressor(SMALL), {"drive"}))
+
+
+def test_build_model_picks_the_regressor_only_for_its_technique():
+    assert build_model(SMALL, REGRESSION).output_shape == (None, 1)
+    assert build_model(SMALL, "supcon").output_shape == (None, SMALL.effect_dim)

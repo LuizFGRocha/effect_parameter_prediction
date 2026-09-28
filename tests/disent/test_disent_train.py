@@ -152,14 +152,14 @@ def test_the_batchnorm_control_moves_only_the_moving_statistics(tmp_path, monkey
     """`bn_only` so vale como controle se nenhum peso treinavel mudar. Se mudar,
     ele passa a medir aprendizado e a diferenca para o encoder treinado some."""
     vistos = []
-    original = train_module.build_encoder
+    original = train_module.build_model
 
-    def espiao(config):
-        modelo = original(config)
+    def espiao(config, technique):
+        modelo = original(config, technique)
         vistos.append((modelo, {v.path: np.array(v) for v in modelo.weights}))
         return modelo
 
-    monkeypatch.setattr(train_module, "build_encoder", espiao)
+    monkeypatch.setattr(train_module, "build_model", espiao)
     manifest = train_module.train(_config(tmp_path, technique="bn_only", steps=5),
                                   verbose=False)
     modelo, inicial = vistos[0]
@@ -211,6 +211,28 @@ def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_pat
     assert codes.shape == (len(frame), config.encoder.effect_dim)
     direto = model(standardizer.transform(store.take(np.arange(3))), training=False)
     assert np.allclose(codes[:3], np.asarray(direto), atol=1e-6)
+
+
+# --- o controle escalar -------------------------------------------------------
+def test_the_scalar_control_trains_reloads_and_is_read_without_a_catalog(tmp_path):
+    from gefx.disent.probes import embed_run
+
+    manifest = train_module.train(_config(tmp_path, technique="regressao"), verbose=False)
+    metrics = json.loads((tmp_path / "out" / "metrics.json").read_text())
+    assert metrics["direct_readout"]["drive_level"]["chance"] == pytest.approx(0.25)
+    assert {"direct_drive_exact", "direct_mae_db"} <= set(manifest["summary"])
+    _, frame, codes = embed_run(tmp_path / "out", manifest["config"]["dataset_root"])
+    assert codes.shape == (len(frame), 1)
+
+
+def test_the_direct_readout_maps_the_unit_interval_back_onto_the_ladder(tmp_path):
+    """0 e 1 sao os extremos da escada do treino; um valor exato acerta tudo."""
+    frames = split_frames(_dataset(tmp_path))
+    queries = frames["query"]
+    exact = queries["drive_level"].to_numpy() / (len(DRIVES) - 1)
+    readout = train_module.direct_readout(frames, exact)
+    assert readout["drive_level"]["exact"] == pytest.approx(1.0)
+    assert readout["mae_db"] == pytest.approx(0.0, abs=1e-9)
 
 
 # --- a escada -----------------------------------------------------------------
