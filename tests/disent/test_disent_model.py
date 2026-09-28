@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gefx.disent.model import EffectModel, EncoderConfig, build_encoder
+from gefx.disent.model import EncoderConfig, build_encoder
 
 SMALL = EncoderConfig(input_shape=(32, 24, 1), filters=(8, 16), trunk_units=16,
                       effect_dim=4)
@@ -25,28 +25,21 @@ def test_the_effect_code_lives_on_the_unit_sphere():
     assert np.allclose(np.linalg.norm(np.asarray(z_e), axis=1), 1.0, atol=1e-5)
 
 
-def test_the_forward_pass_is_the_effect_code():
-    model = EffectModel(SMALL)
-    x = _batch()
-    assert np.array_equal(np.asarray(model(x, training=False)), np.asarray(model.encode(x)))
-
-
 def test_weights_round_trip_through_disk(tmp_path):
-    model = EffectModel(SMALL)
+    model = build_encoder(SMALL)
     x = _batch(3)
-    expected = np.asarray(model.encode(x))
-    model.save_weights(tmp_path / "w")
+    expected = np.asarray(model(x, training=False))
+    model.save_weights(tmp_path / "w.weights.h5")
 
-    other = EffectModel(SMALL)
-    assert not np.allclose(np.asarray(other.encode(x)), expected)
-    other.load_weights(tmp_path / "w")
-    assert np.allclose(np.asarray(other.encode(x)), expected, atol=1e-6)
+    other = build_encoder(SMALL)
+    assert not np.allclose(np.asarray(other(x, training=False)), expected)
+    other.load_weights(tmp_path / "w.weights.h5")
+    assert np.allclose(np.asarray(other(x, training=False)), expected, atol=1e-6)
 
 
-def test_loading_from_a_directory_without_weights_is_refused(tmp_path):
-    (tmp_path / "empty").mkdir()
+def test_loading_weights_that_are_not_there_is_refused(tmp_path):
     with pytest.raises((FileNotFoundError, ValueError)):
-        EffectModel(SMALL).load_weights(tmp_path / "empty")
+        build_encoder(SMALL).load_weights(tmp_path / "nada.weights.h5")
 
 
 def test_the_encoder_config_round_trips_through_its_dict():

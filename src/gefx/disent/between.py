@@ -21,6 +21,7 @@ from typing import Dict, List, Sequence
 import numpy as np
 import pandas as pd
 
+from gefx.disent.retrieval import nearest
 from gefx.disent.sidecar import read_dataset, split_frames
 
 DEFAULT_K = 10
@@ -36,14 +37,11 @@ def between_predictions(
     """Uma linha por consulta, buscando so em outras implementacoes."""
     catalog_db = catalog["drive_db_equivalente"].to_numpy()
     catalog_level = catalog["drive_level"].to_numpy()
-    z_query = z_query / np.linalg.norm(z_query, axis=1, keepdims=True)
-    z_catalog = z_catalog / np.linalg.norm(z_catalog, axis=1, keepdims=True)
     parts: List[pd.DataFrame] = []
     for arm in sorted(queries["arm"].unique()):
         q = np.flatnonzero((queries["arm"] == arm).to_numpy())
         c = np.flatnonzero((catalog["arm"] != arm).to_numpy())
-        similarity = z_query[q] @ z_catalog[c].T
-        top = c[np.argsort(-similarity, axis=1)[:, :k]]  # o primeiro e o mais proximo
+        top = c[nearest(z_query[q], z_catalog[c], k)[0]]  # o primeiro e o mais proximo
         parts.append(pd.DataFrame({
             "file_name": queries["file_name"].to_numpy()[q],
             "query_arm": arm,

@@ -20,18 +20,15 @@ def test_nearest_finds_the_exact_row():
     rng = np.random.default_rng(0)
     catalog = rng.standard_normal((20, 8)).astype(np.float32)
     picks, dists = nearest(catalog[[3, 7, 11]], catalog)
-    assert picks.tolist() == [3, 7, 11]
-    assert dists == pytest.approx([0.0, 0.0, 0.0], abs=1e-6)
+    assert picks[:, 0].tolist() == [3, 7, 11]
+    assert dists[:, 0] == pytest.approx([0.0, 0.0, 0.0], abs=1e-6)
 
 
-def test_nearest_is_independent_of_the_chunk_size():
-    rng = np.random.default_rng(1)
-    queries = rng.standard_normal((23, 5)).astype(np.float32)
-    catalog = rng.standard_normal((17, 5)).astype(np.float32)
-    a = nearest(queries, catalog, chunk=4)
-    b = nearest(queries, catalog, chunk=100)
-    assert a[0].tolist() == b[0].tolist()
-    assert a[1] == pytest.approx(b[1])
+def test_the_k_nearest_come_closest_first():
+    catalog = np.array([[1.0, 0.0], [0.0, 1.0], [0.8, 0.6]], dtype=np.float32)
+    picks, dists = nearest(np.array([[1.0, 0.1]], dtype=np.float32), catalog, k=3)
+    assert picks.tolist() == [[0, 2, 1]]
+    assert np.all(np.diff(dists[0]) > 0)
 
 
 def test_nearest_is_cosine_and_ignores_the_norm():
@@ -40,12 +37,12 @@ def test_nearest_is_cosine_and_ignores_the_norm():
     queries = np.array([[2.0, 0.0]], dtype=np.float32)
     catalog = np.array([[1.0, 0.0], [2.0, 0.6]], dtype=np.float32)
     picks, dists = nearest(queries, catalog)
-    assert picks[0] == 0
-    assert dists[0] == pytest.approx(0.0, abs=1e-6)
+    assert picks[0, 0] == 0
+    assert dists[0, 0] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_nearest_rejects_mismatched_dimensions():
-    with pytest.raises(ValueError, match="dimensoes incompativeis"):
+    with pytest.raises(ValueError):
         nearest(np.zeros((2, 3), np.float32), np.zeros((2, 4), np.float32))
 
 

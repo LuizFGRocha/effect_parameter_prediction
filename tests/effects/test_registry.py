@@ -8,19 +8,16 @@ from gefx.effects.registry import (
     REFERENCE_ARM,
     REGISTRY,
     all_arms,
-    arms_for,
     ident,
     is_exact,
     onto,
     to_db,
-    to_ms,
     to_pct,
 )
 
 
-def test_ident_to_ms_to_pct():
+def test_ident_to_pct():
     assert ident(3.5) == 3.5
-    assert to_ms(0.2) == pytest.approx(200.0)
     assert to_pct(0.35) == pytest.approx(35.0)
 
 
@@ -43,16 +40,6 @@ def test_onto_maps_normalized_range():
     assert convert(0.0) == pytest.approx(2.0)
     assert convert(0.5) == pytest.approx(6.0)
     assert convert(1.0) == pytest.approx(10.0)
-
-
-def test_arms_for_puts_reference_first():
-    assert arms_for("distortion") == ["pedalboard", "chowcentaur", "lsp"]
-    assert arms_for("phaser") == ["pedalboard", "chowphaser", "lsp"]
-
-
-def test_arms_for_unmapped_effect_is_reference_only():
-    assert arms_for("slapback_delay") == [REFERENCE_ARM]
-    assert arms_for("nao_existe") == [REFERENCE_ARM]
 
 
 def test_all_arms():

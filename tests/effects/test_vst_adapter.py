@@ -1,20 +1,17 @@
-"""Adaptador de VST3. So o que roda sem plugin: parsing de texto, clamp e mono/estereo."""
+"""Adaptador de VST3. So o que roda sem plugin: clamp e mono/estereo."""
 from __future__ import annotations
-
-import math
 
 import numpy as np
 import pytest
 
 from gefx.effects import vst_adapter
-from gefx.effects.vst_adapter import display_as, process_mono, set_parameter
+from gefx.effects.vst_adapter import process_mono, set_parameter
 
 
 class FakeParam:
-    def __init__(self, min_value=0.0, max_value=1.0, valid_values=()):
+    def __init__(self, min_value=0.0, max_value=1.0):
         self.min_value = min_value
         self.max_value = max_value
-        self.valid_values = list(valid_values)
         self.raw_value = 0.0
 
 
@@ -30,33 +27,6 @@ class FakePlugin:
         if name in self._explode:
             raise RuntimeError(f"plugin recusou {name}")
         self.written[name] = value
-
-
-@pytest.mark.parametrize(
-    "text, unit, expected",
-    [
-        ("200.00 ms", "ms", 200.0),
-        ("1.50 s", "ms", 1500.0),
-        ("35%", "%", 35.0),
-        ("-12.5 dB", "dB", -12.5),
-        ("  8 ", "ms", 8.0),
-        ("1.50 s", "%", 1.5),  # so a unidade "ms" dispara a conversao s->ms
-    ],
-)
-def test_display_as(text, unit, expected):
-    assert display_as(text, unit) == pytest.approx(expected)
-
-
-def test_display_as_empty_is_nan():
-    assert math.isnan(display_as("", "ms"))
-    assert math.isnan(display_as("sem numero", "ms"))
-
-
-def test_display_as_breaks_on_scientific_notation():
-    # CARACTERIZACAO: o filtro de caracteres transforma "1.5e-3" em "1.5-3".
-    # Nenhum plugin do registro atual exibe assim, mas um que exibisse quebraria.
-    with pytest.raises(ValueError):
-        display_as("1.5e-3 s", "ms")
 
 
 def test_set_parameter_writes_through():
@@ -100,15 +70,6 @@ def test_set_parameter_swallows_plugin_errors(capsys):
     plugin = FakePlugin({"depth": FakeParam(0.0, 1.0)}, explode={"depth"})
     set_parameter(plugin, "depth", 0.5)  # nao levanta
     assert "falhou setar" in capsys.readouterr().out
-
-
-def test_set_parameter_by_display_picks_nearest_valid_value():
-    param = FakeParam(valid_values=["0.00 ms", "100.00 ms", "200.00 ms"])
-    plugin = FakePlugin({"node_1_delay": param})
-    set_parameter(plugin, "node_1_delay", 105.0)
-    # indice 1 de 3 -> raw 1/(3-1)
-    assert param.raw_value == pytest.approx(0.5)
-    assert plugin.written == {}  # enderecado por raw_value, nao por setattr
 
 
 def test_process_mono_passes_mono_through():

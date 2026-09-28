@@ -1,26 +1,27 @@
 """Acesso ao cache de features sem carregar tudo.
 
-O motivo de este modulo existir e prosaico: o cache do `Spec` tem 4,96 GB e a
-maquina tem 5 GB livres. O que os testes protegem e o que quebraria em silencio
--- o deslocamento do membro cru dentro do zip e o alinhamento por nome de
+Os caches dos arms nao cabem juntos na RAM, por isso o `.npy` mapeado. O que os
+testes protegem e o que quebraria em silencio -- o alinhamento por nome de
 arquivo, que e a mesma armadilha do POC I: usar as duas ordens trocadas nao
 levanta erro, so treina com o rotulo errado.
 """
 from __future__ import annotations
 
 import json
-import zipfile
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from gefx.disent import features as features_module
 from gefx.disent.features import (
     FeatureStore,
     PixelStandardizer,
-    npy_member_offset,
+    arm_feature_folder,
+    ensure_arm_cache,
     open_cache_memmap,
 )
+from gefx.disent.sidecar import EFFECT_FOLDER
 
 ARMS = ("m0", "m1")
 SHAPE = (6, 5)
@@ -29,7 +30,7 @@ SHAPE = (6, 5)
 def _write_arm(root, arm, names, features):
     folder = root / arm / "distortion"
     folder.mkdir(parents=True)
-    np.savez(folder / "Spec.npz", features)
+    np.save(folder / "Spec.npy", features)
     (folder / "file_names.json").write_text(json.dumps(list(names)), encoding="utf-8")
     return folder
 
@@ -52,26 +53,6 @@ def _dataset(tmp_path, rows=4):
     return pd.concat(frames, ignore_index=True), payload
 
 
-def test_the_member_offset_points_at_the_raw_array(tmp_path):
-    features = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
-    _write_arm(tmp_path, "m0", ["a.wav", "b.wav"], features)
-    path = tmp_path / "m0" / "distortion" / "Spec.npz"
-    offset, shape, dtype, fortran = npy_member_offset(path)
-    assert shape == features.shape and dtype == features.dtype and not fortran
-    mapped = np.memmap(path, dtype=dtype, mode="r", offset=offset, shape=shape)
-    assert np.array_equal(np.asarray(mapped), features)
-
-
-def test_a_compressed_npz_is_refused_instead_of_read_wrong(tmp_path):
-    """`np.savez_compressed` grava o mesmo nome de membro, e o deslocamento
-    apontaria para bytes comprimidos -- lixo silencioso, nao erro."""
-    folder = tmp_path / "m0" / "distortion"
-    folder.mkdir(parents=True)
-    np.savez_compressed(folder / "Spec.npz", np.zeros((2, 3), dtype=np.float32))
-    with pytest.raises(ValueError, match="comprimido"):
-        npy_member_offset(folder / "Spec.npz")
-
-
 def test_open_cache_memmap_does_not_read_the_array_into_memory(tmp_path):
     features = np.random.default_rng(1).random((3, 4)).astype(np.float32)
     _write_arm(tmp_path, "m0", ["a.wav", "b.wav", "c.wav"], features)
@@ -90,7 +71,7 @@ def test_a_missing_cache_says_which_command_builds_it(tmp_path):
 def test_a_cache_and_a_name_list_of_different_lengths_are_refused(tmp_path):
     folder = tmp_path / "m0" / "distortion"
     folder.mkdir(parents=True)
-    np.savez(folder / "Spec.npz", np.zeros((3, 2), dtype=np.float32))
+    np.save(folder / "Spec.npy", np.zeros((3, 2), dtype=np.float32))
     (folder / "file_names.json").write_text(json.dumps(["a.wav"]), encoding="utf-8")
     with pytest.raises(ValueError, match="file_names.json"):
         open_cache_memmap(tmp_path, "m0", "Spec")
@@ -175,12 +156,27 @@ def test_the_standardizer_round_trips_through_disk(tmp_path):
     assert restored.n == 7
 
 
-def test_the_cache_written_by_the_repo_is_stored_uncompressed(tmp_path):
-    """O mapeamento so vale porque `data/cache.py` usa `np.savez`. Se algum dia
-    virar `savez_compressed`, e este teste que avisa antes do treino quebrar."""
-    from gefx.data.cache import save_cache
+def test_the_cache_is_written_once_and_read_back_as_a_memmap(tmp_path, monkeypatch):
+    """O que `ensure_arm_cache` grava e o que `open_cache_memmap` le: sem
+    reextrair na segunda vez, e sem trazer o array para a RAM."""
+    calls = []
+    features = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
 
-    save_cache(tmp_path, "Spec", np.zeros((2, 3), dtype=np.float32),
-               np.array(["a.wav", "b.wav"]))
-    with zipfile.ZipFile(tmp_path / "Spec.npz") as archive:
-        assert all(item.compress_type == zipfile.ZIP_STORED for item in archive.infolist())
+    def fake_build(folder, feature_name):
+        calls.append(folder)
+        return features, np.array(["a.wav", "b.wav"])
+
+    monkeypatch.setattr(features_module, "build_cache", fake_build)
+    arm_feature_folder(tmp_path, "m0").mkdir(parents=True)
+    for _ in range(2):
+        mapped, names = ensure_arm_cache(tmp_path, "m0", "Spec")
+    assert len(calls) == 1
+    assert isinstance(mapped, np.memmap)
+    assert np.array_equal(mapped, features)
+    assert names.tolist() == ["a.wav", "b.wav"]
+
+
+def test_feature_folder_is_beside_the_audio(tmp_path):
+    # O cache mora dentro do dataset, ao lado dos wavs, como no POC I: copiar o
+    # dataset leva o cache junto.
+    assert arm_feature_folder(tmp_path, "m0") == tmp_path / "m0" / EFFECT_FOLDER

@@ -26,10 +26,6 @@ def ident(value: float) -> float:
     return value
 
 
-def to_ms(value: float) -> float:
-    return value * 1000.0
-
-
 def to_pct(value: float) -> float:
     return value * 100.0
 
@@ -133,10 +129,6 @@ REGISTRY: Dict[str, Dict[str, dict]] = {
 # foram treinados. Sem ele nao da pra separar "o modelo nao generaliza" de
 # "esse conjunto de avaliacao e simplesmente diferente".
 REFERENCE_ARM = "pedalboard"
-
-
-def arms_for(effect: str) -> List[str]:
-    return [REFERENCE_ARM] + sorted(REGISTRY.get(effect, {}))
 
 
 def all_arms() -> List[str]:

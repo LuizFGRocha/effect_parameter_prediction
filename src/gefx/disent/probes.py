@@ -91,12 +91,12 @@ def linear_probes(
 
 def load_run(run_dir: Path):
     """`(modelo, manifesto)` de uma execucao gravada."""
-    from gefx.disent.model import EffectModel, EncoderConfig
+    from gefx.disent.model import WEIGHTS_FILE, EncoderConfig, build_encoder
 
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    model = EffectModel(EncoderConfig.from_dict(manifest["config"]["encoder"]))
-    model.load_weights(run_dir / "weights")
+    model = build_encoder(EncoderConfig.from_dict(manifest["config"]["encoder"]))
+    model.load_weights(run_dir / WEIGHTS_FILE)
     return model, manifest
 
 
