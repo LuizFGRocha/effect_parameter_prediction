@@ -215,13 +215,18 @@ def _write_table(tabela, destino: Path) -> None:
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
-    from gefx.disent.model import EncoderConfig
+    from dataclasses import replace
+
+    from gefx.disent.model import ARCHITECTURES
     from gefx.disent.train import RESULTS_ROOT, TECHNIQUES, TrainConfig, compare, train
 
     escolhidas = list(dict.fromkeys(args.technique or ["supcon"]))
     desconhecidas = [nome for nome in escolhidas if nome not in TECHNIQUES]
     if desconhecidas:
         raise SystemExit(f"tecnica desconhecida: {desconhecidas}. Ha {list(TECHNIQUES)}")
+    encoder = ARCHITECTURES[args.arch]
+    if args.time_pool:
+        encoder = replace(encoder, time_pool=args.time_pool)
     raiz = Path(args.results_dir)
     for nome in escolhidas:
         # A semente padrao fica em `<tecnica>/`; as outras, ao lado.
@@ -241,7 +246,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             seed=args.seed,
             deterministic=args.deterministic,
             output_dir=raiz / pasta,
-            encoder=EncoderConfig(time_pool=args.time_pool),
+            encoder=encoder,
         ))
 
     print()
@@ -530,10 +535,14 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Nucleos deterministicos do TensorFlow. Sem isto a "
                                    "semente fixa so a inicializacao e duas execucoes "
                                    "identicas divergem. Custa ~20%% de velocidade.")
-    disent_train.add_argument("--time-pool", default="mean",
+    disent_train.add_argument("--arch", default="poc2", choices=["poc2", "poc1"],
+                              help="poc2: o encoder do relatorio. poc1: a CNN do POC I "
+                                   "(2 blocos de 6 e 12 filtros, sem media no tempo, "
+                                   "duas densas de 64).")
+    disent_train.add_argument("--time-pool", default=None,
                               choices=["mean", "max", "flatten"],
-                              help="Reducao do eixo do tempo no tronco. mean e o "
-                                   "encoder do relatorio; max e flatten sao a ablacao.")
+                              help="Reducao do eixo do tempo no tronco; sem isto, a da "
+                                   "arquitetura. max e flatten sao a ablacao do poc2.")
     disent_train.set_defaults(func=_cmd_disent_train)
 
     disent_between = disent_sub.add_parser(
