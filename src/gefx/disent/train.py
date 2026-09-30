@@ -1,13 +1,15 @@
 """Treino do encoder e os dois controles que separam aprendizado de arquitetura.
 
 - `supcon`: o encoder, treinado com o SupCon (`losses.py`) sobre `z_e`;
+- `regressao`: o mesmo tronco com uma saida so, o drive em dB normalizado, por
+  MSE. Controla se `z_e` precisa de mais de uma dimensao para o nivel;
 - `random_encoder`: a mesma rede sem nenhum passo, o que a arquitetura ja entrega;
 - `bn_only`: a rede sem treino com so as estatisticas moveis da BatchNorm
   calibradas, sem gradiente. Com zero passos elas ficam na inicializacao (0, 1),
   sem relacao com as ativacoes reais, o que deixa o `random_encoder` em
   desvantagem artificial.
 
-Os tres rodam pelo mesmo codigo, arquitetura, amostrador e semente.
+Os quatro rodam pelo mesmo codigo, arquitetura, amostrador e semente.
 """
 from __future__ import annotations
 
@@ -24,12 +26,12 @@ import pandas as pd
 from gefx.config import git_revision
 from gefx.disent.features import FeatureStore, PixelStandardizer
 from gefx.disent.losses import DEFAULT_TEMPERATURE, sup_con_loss
-from gefx.disent.model import WEIGHTS_FILE, EncoderConfig, build_encoder
-from gefx.disent.retrieval import retrieve_by_arm
+from gefx.disent.model import REGRESSION, WEIGHTS_FILE, EncoderConfig, build_model
+from gefx.disent.retrieval import alphabet, nearest_level, retrieve_by_arm, score
 from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
 from gefx.disent.sidecar import split_frames
 
-TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon")
+TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon", REGRESSION)
 
 RESULTS_ROOT = Path("results/disent/v2/encoder")
 
@@ -92,6 +94,29 @@ def make_step(model, optimizer, temperature: float):
     return step
 
 
+def make_regression_step(model, optimizer):
+    """MSE entre a saida sigmoide e o drive em [0, 1], como o regressor do POC I."""
+    import tensorflow as tf
+
+    variables = model.trainable_variables
+
+    @tf.function(reduce_retracing=True)
+    def step(x, drive):
+        with tf.GradientTape() as tape:
+            loss = tf.reduce_mean(tf.square(model(x, training=True) - drive))
+        gradients = tape.gradient(loss, variables)
+        optimizer.apply_gradients(zip(gradients, variables))
+        return loss
+
+    return step
+
+
+def drive_range(frame: pd.DataFrame) -> Tuple[float, float]:
+    """Os extremos da escada em dB: o regressor preve dentro deles, em [0, 1]."""
+    values = frame["drive_db_equivalente"]
+    return float(values.min()), float(values.max())
+
+
 def make_bn_step(model):
     """Passo para frente em modo de treino: so as medias moveis da BatchNorm mudam."""
     import tensorflow as tf
@@ -131,18 +156,40 @@ def evaluate(
         )
     z_query = embed(model, stores["query"], standardizer, batch)
     z_catalog = embed(model, stores["catalog"], standardizer, batch)
+    scalar = z_query.shape[1] == 1
 
+    metric = "euclidean" if scalar else "cosine"
     cross = retrieve_by_arm(
         frames["query"], frames["catalog"], z_query, z_catalog,
-        same_arm=False,
+        same_arm=False, metric=metric,
     )
     same = retrieve_by_arm(
         frames["query"], frames["catalog"], z_query, z_catalog,
-        same_arm=True,
+        same_arm=True, metric=metric,
     )
     metrics: Dict[str, object] = dict(cross.metrics)
     metrics["same_arm_control"] = same.metrics["overall"]
+    if scalar:
+        metrics["direct_readout"] = direct_readout(frames, z_query[:, 0])
     return cross.predictions, metrics
+
+
+def direct_readout(frames: Mapping[str, pd.DataFrame],
+                   predicted: np.ndarray) -> Dict[str, object]:
+    """O regressor lido sem catalogo: o degrau da escada mais proximo, como no B1."""
+    queries = frames["query"]
+    lo, hi = drive_range(frames["train"])
+    drive_db = lo + predicted * (hi - lo)
+    ladder = np.array(sorted(queries.groupby("drive_level")["drive_db_equivalente"].first()))
+    out = pd.DataFrame({
+        "query_arm": queries["arm"].to_numpy(),
+        "retrieved_arm": "(leitura direta)",
+        "true_drive_level": queries["drive_level"].to_numpy(),
+        "pred_drive_level": nearest_level(drive_db, ladder),
+        "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
+        "pred_drive_db": drive_db,
+    })
+    return score(out, alphabet(queries))
 
 
 # --- laco ---------------------------------------------------------------------
@@ -176,11 +223,16 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         config,
         encoder=replace(config.encoder, input_shape=(*stores["train"].feature_shape, 1)),
     )
-    model = build_encoder(config.encoder)
+    model = build_model(config.encoder, config.technique)
 
     steps = 0 if config.technique == "random_encoder" else config.steps
     if config.technique == "bn_only":
         step = make_bn_step(model)
+    elif config.technique == REGRESSION:
+        optimizer = keras.optimizers.Adam(learning_rate=config.learning_rate)
+        step = make_regression_step(model, optimizer)
+        lo, hi = drive_range(index.frame)
+        drive = ((index.frame["drive_db_equivalente"].to_numpy() - lo) / (hi - lo))
     else:
         optimizer = keras.optimizers.Adam(learning_rate=config.learning_rate)
         step = make_step(model, optimizer, config.temperature)
@@ -198,7 +250,10 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         if config.technique == "bn_only":
             step(features)
         else:
-            loss = float(step(features, tf.constant(batch.config, dtype=tf.int32)))
+            label = (tf.constant(drive[batch.rows][:, None], dtype=tf.float32)
+                     if config.technique == REGRESSION
+                     else tf.constant(batch.config, dtype=tf.int32))
+            loss = float(step(features, label))
             history.append({"loss": loss, "step": number})
             if verbose and (number == 1 or number % 100 == 0):
                 print(f"  passo {number:5d}/{steps}  {config.technique}={loss:.4f}", flush=True)
@@ -252,11 +307,16 @@ def summarize(metrics: Dict[str, object]) -> Dict[str, float]:
     """Os numeros da escada: a tarefa e o controle sem travessia de implementacao."""
     overall = metrics["overall"]  # type: ignore[index]
     same = metrics["same_arm_control"]  # type: ignore[index]
-    return {
+    out = {
         "drive_exact": float(overall["drive_level"]["exact"]),
         "mae_db": float(overall["mae_db"]),
         "same_arm_drive_exact": float(same["drive_level"]["exact"]),
     }
+    if "direct_readout" in metrics:  # so o regressor
+        direct = metrics["direct_readout"]  # type: ignore[index]
+        out["direct_drive_exact"] = float(direct["drive_level"]["exact"])
+        out["direct_mae_db"] = float(direct["mae_db"])
+    return out
 
 
 def load_baselines(baselines_dir: Path) -> List[Dict[str, object]]:

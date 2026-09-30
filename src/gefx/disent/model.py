@@ -110,3 +110,25 @@ def build_encoder(config: EncoderConfig):
     z_e = layers.Dense(config.effect_dim, name="effect_dense")(trunk.output)
     z_e = layers.UnitNormalization(name="effect_code")(z_e)
     return models.Model(trunk.input, z_e, name="encoder")
+
+
+#: A tecnica cujo modelo e o regressor escalar, e nao o encoder.
+REGRESSION = "regressao"
+
+
+def build_regressor(config: EncoderConfig):
+    """Controle escalar: o mesmo tronco, uma saida sigmoide com o drive em [0, 1].
+
+    Responde se o encoder precisa de `effect_dim` dimensoes para o nivel: com o
+    mesmo tronco, dados e amostrador, so muda a cabeca. `effect_dim` e ignorado.
+    """
+    from keras import layers, models
+
+    trunk = build_trunk(config)
+    drive = layers.Dense(1, activation="sigmoid", name="drive")(trunk.output)
+    return models.Model(trunk.input, drive, name="regressor")
+
+
+def build_model(config: EncoderConfig, technique: str):
+    """O regressor para `REGRESSION`, o encoder para as outras tecnicas."""
+    return build_regressor(config) if technique == REGRESSION else build_encoder(config)

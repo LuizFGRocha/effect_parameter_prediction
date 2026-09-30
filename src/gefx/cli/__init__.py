@@ -509,10 +509,12 @@ def build_parser() -> argparse.ArgumentParser:
     disent_train.add_argument("--results-dir", default="results/disent/v2/encoder")
     disent_train.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
     disent_train.add_argument("--technique", action="append", default=None,
-                              choices=["supcon", "random_encoder", "bn_only"],
+                              choices=["supcon", "random_encoder", "bn_only",
+                                       "regressao"],
                               help="Repetivel. Padrao: supcon. random_encoder: "
                                    "zero passos. bn_only: so calibra a BatchNorm, sem "
-                                   "gradiente.")
+                                   "gradiente. regressao: o mesmo tronco com uma saida "
+                                   "so, o drive em dB, por MSE.")
     disent_train.add_argument("--arm", action="append", default=None,
                               help="Restringe as implementacoes.")
     disent_train.add_argument("--steps", type=int, default=4000)
