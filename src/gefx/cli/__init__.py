@@ -215,6 +215,7 @@ def _write_table(tabela, destino: Path) -> None:
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
+    from gefx.disent.model import EncoderConfig
     from gefx.disent.train import RESULTS_ROOT, TECHNIQUES, TrainConfig, compare, train
 
     escolhidas = list(dict.fromkeys(args.technique or ["supcon"]))
@@ -240,6 +241,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             seed=args.seed,
             deterministic=args.deterministic,
             output_dir=raiz / pasta,
+            encoder=EncoderConfig(time_pool=args.time_pool),
         ))
 
     print()
@@ -526,6 +528,10 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Nucleos deterministicos do TensorFlow. Sem isto a "
                                    "semente fixa so a inicializacao e duas execucoes "
                                    "identicas divergem. Custa ~20%% de velocidade.")
+    disent_train.add_argument("--time-pool", default="mean",
+                              choices=["mean", "max", "flatten"],
+                              help="Reducao do eixo do tempo no tronco. mean e o "
+                                   "encoder do relatorio; max e flatten sao a ablacao.")
     disent_train.set_defaults(func=_cmd_disent_train)
 
     disent_between = disent_sub.add_parser(

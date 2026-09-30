@@ -302,6 +302,7 @@ def compare(
             "run": name,
             "technique": manifest["config"]["technique"],
             "seed": manifest["config"]["seed"],
+            "time_pool": manifest["config"].get("encoder", {}).get("time_pool", "mean"),
             **manifest["summary"],
             "steps": manifest["steps_executed"],
         })

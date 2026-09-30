@@ -3,6 +3,10 @@
 `z_e` e L2-normalizado porque a busca e por cosseno. O tronco tira a media so no
 eixo do tempo: o ajuste de distorcao e estacionario num segmento de dois
 segundos, e o que varia no tempo e o que foi tocado.
+
+A media no tempo entrou por esse argumento, sem medicao. `time_pool` existe para
+a ablacao: `max` reduz o tempo com o mesmo tamanho de saida, e `flatten` o
+mantem inteiro (a `trunk_dense` fica ~8x maior), como a CNN do POC I.
 """
 from __future__ import annotations
 
@@ -11,6 +15,9 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
+
+#: Como o tronco trata o eixo do tempo antes da camada densa.
+TIME_POOLS: Tuple[str, ...] = ("mean", "max", "flatten")
 
 #: Onde cada execucao grava os pesos do encoder, relativo a pasta dela.
 WEIGHTS_FILE = Path("weights") / "encoder.weights.h5"
@@ -26,6 +33,14 @@ class EncoderConfig:
     trunk_units: int = 256
     dropout: float = 0.2
     effect_dim: int = 32
+    #: Manifestos anteriores a ablacao nao tem o campo: rodaram com a media.
+    time_pool: str = "mean"
+
+    def __post_init__(self) -> None:
+        if self.time_pool not in TIME_POOLS:
+            raise ValueError(
+                f"time_pool desconhecido: {self.time_pool!r}. Ha {list(TIME_POOLS)}"
+            )
 
     def as_dict(self) -> Dict[str, object]:
         return {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(self).items()}
@@ -43,8 +58,21 @@ def _mean_over_time(tensor):
     return tf.reduce_mean(tensor, axis=2)
 
 
+def _max_over_time(tensor):
+    """(batch, frequencia, tempo, canal) -> (batch, frequencia, canal)."""
+    import tensorflow as tf
+
+    return tf.reduce_max(tensor, axis=2)
+
+
+_TIME_REDUCERS = {"mean": _mean_over_time, "max": _max_over_time}
+
+
 def build_trunk(config: EncoderConfig):
-    """Conv2D -> BN -> pool empilhados, media no tempo, denso. Um `keras.Model`."""
+    """Conv2D -> BN -> pool empilhados, reducao do tempo, denso. Um `keras.Model`.
+
+    Com `time_pool="flatten"` nao ha reducao: o `Flatten` leva frequencia e tempo.
+    """
     from keras import layers, models
 
     inputs = layers.Input(shape=tuple(config.input_shape), name="spec")
@@ -58,11 +86,12 @@ def build_trunk(config: EncoderConfig):
         if index:
             x = layers.Dropout(config.dropout, name=f"drop{index}")(x)
 
-    x = layers.Lambda(
-        _mean_over_time,
-        output_shape=lambda shape: (shape[0], shape[1], shape[3]),
-        name="time_pool",
-    )(x)
+    if config.time_pool in _TIME_REDUCERS:
+        x = layers.Lambda(
+            _TIME_REDUCERS[config.time_pool],
+            output_shape=lambda shape: (shape[0], shape[1], shape[3]),
+            name="time_pool",
+        )(x)
     x = layers.Flatten(name="flat")(x)
     x = layers.Dense(config.trunk_units, activation="relu", name="trunk_dense")(x)
     x = layers.BatchNormalization(name="trunk_bn")(x)
