@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from gefx.disent.model import (
+    ARCHITECTURES,
     REGRESSION,
     EncoderConfig,
     build_encoder,
@@ -107,3 +108,47 @@ def test_the_regressor_shares_the_trunk_and_changes_only_the_head():
 def test_build_model_picks_the_regressor_only_for_its_technique():
     assert build_model(SMALL, REGRESSION).output_shape == (None, 1)
     assert build_model(SMALL, "supcon").output_shape == (None, SMALL.effect_dim)
+
+
+def _layers(model):
+    """(tipo, forma de saida, parametros) de cada camada que calcula algo."""
+    from keras import layers
+
+    skip = (layers.InputLayer,)
+    return [(type(layer).__name__, tuple(layer.output.shape[1:]), layer.count_params())
+            for layer in model.layers if not isinstance(layer, skip)]
+
+
+def test_the_poc1_architecture_is_the_poc1_cnn_layer_by_layer():
+    """O degrau de partida da escada: o regressor `poc1` e a CNN do POC I
+    (`experiments/base.yaml`), com as mesmas camadas, formas e pesos."""
+    from dataclasses import replace
+
+    from gefx.config import load_config
+    from gefx.training.architecture import build_model as build_poc1
+
+    shape = (64, 48, 1)
+    poc1 = build_poc1(shape, 1, load_config("experiments/base.yaml").architecture)
+    ours = build_regressor(replace(ARCHITECTURES["poc1"], input_shape=shape))
+    assert _layers(ours) == _layers(poc1)
+
+
+def test_the_poc1_encoder_changes_only_the_head():
+    """Com o SupCon, so a saida muda: 32 dimensoes na esfera no lugar da sigmoide."""
+    from dataclasses import replace
+
+    config = replace(ARCHITECTURES["poc1"], input_shape=(64, 48, 1))
+    encoder, regressor = _layers(build_encoder(config)), _layers(build_regressor(config))
+    assert encoder[:-2] == regressor[:-1]
+    assert encoder[-2][0] == "Dense" and encoder[-1][0] == "UnitNormalization"
+
+
+def test_the_extra_dense_layers_keep_the_old_names_for_the_first():
+    """Os pesos gravados com uma densa so continuam a carregar."""
+    model = build_encoder(EncoderConfig(**{**SMALL.as_dict(), "trunk_layers": 2}))
+    names = {layer.name for layer in model.layers}
+    assert {"trunk_dense", "trunk_dense1"} <= names
+
+
+def test_the_default_architecture_is_the_report_encoder():
+    assert ARCHITECTURES["poc2"] == EncoderConfig()

@@ -7,6 +7,11 @@ segundos, e o que varia no tempo e o que foi tocado.
 A media no tempo entrou por esse argumento, sem medicao. `time_pool` existe para
 a ablacao: `max` reduz o tempo com o mesmo tamanho de saida, e `flatten` o
 mantem inteiro (a `trunk_dense` fica ~8x maior), como a CNN do POC I.
+
+`ARCHITECTURES["poc1"]` e a CNN do POC I (`training/architecture.py` com
+`experiments/base.yaml`) escrita neste tronco: com a cabeca do regressor, e a
+mesma rede camada a camada. E o ponto de partida da escada do POC I ao POC II,
+em que cada degrau muda uma coisa so.
 """
 from __future__ import annotations
 
@@ -35,12 +40,16 @@ class EncoderConfig:
     effect_dim: int = 32
     #: Manifestos anteriores a ablacao nao tem o campo: rodaram com a media.
     time_pool: str = "mean"
+    #: Camadas densas ocultas do tronco (o POC I tem duas). Idem: antes, uma.
+    trunk_layers: int = 1
 
     def __post_init__(self) -> None:
         if self.time_pool not in TIME_POOLS:
             raise ValueError(
                 f"time_pool desconhecido: {self.time_pool!r}. Ha {list(TIME_POOLS)}"
             )
+        if self.trunk_layers < 1:
+            raise ValueError("o tronco precisa de ao menos uma camada densa")
 
     def as_dict(self) -> Dict[str, object]:
         return {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(self).items()}
@@ -93,9 +102,13 @@ def build_trunk(config: EncoderConfig):
             name="time_pool",
         )(x)
     x = layers.Flatten(name="flat")(x)
-    x = layers.Dense(config.trunk_units, activation="relu", name="trunk_dense")(x)
-    x = layers.BatchNormalization(name="trunk_bn")(x)
-    x = layers.Dropout(config.dropout, name="trunk_drop")(x)
+    # A primeira camada guarda os nomes antigos, para os pesos gravados carregarem.
+    for index in range(config.trunk_layers):
+        suffix = str(index) if index else ""
+        x = layers.Dense(config.trunk_units, activation="relu",
+                         name=f"trunk_dense{suffix}")(x)
+        x = layers.BatchNormalization(name=f"trunk_bn{suffix}")(x)
+        x = layers.Dropout(config.dropout, name=f"trunk_drop{suffix}")(x)
     return models.Model(inputs, x, name="trunk")
 
 
@@ -132,3 +145,12 @@ def build_regressor(config: EncoderConfig):
 def build_model(config: EncoderConfig, technique: str):
     """O regressor para `REGRESSION`, o encoder para as outras tecnicas."""
     return build_regressor(config) if technique == REGRESSION else build_encoder(config)
+
+
+#: Arquiteturas nomeadas. `poc2` e o encoder do relatorio; `poc1`, a CNN do POC I:
+#: dois blocos de 6 e 12 filtros, sem reducao do tempo, duas densas de 64.
+ARCHITECTURES: Dict[str, EncoderConfig] = {
+    "poc2": EncoderConfig(),
+    "poc1": EncoderConfig(filters=(6, 12), time_pool="flatten", trunk_units=64,
+                          trunk_layers=2),
+}
