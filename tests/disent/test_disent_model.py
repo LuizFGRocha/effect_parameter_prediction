@@ -50,3 +50,33 @@ def test_a_manifest_with_fields_this_encoder_does_not_have_is_refused():
     """Um `run.json` do encoder de dois blocos nao pode recarregar em silencio."""
     with pytest.raises(TypeError):
         EncoderConfig.from_dict({**SMALL.as_dict(), "content_dim": 64})
+
+
+@pytest.mark.parametrize("time_pool", ["mean", "max", "flatten"])
+def test_every_time_pool_gives_the_effect_code_on_the_sphere(time_pool):
+    config = EncoderConfig(**{**SMALL.as_dict(), "time_pool": time_pool})
+    z_e = np.asarray(build_encoder(config)(_batch()))
+    assert z_e.shape == (4, SMALL.effect_dim)
+    assert np.allclose(np.linalg.norm(z_e, axis=1), 1.0, atol=1e-5)
+
+
+def test_flatten_keeps_the_time_axis_and_the_reductions_do_not():
+    """Com `flatten` a camada densa ve frequencia x tempo; com `mean` e `max`,
+    so frequencia, e as duas reducoes tem o mesmo numero de pesos."""
+    def dense_inputs(time_pool):
+        model = build_encoder(EncoderConfig(**{**SMALL.as_dict(), "time_pool": time_pool}))
+        return model.get_layer("trunk_dense").kernel.shape[0]
+
+    assert dense_inputs("mean") == dense_inputs("max")
+    assert dense_inputs("flatten") > dense_inputs("mean")
+
+
+def test_a_manifest_from_before_the_ablation_loads_with_the_mean():
+    """Os `run.json` anteriores nao tem `time_pool`: rodaram com a media."""
+    old = {k: v for k, v in SMALL.as_dict().items() if k != "time_pool"}
+    assert EncoderConfig.from_dict(old).time_pool == "mean"
+
+
+def test_an_unknown_time_pool_is_refused():
+    with pytest.raises(ValueError):
+        EncoderConfig(time_pool="median")
