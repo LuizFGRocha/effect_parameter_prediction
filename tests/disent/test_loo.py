@@ -136,7 +136,8 @@ def test_the_curve_keeps_the_catalog_fixed_while_the_training_set_grows(tmp_path
     vistos = []
     monkeypatch.setattr(
         modulo, "_evaluate_held_out",
-        lambda run_dir, root, held_out, seen, catalog_arms=None, batch=64, extra=None:
+        lambda run_dir, root, held_out, seen, catalog_arms=None, batch=64, extra=None,
+               split="validacao":
             vistos.append((tuple(seen), tuple(catalog_arms or seen))) or [],
     )
     monkeypatch.setattr("gefx.disent.train.train",

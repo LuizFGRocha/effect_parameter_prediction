@@ -172,13 +172,13 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
 
     root = Path(args.output_root)
     if args.baseline == "b0":
-        result = baseline_b0(root, arms=args.arm)
+        result = baseline_b0(root, arms=args.arm, split=args.split)
         rotulo = "B0 -- vizinho mais proximo no Spec padronizado"
     else:
-        result = baseline_b1(root, arms=args.arm)
+        result = baseline_b1(root, arms=args.arm, split=args.split)
         rotulo = "B1 -- regressor do POC I, sem retreino"
     overall = result.metrics["overall"]
-    print(f"{rotulo}, entre implementacoes, {overall['n']} consultas")
+    print(f"{rotulo}, entre implementacoes, {args.split}, {overall['n']} consultas")
     item = overall["drive_level"]
     print(f"  {'drive_level':12s} exato {item['exact']:.1%} (acaso {item['chance']:.1%})  "
           f"+-1 {item['within_one']:.1%}  MAE {item['mae_levels']:.2f} niveis")
@@ -189,7 +189,7 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
               f"MAE {item['drive_level']['mae_levels']:.2f}  "
               f"{item['mae_db']:.2f} dB")
 
-    destino = Path(args.results_dir) / args.baseline
+    destino = Path(args.results_dir) / f"{args.baseline}_{args.split}"
     destino.parent.mkdir(parents=True, exist_ok=True)
     result.predictions.to_csv(destino.with_suffix(".csv"), index=False)
     destino.with_suffix(".json").write_text(json.dumps(result.metrics, indent=2),
@@ -200,10 +200,14 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
 def _cmd_disent_plots(args: argparse.Namespace) -> None:
     from gefx.disent.plots import build_all
 
-    escritos = build_all(Path(args.results_dir), Path(args.out_dir) if args.out_dir else None)
+    escritos = build_all(Path(args.results_dir), Path(args.out_dir) if args.out_dir else None,
+                         split=args.split)
     print(f"{len(escritos)} figuras:")
     for caminho in escritos:
         print(f"  {caminho}")
+
+
+_SPLIT_HELP = "validacao: o que o desenvolvimento le. teste: so na passada final."
 
 
 def _write_table(tabela, destino: Path) -> None:
@@ -251,7 +255,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
         ))
 
     print()
-    _write_table(compare(raiz), raiz / "escada.csv")
+    _write_table(compare(raiz), raiz / "escada_validacao.csv")
 
 
 def _cmd_disent_probe(args: argparse.Namespace) -> None:
@@ -261,7 +265,7 @@ def _cmd_disent_probe(args: argparse.Namespace) -> None:
         Path(args.results_dir), Path(args.output_root),
         runs=args.run, split=args.split, folds=args.folds, seed=args.seed,
     )
-    _write_table(tabela, Path(args.results_dir) / "sondas.csv")
+    _write_table(tabela, Path(args.results_dir) / f"sondas_{args.split}.csv")
 
 
 def _cmd_disent_diversity(args: argparse.Namespace) -> None:
@@ -270,11 +274,11 @@ def _cmd_disent_diversity(args: argparse.Namespace) -> None:
     tabela = arm_diversity_curve(
         args.held_out, Path(args.output_root), Path(args.results_dir),
         steps=args.steps, seed=args.seed,
-        reuse=Path(args.reuse) if args.reuse else None,
+        reuse=Path(args.reuse) if args.reuse else None, split=args.split,
     )
     print()
     print(tabela.to_string(index=False))
-    print(f"\ntabela em {Path(args.results_dir) / 'resumo.csv'}")
+    print(f"\ntabela em {Path(args.results_dir) / f'resumo_{args.split}.csv'}")
 
 
 def _cmd_disent_loo(args: argparse.Namespace) -> None:
@@ -284,14 +288,26 @@ def _cmd_disent_loo(args: argparse.Namespace) -> None:
         Path(args.output_root), Path(args.results_dir),
         steps=args.steps, seed=args.seed,
         seeds=[args.seed] + [s for s in (args.extra_seed or []) if s != args.seed],
+        split=args.split,
     )
-    custo = transfer_cost(tabela)
+    # O encoder treinado com todos os arms, na pasta acima da do leave-one-out.
+    custo = transfer_cost(tabela, Path(args.results_dir).parent / "supcon"
+                          / f"metrics_{args.split}.json")
     print()
     print(custo.to_string(index=False))
     print(f"\ncusto medio de nunca ter visto a implementacao: "
           f"{custo.custo_pontos.mean():+.1f} pontos")
     print(custo.groupby("estrato").custo_pontos.mean().round(1).to_string())
-    custo.to_csv(Path(args.results_dir) / "custo_de_transferencia.csv", index=False)
+    custo.to_csv(Path(args.results_dir) / f"custo_de_transferencia_{args.split}.csv",
+                 index=False)
+
+
+def _cmd_disent_evaluate(args: argparse.Namespace) -> None:
+    from gefx.disent.train import evaluate_runs
+
+    raiz = Path(args.results_dir)
+    _write_table(evaluate_runs(raiz, args.run, split=args.split),
+                 raiz / f"escada_{args.split}.csv")
 
 
 def _cmd_disent_validate(args: argparse.Namespace) -> None:
@@ -483,8 +499,10 @@ def build_parser() -> argparse.ArgumentParser:
                                       "retreino.")
     disent_retrieve.add_argument("--output-root", default="datasets/disent_v2")
     disent_retrieve.add_argument("--results-dir", default="results/disent/v2/validacao",
-                                 help="Grava <results-dir>/<baseline>.{csv,json}, onde "
-                                      "a escada e as figuras os procuram.")
+                                 help="Grava <results-dir>/<baseline>_<split>.{csv,json}, "
+                                      "onde a escada e as figuras os procuram.")
+    disent_retrieve.add_argument("--split", default="validacao",
+                                 choices=["validacao", "teste"], help=_SPLIT_HELP)
     disent_retrieve.add_argument("--arm", action="append", default=None,
                                  help="Restringe o roster. Padrao: todos.")
     disent_retrieve.set_defaults(func=_cmd_disent_retrieve)
@@ -494,7 +512,9 @@ def build_parser() -> argparse.ArgumentParser:
     disent_plots.add_argument("--results-dir", default="results/disent/v2/validacao",
                               help="Baselines na raiz, o encoder em <results-dir>/encoder.")
     disent_plots.add_argument("--out-dir", default=None,
-                              help="Padrao: <results-dir>/figuras.")
+                              help="Padrao: <results-dir>/figuras_<split>.")
+    disent_plots.add_argument("--split", default="validacao",
+                              choices=["validacao", "teste"], help=_SPLIT_HELP)
     disent_plots.set_defaults(func=_cmd_disent_plots)
 
     disent_cache = disent_sub.add_parser(
@@ -562,7 +582,9 @@ def build_parser() -> argparse.ArgumentParser:
     disent_between.add_argument("--curves", default="results/disent/calibracao/curvas.csv")
     disent_between.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
     disent_between.add_argument("--output-root", default="datasets/disent_v2",
-                                help="Dataset da grade, de onde sai o catalogo.")
+                                help="Dataset da grade, de onde sai o catalogo (o do "
+                                     "teste: os pontos medios so existem para as "
+                                     "gravacoes de consulta, entao isto e da passada final).")
     disent_between.add_argument("--between-root", default="datasets/disent_v2_entre",
                                 help="Dataset das consultas nos pontos medios.")
     disent_between.add_argument("--run", action="append", default=None,
@@ -578,7 +600,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_probe.add_argument("--output-root", default="datasets/disent_v2")
     disent_probe.add_argument("--run", action="append", default=None,
                               help="Repetivel. Padrao: toda execucao em --results-dir.")
-    disent_probe.add_argument("--split", default="catalog",
+    disent_probe.add_argument("--split", default="val_catalog",
                               help="Particao sondada. O catalogo e o padrao porque "
                                    "e o que a busca de fato consulta.")
     disent_probe.add_argument("--folds", type=int, default=3)
@@ -596,6 +618,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Repetivel. Repete o leave-one-out inteiro com outra "
                                  "semente; e o unico jeito de por barra no custo por "
                                  "arm, que tem so 800 consultas.")
+    disent_loo.add_argument("--split", default="validacao",
+                            choices=["validacao", "teste"], help=_SPLIT_HELP)
     disent_loo.set_defaults(func=_cmd_disent_loo)
 
     disent_diversity = disent_sub.add_parser(
@@ -613,7 +637,21 @@ def build_parser() -> argparse.ArgumentParser:
     disent_diversity.add_argument("--reuse", default="results/disent/v2/validacao/encoder/loo",
                                   help="Diretorio do leave-one-out: o ultimo ponto da "
                                        "curva e a mesma execucao e nao e retreinado.")
+    disent_diversity.add_argument("--split", default="validacao",
+                                  choices=["validacao", "teste"], help=_SPLIT_HELP)
     disent_diversity.set_defaults(func=_cmd_disent_diversity)
+
+    disent_evaluate = disent_sub.add_parser(
+        "evaluate",
+        help="Avalia execucoes ja treinadas numa particao. E a passada final do teste, "
+             "com os modelos finais; o treino so le a validacao.",
+    )
+    disent_evaluate.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
+    disent_evaluate.add_argument("--run", action="append", default=None,
+                                 help="Repetivel. Padrao: toda execucao em --results-dir.")
+    disent_evaluate.add_argument("--split", default="teste",
+                                 choices=["validacao", "teste"], help=_SPLIT_HELP)
+    disent_evaluate.set_defaults(func=_cmd_disent_evaluate)
 
     disent_validate = disent_sub.add_parser(
         "validate", help="Confere que a grade esta cruzada e pareada entre os arms."

@@ -340,11 +340,15 @@ default) is the POC I CNN (`ARCHITECTURES["poc1"]`, tested layer by layer agains
   70.5% with content 7% / pedal 50% in the probes, the Dense(256) one 72.9% / 24% / 63%.
 
 Protocol: up to 20,000 steps, validation error (the test's cross-arm search, in dB) every
-500 steps, stop after 8 evaluations without improvement, keep the minimum's weights; the
-test is read once. Validation = 2 × 20 of the 240 train recordings (`val_query`,
-`val_catalog`), carved at load time by `grid.validation_recordings`, so the sidecar and
-the test split are unchanged. Defaults now write to `results/disent/v2/validacao/`
-(`scripts/poc2_validacao.sh`). Everything under `results/disent/v2/encoder/` and
+500 steps, stop after 8 evaluations without improvement, keep the minimum's weights.
+Validation = 2 × 20 of the 240 train recordings (`val_query`, `val_catalog`), carved at
+load time by `grid.validation_recordings`, so the sidecar and the test split are
+unchanged. **During development only the validation is read** (user's rule,
+2026-10-01): `train`, `retrieve`, `probe` (`val_catalog`), `loo`, `diversity` and
+`plots` default to it and write `*_validacao.*`. The test is read once, at the end, with
+the final models: `scripts/poc2_teste.sh` (`gefx disent evaluate --split teste`, the
+`--split teste` flags, `between`, which only exists on test recordings). Defaults write
+to `results/disent/v2/validacao/` (`scripts/poc2_validacao.sh`). Everything under `results/disent/v2/encoder/` and
 `escada/` used the old protocol (fixed steps, intermediate evaluations on the test, last
 step kept — which sometimes collapsed, e.g. 52–55% → 42% at the final step), and the
 ladder choices were made on the test split.

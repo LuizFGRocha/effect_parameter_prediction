@@ -14,6 +14,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from gefx.disent.grid import EVAL_SPLITS
 from gefx.disent.sidecar import EFFECT_FOLDER, read_dataset, split_frames
 
 LEVEL_AXES: Tuple[str, ...] = ("drive_level",)
@@ -199,6 +200,7 @@ def baseline_b0(
     root: Path,
     arms: Optional[Sequence[str]] = None,
     feature: str = "Spec",
+    split: str = "validacao",
 ) -> RetrievalResult:
     """B0: vizinho mais proximo na propria entrada do encoder, sem aprender nada.
 
@@ -207,14 +209,15 @@ def baseline_b0(
     """
     from gefx.disent.features import FeatureStore, PixelStandardizer
 
+    query_key, catalog_key = EVAL_SPLITS[split]
     frames = split_frames(Path(root), arms)
-    stores = {name: FeatureStore(Path(root), frame, feature)
-              for name, frame in frames.items()}
+    stores = {name: FeatureStore(Path(root), frames[name], feature)
+              for name in ("train", query_key, catalog_key)}
     standardizer = PixelStandardizer.fit(stores["train"])
     return retrieve_by_arm(
-        frames["query"], frames["catalog"],
-        standardized_rows(stores["query"], standardizer),
-        standardized_rows(stores["catalog"], standardizer),
+        frames[query_key], frames[catalog_key],
+        standardized_rows(stores[query_key], standardizer),
+        standardized_rows(stores[catalog_key], standardizer),
     )
 
 
@@ -230,7 +233,7 @@ def nearest_level(values: np.ndarray, ladder: np.ndarray) -> np.ndarray:
 def baseline_b1(
     root: Path,
     model_dir: Path = POC1_MODEL_DIR,
-    split: str = "query",
+    split: str = "validacao",
     arms: Optional[Sequence[str]] = None,
     feature_name: str = "Spec",
     batch: int = 256,
@@ -248,12 +251,7 @@ def baseline_b1(
     spec = EFFECT_PARAMETER_RANGES["distortion"][0]
     lo, hi = float(spec["min"]), float(spec["max"])
 
-    data = read_dataset(Path(root))
-    if arms is not None:
-        data = data[data["arm"].isin(list(arms))]
-    queries = data[data["split"] == split].reset_index(drop=True)
-    if queries.empty:
-        raise ValueError(f"nenhuma linha no split {split!r}")
+    queries = split_frames(Path(root), arms)[EVAL_SPLITS[split][0]]
 
     chain = load_trained_chain(model_dir)
     predicted = np.empty(len(queries), dtype=float)

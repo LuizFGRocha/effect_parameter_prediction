@@ -59,7 +59,11 @@ def _run(root, nome, technique, drive_exact, mae_db, seed=1):
         "summary": {"drive_exact": drive_exact, "mae_db": mae_db,
                     "same_arm_drive_exact": drive_exact + 0.01},
     }), encoding="utf-8")
-    (pasta / "metrics.json").write_text(json.dumps(_metrics()), encoding="utf-8")
+    metricas = _metrics()
+    metricas["overall"] = {**metricas["overall"], "drive_level": {"exact": drive_exact},
+                           "mae_db": mae_db}
+    metricas["same_arm_control"] = {"drive_level": {"exact": drive_exact + 0.01}}
+    (pasta / "metrics_validacao.json").write_text(json.dumps(metricas), encoding="utf-8")
 
 
 def test_build_all_writes_what_there_is_data_for(tmp_path):
@@ -100,14 +104,14 @@ def test_the_curve_averages_the_seeds_and_still_shows_them(tmp_path):
         (tmp_path / "encoder" / pasta).mkdir()
         dados = _curva()
         dados["drive_exact"] = dados["drive_exact"] + deslocamento
-        dados.to_csv(tmp_path / "encoder" / pasta / "resumo.csv", index=False)
+        dados.to_csv(tmp_path / "encoder" / pasta / "resumo_validacao.csv", index=False)
 
     nomes = {caminho.name for caminho in build_all(tmp_path)}
     assert "curva_de_diversidade.png" in nomes
 
 
 def test_the_ladder_takes_the_baselines_from_what_retrieve_wrote(tmp_path):
-    for nome in ("b0.json", "b1.json"):
+    for nome in ("b0_validacao.json", "b1_validacao.json"):
         (tmp_path / nome).write_text(json.dumps(_metrics()), encoding="utf-8")
     _run(tmp_path, "supcon", "supcon", 0.44, 3.8)
     nomes = {caminho.name for caminho in build_all(tmp_path)}

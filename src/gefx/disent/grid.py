@@ -21,6 +21,12 @@ VALIDATION_SPLITS: Tuple[str, ...] = ("val_query", "val_catalog")
 #: Gravacoes em cada lado da validacao: 2 x 20 das 240 de treino.
 VALIDATION_RECORDINGS = 20
 VALIDATION_SEED = 20260930
+#: As duas buscas: (consulta, catalogo). O desenvolvimento so le a validacao; o
+#: teste e lido uma vez, no fim, com os modelos finais (`gefx disent evaluate`).
+EVAL_SPLITS: Mapping[str, Tuple[str, str]] = {
+    "validacao": ("val_query", "val_catalog"),
+    "teste": ("query", "catalog"),
+}
 DEFAULT_SPLIT_FRACTIONS: Mapping[str, float] = {"train": 0.6, "catalog": 0.2, "query": 0.2}
 
 

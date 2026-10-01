@@ -15,7 +15,9 @@ Protocolo: ate `steps` passos, com o erro de validacao (a mesma busca do teste,
 em dB, sobre `val_query` e `val_catalog`) medido a cada `eval_every`. O treino
 para quando ele passa `patience` avaliacoes sem descer, e os pesos do minimo sao
 os que ficam -- a semantica de `keras.callbacks.EarlyStopping` com
-`restore_best_weights=True`. O teste so e lido uma vez, no fim, com esses pesos.
+`restore_best_weights=True`. O treino so le a validacao: as metricas que grava (`metrics_validacao.json`) sao
+dela. O teste fica para `evaluate_runs(split="teste")`, uma passada no fim com os
+modelos finais.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ from gefx.disent.features import FeatureStore, PixelStandardizer
 from gefx.disent.losses import DEFAULT_TEMPERATURE, sup_con_loss
 from gefx.disent.model import REGRESSION, WEIGHTS_FILE, EncoderConfig, build_model
 from gefx.disent.retrieval import alphabet, nearest_level, retrieve_by_arm, score
-from gefx.disent.grid import VALIDATION_RECORDINGS
+from gefx.disent.grid import EVAL_SPLITS, VALIDATION_RECORDINGS
 from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
 from gefx.disent.sidecar import split_frames
 
@@ -42,8 +44,16 @@ TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon", REGRESSION
 
 RESULTS_ROOT = Path("results/disent/v2/validacao/encoder")
 
-#: Arquivos de `gefx disent retrieve`, ao lado de `RESULTS_ROOT`.
-BASELINES: Dict[str, str] = {"B0": "b0.json", "B1": "b1.json"}
+#: Arquivos de `gefx disent retrieve`, ao lado de `RESULTS_ROOT`: `<nome>_<particao>.json`.
+BASELINES: Dict[str, str] = {"B0": "b0", "B1": "b1"}
+
+
+def metrics_file(split: str) -> str:
+    return f"metrics_{split}.json"
+
+
+def predictions_file(split: str) -> str:
+    return f"predictions_{split}.csv"
 
 
 @dataclass
@@ -157,32 +167,32 @@ def evaluate(
     stores: Mapping[str, FeatureStore],
     standardizer: PixelStandardizer,
     batch: int = 128,
+    split: str = "validacao",
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
     """A tarefa do POC II sobre o codigo aprendido, pelo mesmo caminho do B0."""
-    arms = set(frames["catalog"]["arm"].unique())
+    query_key, catalog_key = EVAL_SPLITS[split]
+    arms = set(frames[catalog_key]["arm"].unique())
     if len(arms) < 2:
         raise ValueError(
             f"a tarefa entre implementacoes precisa de ao menos 2 arms no "
             f"catalogo, ha {sorted(arms)}. Use evaluate_at_end=False e meca "
             f"por fora."
         )
-    z_query = embed(model, stores["query"], standardizer, batch)
-    z_catalog = embed(model, stores["catalog"], standardizer, batch)
+    queries, catalog = frames[query_key], frames[catalog_key]
+    z_query = embed(model, stores[query_key], standardizer, batch)
+    z_catalog = embed(model, stores[catalog_key], standardizer, batch)
     scalar = z_query.shape[1] == 1
 
     metric = "euclidean" if scalar else "cosine"
-    cross = retrieve_by_arm(
-        frames["query"], frames["catalog"], z_query, z_catalog,
-        same_arm=False, metric=metric,
-    )
-    same = retrieve_by_arm(
-        frames["query"], frames["catalog"], z_query, z_catalog,
-        same_arm=True, metric=metric,
-    )
+    cross = retrieve_by_arm(queries, catalog, z_query, z_catalog,
+                            same_arm=False, metric=metric)
+    same = retrieve_by_arm(queries, catalog, z_query, z_catalog,
+                           same_arm=True, metric=metric)
     metrics: Dict[str, object] = dict(cross.metrics)
+    metrics["split"] = split
     metrics["same_arm_control"] = same.metrics["overall"]
     if scalar:
-        metrics["direct_readout"] = direct_readout(frames, z_query[:, 0])
+        metrics["direct_readout"] = direct_readout(queries, frames["train"], z_query[:, 0])
     return cross.predictions, metrics
 
 
@@ -212,11 +222,10 @@ def validation_error(
             "same_arm": bool(same_arm)}
 
 
-def direct_readout(frames: Mapping[str, pd.DataFrame],
+def direct_readout(queries: pd.DataFrame, train_frame: pd.DataFrame,
                    predicted: np.ndarray) -> Dict[str, object]:
     """O regressor lido sem catalogo: o degrau da escada mais proximo, como no B1."""
-    queries = frames["query"]
-    lo, hi = drive_range(frames["train"])
+    lo, hi = drive_range(train_frame)
     drive_db = lo + predicted * (hi - lo)
     ladder = np.array(sorted(queries.groupby("drive_level")["drive_db_equivalente"].first()))
     out = pd.DataFrame({
@@ -324,7 +333,7 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
 
     if config.evaluate_at_end:
         predictions, metrics = evaluate(model, frames, stores, standardizer,
-                                        config.embed_batch)
+                                        config.embed_batch, split="validacao")
     else:
         predictions, metrics = None, None
     elapsed = time.time() - started
@@ -336,9 +345,9 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     standardizer.save(out_dir / "standardizer.npz")
     (out_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
     if metrics is not None:
-        predictions.to_csv(out_dir / "predictions.csv", index=False)
-        (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2),
-                                              encoding="utf-8")
+        predictions.to_csv(out_dir / predictions_file("validacao"), index=False)
+        (out_dir / metrics_file("validacao")).write_text(json.dumps(metrics, indent=2),
+                                                         encoding="utf-8")
 
     manifest = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -350,6 +359,7 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         "best_step": best["step"] or executed,
         "best_val_mae_db": best["mae_db"] if best["weights"] is not None else None,
         "checkpoints": checkpoints,
+        # Da validacao; o teste vai para `metrics_teste.json`, no fim.
         "summary": summarize(metrics) if metrics is not None else None,
     }
     (out_dir / "run.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -374,11 +384,11 @@ def summarize(metrics: Dict[str, object]) -> Dict[str, float]:
     return out
 
 
-def load_baselines(baselines_dir: Path) -> List[Dict[str, object]]:
+def load_baselines(baselines_dir: Path, split: str = "validacao") -> List[Dict[str, object]]:
     """Uma linha por baseline gravado, mais o acaso de drive tirado do alfabeto dele."""
     rows: List[Dict[str, object]] = []
-    for name, filename in BASELINES.items():
-        path = Path(baselines_dir) / filename
+    for name, stem in BASELINES.items():
+        path = Path(baselines_dir) / f"{stem}_{split}.json"
         if not path.exists():
             continue
         metrics = json.loads(path.read_text(encoding="utf-8"))
@@ -396,30 +406,68 @@ def compare(
     results_dir: Path = RESULTS_ROOT,
     runs: Optional[Sequence[str]] = None,
     baselines_dir: Optional[Path] = None,
+    split: str = "validacao",
 ) -> pd.DataFrame:
-    """A escada: baselines por cima, depois uma linha por execucao gravada.
+    """A escada numa particao: baselines por cima, depois uma linha por execucao.
 
-    Sem `runs`, pega toda subpasta com `run.json` avaliado, em ordem alfabetica. Os
-    baselines saem de `baselines_dir`, por padrao a pasta acima de `results_dir`.
+    Sem `runs`, pega toda subpasta com `run.json`, em ordem alfabetica; entram as
+    que ja foram avaliadas em `split`. Os baselines saem de `baselines_dir`, por
+    padrao a pasta acima de `results_dir`.
     """
     results_dir = Path(results_dir)
     if runs is None:
         runs = sorted(path.parent.name for path in results_dir.glob("*/run.json"))
-    rows = load_baselines(baselines_dir or results_dir.parent)
+    rows = load_baselines(baselines_dir or results_dir.parent, split)
     for name in runs:
         manifest_path = results_dir / name / "run.json"
-        if not manifest_path.exists():
+        metrics_path = results_dir / name / metrics_file(split)
+        if not (manifest_path.exists() and metrics_path.exists()):
             continue
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if not manifest.get("summary"):  # `evaluate_at_end=False`
-            continue
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         rows.append({
             "run": name,
             "technique": manifest["config"]["technique"],
             "seed": manifest["config"]["seed"],
             "time_pool": manifest["config"].get("encoder", {}).get("time_pool", "mean"),
-            **manifest["summary"],
+            **summarize(metrics),
             "steps": manifest["steps_executed"],
             "best_step": manifest.get("best_step"),
         })
     return pd.DataFrame(rows, columns=None if rows else ["run", "technique"])
+
+
+def evaluate_runs(
+    results_dir: Path = RESULTS_ROOT,
+    runs: Optional[Sequence[str]] = None,
+    split: str = "teste",
+    dataset_root: Optional[Path] = None,
+) -> pd.DataFrame:
+    """Avalia execucoes gravadas numa particao, com os pesos que o treino deixou.
+
+    E a passada final sobre o teste: grava `metrics_<split>.json` e
+    `predictions_<split>.csv` em cada execucao e devolve a escada dessa particao.
+    Le cada execucao com os arms e a validacao com que ela treinou.
+    """
+    from gefx.disent.probes import load_run
+
+    results_dir = Path(results_dir)
+    if runs is None:
+        runs = sorted(path.parent.name for path in results_dir.glob("*/run.json"))
+    for name in runs:
+        run_dir = results_dir / name
+        model, manifest = load_run(run_dir)
+        run_config = manifest["config"]
+        root = Path(dataset_root or run_config["dataset_root"])
+        frames = split_frames(root, run_config.get("arms"),
+                              run_config.get("validation_recordings", VALIDATION_RECORDINGS))
+        stores = {key: FeatureStore(root, frames[key], run_config["feature"])
+                  for key in EVAL_SPLITS[split]}
+        standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
+        predictions, metrics = evaluate(model, frames, stores, standardizer,
+                                        run_config.get("embed_batch", 128), split=split)
+        predictions.to_csv(run_dir / predictions_file(split), index=False)
+        metrics["git_revision"] = git_revision()
+        (run_dir / metrics_file(split)).write_text(json.dumps(metrics, indent=2),
+                                                  encoding="utf-8")
+    return compare(results_dir, runs, split=split)
