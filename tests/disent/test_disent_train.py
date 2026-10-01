@@ -23,7 +23,9 @@ from gefx.disent.train import (
 )
 
 ARMS = ("a0", "a1", "a2")
-CONTENTS = {"train": ["c0", "c1", "c2"], "catalog": ["c3", "c4"], "query": ["c5", "c6"]}
+# 2 x 20 gravacoes de treino vao para a validacao (`grid.VALIDATION_RECORDINGS`).
+CONTENTS = {"train": [f"t{i:02d}" for i in range(44)], "catalog": ["c3", "c4"],
+            "query": ["c5", "c6"]}
 DRIVES = (0, 1, 2, 3)
 SHAPE = (32, 24)
 
@@ -106,11 +108,24 @@ def test_the_default_output_directory_is_named_after_the_technique():
 
 
 # --- dados --------------------------------------------------------------------
-def test_split_frames_gives_the_three_partitions_with_disjoint_contents(tmp_path):
+def test_split_frames_gives_the_five_partitions_with_disjoint_contents(tmp_path):
     frames = split_frames(_dataset(tmp_path))
-    assert set(frames) == {"train", "catalog", "query"}
+    assert set(frames) == {"train", "val_query", "val_catalog", "catalog", "query"}
     for first, second in itertools.combinations(frames.values(), 2):
         assert not set(first["content_id"]) & set(second["content_id"])
+
+
+def test_the_validation_comes_out_of_the_train_and_never_out_of_the_test(tmp_path):
+    frames = split_frames(_dataset(tmp_path), validation=3)
+    validation = set(frames["val_query"]["content_id"]) | set(frames["val_catalog"]["content_id"])
+    assert len(set(frames["val_query"]["content_id"])) == 3
+    assert validation <= set(CONTENTS["train"])
+    assert set(frames["train"]["content_id"]) | validation == set(CONTENTS["train"])
+
+
+def test_the_validation_is_the_same_in_every_run(tmp_path):
+    first, second = split_frames(_dataset(tmp_path)), split_frames(_dataset(tmp_path))
+    assert first["val_query"].equals(second["val_query"])
 
 
 def test_split_frames_refuses_a_slice_that_empties_a_partition(tmp_path):
@@ -128,7 +143,8 @@ def test_a_run_writes_every_artifact_that_makes_it_reproducible(tmp_path):
         assert (out / name).exists(), name
     assert (out / "weights" / "encoder.weights.h5").exists()
     assert manifest["config"]["technique"] == "supcon"
-    assert manifest["splits"]["train"] == len(ARMS) * 3 * 4
+    assert manifest["splits"]["train"] == len(ARMS) * (len(CONTENTS["train"]) - 40) * 4
+    assert manifest["splits"]["val_query"] == len(ARMS) * 20 * 4
     assert set(manifest["summary"]) == {"drive_exact", "mae_db",
                                         "same_arm_drive_exact"}
 
@@ -328,3 +344,61 @@ def test_b0_searches_the_standardized_encoder_input_across_implementations(tmp_p
     assert not (result.predictions["query_arm"] == result.predictions["retrieved_arm"]).any()
     overall = result.metrics["overall"]
     assert overall["drive_level"]["exact"] > overall["drive_level"]["chance"]
+
+
+# --- parada pela validacao ----------------------------------------------------
+def _scripted_validation(monkeypatch, errors):
+    """Troca o erro de validacao por uma sequencia fixa e guarda os pesos de cada
+    avaliacao, para conferir quais o treino devolve."""
+    seen = []
+
+    def fake(model, *args, **kwargs):
+        seen.append([w.copy() for w in model.get_weights()])
+        return {"mae_db": errors[len(seen) - 1], "drive_exact": 0.0, "same_arm": False}
+
+    monkeypatch.setattr(train_module, "validation_error", fake)
+    return seen
+
+
+def test_training_stops_after_patience_evaluations_without_improvement(tmp_path, monkeypatch):
+    _scripted_validation(monkeypatch, [3.0, 2.0, 1.0, 1.5, 1.2, 0.5, 0.4])
+    manifest = train_module.train(
+        _config(tmp_path, steps=7, eval_every=1, patience=2), verbose=False)
+    assert manifest["steps_executed"] == 5
+    assert manifest["best_step"] == 3
+    assert manifest["best_val_mae_db"] == 1.0
+
+
+def test_the_weights_that_stay_are_those_of_the_validation_minimum(tmp_path, monkeypatch):
+    from gefx.disent.model import WEIGHTS_FILE, build_encoder
+
+    seen = _scripted_validation(monkeypatch, [3.0, 1.0, 2.0, 2.5])
+    config = _config(tmp_path, steps=4, eval_every=1, patience=2)
+    train_module.train(config, verbose=False)
+    model = build_encoder(config.encoder)
+    model.load_weights(tmp_path / "out" / WEIGHTS_FILE)
+    for saved, at_minimum in zip(model.get_weights(), seen[1]):
+        assert np.array_equal(saved, at_minimum)
+
+
+def test_patience_zero_runs_every_step(tmp_path, monkeypatch):
+    _scripted_validation(monkeypatch, [1.0, 2.0, 3.0, 4.0])
+    manifest = train_module.train(
+        _config(tmp_path, steps=4, eval_every=1, patience=0), verbose=False)
+    assert manifest["steps_executed"] == 4
+    assert manifest["best_step"] == 1
+
+
+def test_the_validation_error_is_the_test_search_on_the_validation_split(tmp_path):
+    from gefx.disent.features import FeatureStore, PixelStandardizer
+    from gefx.disent.model import build_encoder
+
+    config = _config(tmp_path)
+    frames = split_frames(config.dataset_root)
+    stores = {name: FeatureStore(config.dataset_root, frames[name], "Spec")
+              for name in ("train", "val_query", "val_catalog")}
+    result = train_module.validation_error(
+        build_encoder(config.encoder), frames, stores,
+        PixelStandardizer.fit(stores["train"]), batch=8)
+    assert result["same_arm"] is False
+    assert 0.0 <= result["drive_exact"] <= 1.0 and result["mae_db"] >= 0.0

@@ -10,6 +10,12 @@
   desvantagem artificial.
 
 Os quatro rodam pelo mesmo codigo, arquitetura, amostrador e semente.
+
+Protocolo: ate `steps` passos, com o erro de validacao (a mesma busca do teste,
+em dB, sobre `val_query` e `val_catalog`) medido a cada `eval_every`. O treino
+para quando ele passa `patience` avaliacoes sem descer, e os pesos do minimo sao
+os que ficam -- a semantica de `keras.callbacks.EarlyStopping` com
+`restore_best_weights=True`. O teste so e lido uma vez, no fim, com esses pesos.
 """
 from __future__ import annotations
 
@@ -28,12 +34,13 @@ from gefx.disent.features import FeatureStore, PixelStandardizer
 from gefx.disent.losses import DEFAULT_TEMPERATURE, sup_con_loss
 from gefx.disent.model import REGRESSION, WEIGHTS_FILE, EncoderConfig, build_model
 from gefx.disent.retrieval import alphabet, nearest_level, retrieve_by_arm, score
+from gefx.disent.grid import VALIDATION_RECORDINGS
 from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
 from gefx.disent.sidecar import split_frames
 
 TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon", REGRESSION)
 
-RESULTS_ROOT = Path("results/disent/v2/encoder")
+RESULTS_ROOT = Path("results/disent/v2/validacao/encoder")
 
 #: Arquivos de `gefx disent retrieve`, ao lado de `RESULTS_ROOT`.
 BASELINES: Dict[str, str] = {"B0": "b0.json", "B1": "b1.json"}
@@ -47,12 +54,17 @@ class TrainConfig:
     feature: str = "Spec"
     technique: str = "supcon"
     arms: Optional[Tuple[str, ...]] = None
-    steps: int = 4000
+    #: O teto. Acima do ponto em que as curvas de 16.000 passos se achataram (~10k).
+    steps: int = 20000
     configs_per_batch: int = 8
     views_per_config: int = 8
     learning_rate: float = 1e-3
     temperature: float = DEFAULT_TEMPERATURE
     eval_every: int = 500
+    #: Avaliacoes sem descer o erro de validacao antes de parar; 0 nao para.
+    patience: int = 8
+    #: Gravacoes de cada lado da validacao, tiradas do treino.
+    validation_recordings: int = VALIDATION_RECORDINGS
     embed_batch: int = 128
     seed: int = 20260908
     #: Sem isto a semente so fixa a inicializacao, e duas execucoes divergem.
@@ -174,6 +186,32 @@ def evaluate(
     return cross.predictions, metrics
 
 
+def validation_error(
+    model,
+    frames: Mapping[str, pd.DataFrame],
+    stores: Mapping[str, FeatureStore],
+    standardizer: PixelStandardizer,
+    batch: int = 128,
+) -> Dict[str, float]:
+    """A busca do teste sobre a validacao: o erro em dB que decide a parada.
+
+    Entre implementacoes, como o teste; com um arm so no treino (a curva de
+    diversidade), dentro dele, que e a unica busca possivel sem olhar o retirado.
+    """
+    queries, catalog = frames["val_query"], frames["val_catalog"]
+    z_query = embed(model, stores["val_query"], standardizer, batch)
+    z_catalog = embed(model, stores["val_catalog"], standardizer, batch)
+    same_arm = catalog["arm"].nunique() < 2
+    result = retrieve_by_arm(
+        queries, catalog, z_query, z_catalog, same_arm=same_arm,
+        metric="euclidean" if z_query.shape[1] == 1 else "cosine",
+    )
+    overall = result.metrics["overall"]
+    return {"mae_db": float(overall["mae_db"]),
+            "drive_exact": float(overall["drive_level"]["exact"]),
+            "same_arm": bool(same_arm)}
+
+
 def direct_readout(frames: Mapping[str, pd.DataFrame],
                    predicted: np.ndarray) -> Dict[str, object]:
     """O regressor lido sem catalogo: o degrau da escada mais proximo, como no B1."""
@@ -205,7 +243,7 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     keras.utils.set_random_seed(config.seed)
 
     root = Path(config.dataset_root)
-    frames = split_frames(root, config.arms)
+    frames = split_frames(root, config.arms, config.validation_recordings)
     stores = {
         name: FeatureStore(root, frame, config.feature)
         for name, frame in frames.items()
@@ -240,9 +278,12 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     rng = np.random.default_rng(config.seed)
     history: List[Dict[str, float]] = []
     checkpoints: List[Dict[str, object]] = []
+    best: Dict[str, object] = {"mae_db": float("inf"), "step": 0, "weights": None}
+    waited, executed = 0, 0
     started = time.time()
 
     for number in range(1, steps + 1):
+        executed = number
         batch = class_balanced_batch(
             index, rng, config.configs_per_batch, config.views_per_config
         )
@@ -258,16 +299,28 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
             if verbose and (number == 1 or number % 100 == 0):
                 print(f"  passo {number:5d}/{steps}  {config.technique}={loss:.4f}", flush=True)
 
-        if config.eval_every and number % config.eval_every == 0 and number < steps:
-            _, partial = evaluate(model, frames, stores, standardizer, config.embed_batch)
-            overall = partial["overall"]  # type: ignore[index]
-            checkpoints.append({"step": number,
-                                "drive_exact": overall["drive_level"]["exact"],
-                                "mae_db": overall["mae_db"]})
+        if config.eval_every and number % config.eval_every == 0:
+            validation = validation_error(model, frames, stores, standardizer,
+                                          config.embed_batch)
+            checkpoints.append({"step": number, **validation})
             if verbose:
-                print(f"  [avaliacao no passo {number}] "
-                      f"drive_exact={overall['drive_level']['exact']:.4f} "
-                      f"mae_db={overall['mae_db']:.2f}", flush=True)
+                print(f"  [validacao no passo {number}] "
+                      f"drive_exact={validation['drive_exact']:.4f} "
+                      f"mae_db={validation['mae_db']:.3f}", flush=True)
+            if validation["mae_db"] < best["mae_db"]:  # type: ignore[operator]
+                best = {"mae_db": validation["mae_db"], "step": number,
+                        "weights": model.get_weights()}
+                waited = 0
+            else:
+                waited += 1
+                if config.patience and waited >= config.patience:
+                    if verbose:
+                        print(f"  parada: {waited} avaliacoes sem descer desde o "
+                              f"passo {best['step']}", flush=True)
+                    break
+
+    if best["weights"] is not None:
+        model.set_weights(best["weights"])
 
     if config.evaluate_at_end:
         predictions, metrics = evaluate(model, frames, stores, standardizer,
@@ -293,7 +346,9 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         "elapsed_seconds": round(elapsed, 1),
         "config": config.as_dict(),
         "splits": {name: int(len(frame)) for name, frame in frames.items()},
-        "steps_executed": steps,
+        "steps_executed": executed,
+        "best_step": best["step"] or executed,
+        "best_val_mae_db": best["mae_db"] if best["weights"] is not None else None,
         "checkpoints": checkpoints,
         "summary": summarize(metrics) if metrics is not None else None,
     }
@@ -365,5 +420,6 @@ def compare(
             "time_pool": manifest["config"].get("encoder", {}).get("time_pool", "mean"),
             **manifest["summary"],
             "steps": manifest["steps_executed"],
+            "best_step": manifest.get("best_step"),
         })
     return pd.DataFrame(rows, columns=None if rows else ["run", "technique"])

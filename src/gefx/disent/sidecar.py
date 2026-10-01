@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from gefx.disent.grid import VALIDATION_RECORDINGS, VALIDATION_SPLITS, validation_recordings
+
 SIDECAR_FILENAME = "metadata.csv"
 EFFECT_FOLDER = "distortion"
 
@@ -66,10 +68,23 @@ def read_dataset(root: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def recording_of(frame: pd.DataFrame) -> pd.Series:
+    """A gravacao de cada linha; sem `source_audio_id`, o proprio conteudo."""
+    column = "source_audio_id" if "source_audio_id" in frame.columns else "content_id"
+    return frame[column].astype(str)
+
+
 def split_frames(
-    root: Path, arms: Optional[Sequence[str]] = None
+    root: Path,
+    arms: Optional[Sequence[str]] = None,
+    validation: int = VALIDATION_RECORDINGS,
 ) -> Dict[str, pd.DataFrame]:
-    """As tres particoes por conteudo, ja restritas aos arms pedidos."""
+    """As particoes por gravacao, ja restritas aos arms pedidos.
+
+    `train`, `catalog` e `query` vem do sidecar; `val_query` e `val_catalog` saem
+    do treino, `validation` gravacoes de cada lado (`grid.validation_recordings`),
+    e o que sobra e o `train`. A validacao nunca toca o teste.
+    """
     data = read_dataset(Path(root))
     if arms is not None:
         data = data[data["arm"].isin(list(arms))]
@@ -77,6 +92,12 @@ def split_frames(
         name: data[data["split"] == name].reset_index(drop=True)
         for name in ("train", "catalog", "query")
     }
+    if not frames["train"].empty:
+        sides = validation_recordings(recording_of(frames["train"]), validation)
+        train = frames["train"]
+        recording = recording_of(train)
+        for name in ("train", *VALIDATION_SPLITS):
+            frames[name] = train[recording.isin(sides[name])].reset_index(drop=True)
     empty = [name for name, frame in frames.items() if frame.empty]
     if empty:
         raise ValueError(f"particoes vazias: {empty}")
