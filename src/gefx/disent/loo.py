@@ -78,7 +78,7 @@ def leave_one_arm_out(
     root: Path = DEFAULT_ROOT,
     output_dir: Path = DEFAULT_OUTPUT,
     arms: Optional[Sequence[str]] = None,
-    steps: int = 4000,
+    steps: Optional[int] = None,
     seed: int = 20260908,
     seeds: Optional[Sequence[int]] = None,
     verbose: bool = True,
@@ -104,8 +104,9 @@ def leave_one_arm_out(
             if verbose:
                 print(f"[{held_out} fora, semente {semente}]", flush=True)
             if not (run_dir / "run.json").exists():
-                train(TrainConfig(dataset_root=root, arms=tuple(seen), steps=steps,
-                                  seed=semente, eval_every=0, output_dir=run_dir),
+                train(TrainConfig(dataset_root=root, arms=tuple(seen),
+                                  steps=steps or TrainConfig.steps, seed=semente,
+                                  output_dir=run_dir),
                       verbose=False)
             rows.extend(_evaluate_held_out(run_dir, root, held_out, seen,
                                            extra={"seed": semente}))
@@ -124,7 +125,7 @@ def arm_diversity_curve(
     root: Path = DEFAULT_ROOT,
     output_dir: Path = RESULTS_ROOT / "diversidade",
     order: Optional[Sequence[str]] = None,
-    steps: int = 4000,
+    steps: Optional[int] = None,
     seed: int = 20260908,
     reuse: Optional[Path] = DEFAULT_OUTPUT,
     verbose: bool = True,
@@ -156,9 +157,9 @@ def arm_diversity_curve(
             print(f"[k={k}] {', '.join(treinados)}", flush=True)
         if not (run_dir / "run.json").exists():
             # Quem pontua e o arm retirado, contra o catalogo fixo, logo abaixo.
-            train(TrainConfig(dataset_root=root, arms=tuple(treinados), steps=steps,
-                              seed=seed, eval_every=0, evaluate_at_end=False,
-                              output_dir=run_dir), verbose=False)
+            train(TrainConfig(dataset_root=root, arms=tuple(treinados),
+                              steps=steps or TrainConfig.steps, seed=seed,
+                              evaluate_at_end=False, output_dir=run_dir), verbose=False)
         novas = _evaluate_held_out(
             run_dir, root, held_out, treinados, catalog_arms=pool,
             extra={"k": k, "arms_treinados": "|".join(treinados),

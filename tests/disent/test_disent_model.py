@@ -152,3 +152,11 @@ def test_the_extra_dense_layers_keep_the_old_names_for_the_first():
 
 def test_the_default_architecture_is_the_report_encoder():
     assert ARCHITECTURES["poc2"] == EncoderConfig()
+
+
+def test_a_manifest_of_the_old_encoder_rebuilds_its_single_dense_layer():
+    """Os `run.json` do encoder com uma densa de 256 nao tem `trunk_layers`."""
+    old = {"input_shape": [32, 24, 1], "filters": [8, 16], "kernel_size": 3,
+           "trunk_units": 256, "dropout": 0.2, "effect_dim": 4}
+    config = EncoderConfig.from_dict(old)
+    assert (config.trunk_layers, config.trunk_units, config.time_pool) == (1, 256, "mean")

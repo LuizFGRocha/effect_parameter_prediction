@@ -243,6 +243,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             learning_rate=args.learning_rate,
             temperature=args.temperature,
             eval_every=args.eval_every,
+            patience=args.patience,
             seed=args.seed,
             deterministic=args.deterministic,
             output_dir=raiz / pasta,
@@ -481,7 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       "entrada do encoder. b1: regressor do POC I, sem "
                                       "retreino.")
     disent_retrieve.add_argument("--output-root", default="datasets/disent_v2")
-    disent_retrieve.add_argument("--results-dir", default="results/disent/v2",
+    disent_retrieve.add_argument("--results-dir", default="results/disent/v2/validacao",
                                  help="Grava <results-dir>/<baseline>.{csv,json}, onde "
                                       "a escada e as figuras os procuram.")
     disent_retrieve.add_argument("--arm", action="append", default=None,
@@ -490,7 +491,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     disent_plots = disent_sub.add_parser(
         "plots", help="Figuras dos baselines e do encoder, do que ja esta gravado.")
-    disent_plots.add_argument("--results-dir", default="results/disent/v2",
+    disent_plots.add_argument("--results-dir", default="results/disent/v2/validacao",
                               help="Baselines na raiz, o encoder em <results-dir>/encoder.")
     disent_plots.add_argument("--out-dir", default=None,
                               help="Padrao: <results-dir>/figuras.")
@@ -511,7 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     disent_train.add_argument("--output-root", default="datasets/disent_v2",
                               help="Raiz do dataset do POC II.")
-    disent_train.add_argument("--results-dir", default="results/disent/v2/encoder")
+    disent_train.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
     disent_train.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
     disent_train.add_argument("--technique", action="append", default=None,
                               choices=["supcon", "random_encoder", "bn_only",
@@ -522,13 +523,18 @@ def build_parser() -> argparse.ArgumentParser:
                                    "so, o drive em dB, por MSE.")
     disent_train.add_argument("--arm", action="append", default=None,
                               help="Restringe as implementacoes.")
-    disent_train.add_argument("--steps", type=int, default=4000)
+    disent_train.add_argument("--steps", type=int, default=20000,
+                              help="O teto; o treino para antes pela validacao.")
+    disent_train.add_argument("--patience", type=int, default=8,
+                              help="Avaliacoes sem descer o erro de validacao antes "
+                                   "de parar (0: roda todos os passos). Os pesos do "
+                                   "minimo sao os que ficam.")
     disent_train.add_argument("--configs-per-batch", type=int, default=8)
     disent_train.add_argument("--views-per-config", type=int, default=8)
     disent_train.add_argument("--learning-rate", type=float, default=1e-3)
     disent_train.add_argument("--temperature", type=float, default=0.07)
     disent_train.add_argument("--eval-every", type=int, default=500,
-                              help="0 desliga a avaliacao intermediaria.")
+                              help="0 desliga a validacao, e com ela a parada.")
     disent_train.add_argument("--seed", type=int, default=20260908,
                               help="Fora do padrao, grava em <tecnica>_s<semente>.")
     disent_train.add_argument("--deterministic", action="store_true",
@@ -554,7 +560,7 @@ def build_parser() -> argparse.ArgumentParser:
                                      "`render --levels` (com --split query).")
     disent_between.add_argument("--levels", default="experiments/disent_levels.yaml")
     disent_between.add_argument("--curves", default="results/disent/calibracao/curvas.csv")
-    disent_between.add_argument("--results-dir", default="results/disent/v2/encoder")
+    disent_between.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
     disent_between.add_argument("--output-root", default="datasets/disent_v2",
                                 help="Dataset da grade, de onde sai o catalogo.")
     disent_between.add_argument("--between-root", default="datasets/disent_v2_entre",
@@ -568,7 +574,7 @@ def build_parser() -> argparse.ArgumentParser:
         "probe",
         help="Sondas lineares sobre o z_e: que fatores o codigo ainda deixa ler.",
     )
-    disent_probe.add_argument("--results-dir", default="results/disent/v2/encoder")
+    disent_probe.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
     disent_probe.add_argument("--output-root", default="datasets/disent_v2")
     disent_probe.add_argument("--run", action="append", default=None,
                               help="Repetivel. Padrao: toda execucao em --results-dir.")
@@ -582,8 +588,9 @@ def build_parser() -> argparse.ArgumentParser:
     disent_loo = disent_sub.add_parser(
         "loo", help="Leave-one-arm-out: a transferencia para implementacao inedita.")
     disent_loo.add_argument("--output-root", default="datasets/disent_v2")
-    disent_loo.add_argument("--results-dir", default="results/disent/v2/encoder/loo")
-    disent_loo.add_argument("--steps", type=int, default=4000)
+    disent_loo.add_argument("--results-dir", default="results/disent/v2/validacao/encoder/loo")
+    disent_loo.add_argument("--steps", type=int, default=None,
+                            help="O teto de passos; padrao, o do train.")
     disent_loo.add_argument("--seed", type=int, default=20260908)
     disent_loo.add_argument("--extra-seed", type=int, action="append", default=None,
                             help="Repetivel. Repete o leave-one-out inteiro com outra "
@@ -597,12 +604,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     disent_diversity.add_argument("--output-root", default="datasets/disent_v2")
     disent_diversity.add_argument("--results-dir",
-                                  default="results/disent/v2/encoder/diversidade")
+                                  default="results/disent/v2/validacao/encoder/diversidade")
     disent_diversity.add_argument("--held-out", required=True,
                                   help="O arm que nunca entra no treino.")
-    disent_diversity.add_argument("--steps", type=int, default=4000)
+    disent_diversity.add_argument("--steps", type=int, default=None,
+                                  help="O teto de passos; padrao, o do train.")
     disent_diversity.add_argument("--seed", type=int, default=20260908)
-    disent_diversity.add_argument("--reuse", default="results/disent/v2/encoder/loo",
+    disent_diversity.add_argument("--reuse", default="results/disent/v2/validacao/encoder/loo",
                                   help="Diretorio do leave-one-out: o ultimo ponto da "
                                        "curva e a mesma execucao e nao e retreinado.")
     disent_diversity.set_defaults(func=_cmd_disent_diversity)

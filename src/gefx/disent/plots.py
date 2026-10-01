@@ -128,7 +128,7 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
     _save(fig, out_path)
 
 
-def build_all(results_dir: Path = Path("results/disent/v2"),
+def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
               out_dir: Optional[Path] = None) -> List[Path]:
     """As tres figuras do relatorio, as que tiverem dado em disco: a escada, o
     custo de transferencia (leave-one-arm-out) e a curva de diversidade.

@@ -1,17 +1,19 @@
 """O encoder do POC II: espectrograma -> `z_e`, o codigo de efeito.
 
-`z_e` e L2-normalizado porque a busca e por cosseno. O tronco tira a media so no
-eixo do tempo: o ajuste de distorcao e estacionario num segmento de dois
-segundos, e o que varia no tempo e o que foi tocado.
+`z_e` e L2-normalizado porque a busca e por cosseno.
 
-A media no tempo entrou por esse argumento, sem medicao. `time_pool` existe para
-a ablacao: `max` reduz o tempo com o mesmo tamanho de saida, e `flatten` o
-mantem inteiro (a `trunk_dense` fica ~8x maior), como a CNN do POC I.
+O encoder e a CNN do POC I (`ARCHITECTURES["poc1"]`, a rede de
+`training/architecture.py` com `experiments/base.yaml`, conferida camada a camada)
+com tres mudancas, cada uma medida num degrau da escada do POC I ao POC II
+(SupCon, 3 sementes, recuperacao entre implementacoes):
 
-`ARCHITECTURES["poc1"]` e a CNN do POC I (`training/architecture.py` com
-`experiments/base.yaml`) escrita neste tronco: com a cabeca do regressor, e a
-mesma rede camada a camada. E o ponto de partida da escada do POC I ao POC II,
-em que cada degrau muda uma coisa so.
+- media no eixo do tempo depois das convolucoes: +8,6 pontos, em toda semente;
+- filtros de (6, 12) para (32, 64): +3,1;
+- quatro blocos, (32, 64, 96, 128): +1,5.
+
+As duas densas de 64 do POC I ficam. Uma densa de 256 (o encoder anterior) dava
++1,5 ponto e mais que dobrava o conteudo legivel em `z_e` (19% -> 44%).
+`time_pool` continua configuravel para a ablacao (`max`, `flatten`).
 """
 from __future__ import annotations
 
@@ -20,6 +22,9 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
+
+#: Campos que os manifestos antigos nao tem, com o valor com que eles rodaram.
+LEGACY_FIELDS: Dict[str, object] = {"time_pool": "mean", "trunk_layers": 1}
 
 #: Como o tronco trata o eixo do tempo antes da camada densa.
 TIME_POOLS: Tuple[str, ...] = ("mean", "max", "flatten")
@@ -35,13 +40,12 @@ class EncoderConfig:
     input_shape: Tuple[int, int, int] = (256, 173, 1)
     filters: Tuple[int, ...] = DEFAULT_FILTERS
     kernel_size: int = 3
-    trunk_units: int = 256
+    trunk_units: int = 64
     dropout: float = 0.2
     effect_dim: int = 32
-    #: Manifestos anteriores a ablacao nao tem o campo: rodaram com a media.
     time_pool: str = "mean"
-    #: Camadas densas ocultas do tronco (o POC I tem duas). Idem: antes, uma.
-    trunk_layers: int = 1
+    #: Camadas densas ocultas do tronco, como as `n_full - 1` do POC I.
+    trunk_layers: int = 2
 
     def __post_init__(self) -> None:
         if self.time_pool not in TIME_POOLS:
@@ -56,6 +60,7 @@ class EncoderConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, object]) -> "EncoderConfig":
+        data = {**LEGACY_FIELDS, **data}
         return cls(**{k: tuple(v) if isinstance(v, list) else v  # type: ignore[arg-type]
                       for k, v in data.items()})
 
@@ -147,8 +152,8 @@ def build_model(config: EncoderConfig, technique: str):
     return build_regressor(config) if technique == REGRESSION else build_encoder(config)
 
 
-#: Arquiteturas nomeadas. `poc2` e o encoder do relatorio; `poc1`, a CNN do POC I:
-#: dois blocos de 6 e 12 filtros, sem reducao do tempo, duas densas de 64.
+#: Arquiteturas nomeadas. `poc2` e o encoder; `poc1`, a CNN do POC I: dois blocos
+#: de 6 e 12 filtros, sem reducao do tempo, duas densas de 64.
 ARCHITECTURES: Dict[str, EncoderConfig] = {
     "poc2": EncoderConfig(),
     "poc1": EncoderConfig(filters=(6, 12), time_pool="flatten", trunk_units=64,

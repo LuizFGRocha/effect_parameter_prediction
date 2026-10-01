@@ -4,7 +4,9 @@
   arm e sai do arquivo de niveis. Nao ha tone: a EQ propria de cada pedal, que
   em alguns muda com o ganho, impedia um fator de tone igual em todos.
 - A particao: treino / catalogo / consulta, disjuntas por conteudo, para a busca
-  nao acertar reconhecendo o que foi tocado.
+  nao acertar reconhecendo o que foi tocado. A validacao sai do treino, na
+  leitura (`validation_recordings`), com a mesma forma do teste: uma consulta e
+  um catalogo de gravacoes disjuntas.
 """
 from __future__ import annotations
 
@@ -14,6 +16,11 @@ from typing import Dict, List, Mapping, Sequence, Tuple
 import numpy as np
 
 SPLITS: Tuple[str, ...] = ("train", "catalog", "query")
+#: As particoes de validacao, tiradas do treino. Os nomes espelham as do teste.
+VALIDATION_SPLITS: Tuple[str, ...] = ("val_query", "val_catalog")
+#: Gravacoes em cada lado da validacao: 2 x 20 das 240 de treino.
+VALIDATION_RECORDINGS = 20
+VALIDATION_SEED = 20260930
 DEFAULT_SPLIT_FRACTIONS: Mapping[str, float] = {"train": 0.6, "catalog": 0.2, "query": 0.2}
 
 
@@ -77,3 +84,30 @@ def split_contents(
         "query": shuffled[n_train + n_catalog :],
     }
     return {name: [str(item) for item in items] for name, items in out.items()}
+
+
+def validation_recordings(
+    recordings: Sequence[str],
+    per_side: int = VALIDATION_RECORDINGS,
+    seed: int = VALIDATION_SEED,
+) -> Dict[str, List[str]]:
+    """Separa, das gravacoes de treino, as da consulta e as do catalogo de validacao.
+
+    Por gravacao, como o teste: os trechos de uma execucao ficam do mesmo lado. O
+    sorteio depende so da lista e da semente, entao a validacao e a mesma em toda
+    execucao sobre o mesmo dataset e os mesmos arms.
+    """
+    unique = sorted(set(recordings))
+    if per_side < 1:
+        raise ValueError("a validacao precisa de ao menos uma gravacao de cada lado")
+    if len(unique) <= 2 * per_side:
+        raise ValueError(
+            f"{len(unique)} gravacoes de treino nao comportam 2 x {per_side} de "
+            "validacao e ainda deixar treino"
+        )
+    shuffled = [str(item) for item in np.random.default_rng(seed).permutation(unique)]
+    return {
+        "val_query": shuffled[:per_side],
+        "val_catalog": shuffled[per_side : 2 * per_side],
+        "train": shuffled[2 * per_side :],
+    }
