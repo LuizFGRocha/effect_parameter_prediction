@@ -15,7 +15,16 @@ Protocolo: ate `steps` passos, com o erro de validacao (a mesma busca do teste,
 em dB, sobre `val_query` e `val_catalog`) medido a cada `eval_every`. O treino
 para quando ele passa `patience` avaliacoes sem descer, e os pesos do minimo sao
 os que ficam -- a semantica de `keras.callbacks.EarlyStopping` com
-`restore_best_weights=True`. O treino so le a validacao: as metricas que grava (`metrics_validacao.json`) sao
+`restore_best_weights=True` (Goodfellow et al. 2016, alg. 7.1; a paciencia longa
+segue Prechelt 1998, em que criterios mais lentos generalizam um pouco melhor).
+
+A taxa de aprendizado decai em cosseno ao longo de `steps`, de `learning_rate` a
+`learning_rate * lr_min_fraction`, como no `SupConLoss` oficial (`--cosine` em
+HobbitLong/SupContrast: ate `lr * 0.1 ** 3`). E o `keras.optimizers.schedules.
+CosineDecay`. O POC I tinha taxa fixa; com ela a validacao oscilava o bastante
+(0,08 dB no SupCon, 0,32 dB na regressao) para o minimo ser um vale isolado.
+
+O treino so le a validacao: as metricas que grava (`metrics_validacao.json`) sao
 dela. O teste fica para `evaluate_runs(split="teste")`, uma passada no fim com os
 modelos finais.
 """
@@ -69,10 +78,14 @@ class TrainConfig:
     configs_per_batch: int = 8
     views_per_config: int = 8
     learning_rate: float = 1e-3
+    #: "cosine" (o SupCon oficial) ou "constant" (o POC I).
+    lr_schedule: str = "cosine"
+    #: O fim do cosseno, em fracao da taxa inicial: `0.1 ** 3`, como no original.
+    lr_min_fraction: float = 1e-3
     temperature: float = DEFAULT_TEMPERATURE
     eval_every: int = 500
     #: Avaliacoes sem descer o erro de validacao antes de parar; 0 nao para.
-    patience: int = 8
+    patience: int = 16
     #: Gravacoes de cada lado da validacao, tiradas do treino.
     validation_recordings: int = VALIDATION_RECORDINGS
     embed_batch: int = 128
@@ -97,6 +110,24 @@ class TrainConfig:
 
 
 # --- passo de treino ----------------------------------------------------------
+def learning_rate(config: TrainConfig):
+    """A taxa de `config`: fixa, ou o `CosineDecay` do Keras ao longo de `steps`."""
+    import keras
+
+    if config.lr_schedule == "constant":
+        return config.learning_rate
+    if config.lr_schedule == "cosine":
+        return keras.optimizers.schedules.CosineDecay(
+            config.learning_rate, decay_steps=config.steps, alpha=config.lr_min_fraction)
+    raise ValueError(f"lr_schedule desconhecido: {config.lr_schedule!r}")
+
+
+def make_optimizer(config: TrainConfig):
+    import keras
+
+    return keras.optimizers.Adam(learning_rate=learning_rate(config))
+
+
 def make_step(model, optimizer, temperature: float):
     import tensorflow as tf
 
@@ -276,13 +307,11 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     if config.technique == "bn_only":
         step = make_bn_step(model)
     elif config.technique == REGRESSION:
-        optimizer = keras.optimizers.Adam(learning_rate=config.learning_rate)
-        step = make_regression_step(model, optimizer)
+        step = make_regression_step(model, make_optimizer(config))
         lo, hi = drive_range(index.frame)
         drive = ((index.frame["drive_db_equivalente"].to_numpy() - lo) / (hi - lo))
     else:
-        optimizer = keras.optimizers.Adam(learning_rate=config.learning_rate)
-        step = make_step(model, optimizer, config.temperature)
+        step = make_step(model, make_optimizer(config), config.temperature)
 
     rng = np.random.default_rng(config.seed)
     history: List[Dict[str, float]] = []

@@ -423,3 +423,22 @@ def test_the_final_pass_scores_the_saved_model_on_the_test(tmp_path):
     assert set(predictions["query_content"]) == set(CONTENTS["query"])
     assert list(table["run"]) == ["supcon"]
     assert json.loads((run_dir / "metrics_teste.json").read_text())["split"] == "teste"
+
+
+# --- a taxa de aprendizado ----------------------------------------------------
+def test_the_cosine_goes_from_the_rate_to_the_supcon_floor_over_the_budget():
+    """O `--cosine` do SupCon oficial: de `lr` a `lr * 0.1 ** 3` em `steps`."""
+    config = TrainConfig(steps=1000, learning_rate=1e-3)
+    schedule = train_module.learning_rate(config)
+    assert float(schedule(0)) == pytest.approx(1e-3)
+    assert float(schedule(500)) == pytest.approx(1e-3 * (1 + 1e-3) / 2, rel=1e-4)
+    assert float(schedule(1000)) == pytest.approx(1e-6, rel=1e-3)
+
+
+def test_the_constant_schedule_is_the_poc1_fixed_rate():
+    assert train_module.learning_rate(TrainConfig(lr_schedule="constant")) == 1e-3
+
+
+def test_an_unknown_schedule_is_refused():
+    with pytest.raises(ValueError, match="lr_schedule"):
+        train_module.learning_rate(TrainConfig(lr_schedule="step"))

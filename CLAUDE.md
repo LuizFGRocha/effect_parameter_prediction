@@ -339,8 +339,17 @@ default) is the POC I CNN (`ARCHITECTURES["poc1"]`, tested layer by layer agains
 - 16,000-step curves (1 seed) flatten after ~10k; at 16k the chosen encoder reached
   70.5% with content 7% / pedal 50% in the probes, the Dense(256) one 72.9% / 24% / 63%.
 
-Protocol: up to 20,000 steps, validation error (the test's cross-arm search, in dB) every
-500 steps, stop after 8 evaluations without improvement, keep the minimum's weights.
+Protocol: up to 20,000 steps with the learning rate on a cosine from 1e-3 to 1e-6 over the
+budget (`--cosine` of the official SupContrast, `lr * 0.1 ** 3`; Keras `CosineDecay`),
+validation error (the test's cross-arm search, in dB) every 500 steps, stop after 16
+evaluations without improvement (Prechelt 1998: slower criteria generalize slightly
+better), keep the minimum's weights (Goodfellow et al. 2016, alg. 7.1). The cosine and
+the longer patience came after the first validation runs: at POC I's fixed rate the
+validation curve jittered 0.08 dB (SupCon) / 0.32 dB (regression) between evaluations,
+so the minimum was an isolated dip (seed 1 stopped while the moving average still fell)
+and the regression's best-checkpoint number was optimistic (selection bias, Cawley &
+Talbot 2010). A moving average of the metric was considered and dropped: no published
+reference.
 Validation = 2 × 20 of the 240 train recordings (`val_query`, `val_catalog`), carved at
 load time by `grid.validation_recordings`, so the sidecar and the test split are
 unchanged. **During development only the validation is read** (user's rule,

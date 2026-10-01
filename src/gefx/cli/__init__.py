@@ -248,6 +248,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             temperature=args.temperature,
             eval_every=args.eval_every,
             patience=args.patience,
+            lr_schedule=args.lr_schedule,
             seed=args.seed,
             deterministic=args.deterministic,
             output_dir=raiz / pasta,
@@ -545,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Restringe as implementacoes.")
     disent_train.add_argument("--steps", type=int, default=20000,
                               help="O teto; o treino para antes pela validacao.")
-    disent_train.add_argument("--patience", type=int, default=8,
+    disent_train.add_argument("--patience", type=int, default=16,
                               help="Avaliacoes sem descer o erro de validacao antes "
                                    "de parar (0: roda todos os passos). Os pesos do "
                                    "minimo sao os que ficam.")
@@ -565,6 +566,10 @@ def build_parser() -> argparse.ArgumentParser:
                               help="poc2: o encoder do relatorio. poc1: a CNN do POC I "
                                    "(2 blocos de 6 e 12 filtros, sem media no tempo, "
                                    "duas densas de 64).")
+    disent_train.add_argument("--lr-schedule", default="cosine",
+                              choices=["cosine", "constant"],
+                              help="cosine: decai ate 0,001 x a taxa ao longo de --steps, "
+                                   "como o SupCon oficial. constant: a taxa fixa do POC I.")
     disent_train.add_argument("--time-pool", default=None,
                               choices=["mean", "max", "flatten"],
                               help="Reducao do eixo do tempo no tronco; sem isto, a da "
