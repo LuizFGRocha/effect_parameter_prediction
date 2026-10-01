@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Os resultados do POC II no protocolo com validacao: encoder `poc2` (a CNN do
-# POC I + media no tempo + filtros (32, 64, 96, 128)), ate 20.000 passos, parada
-# pelo erro de validacao com paciencia de 8 avaliacoes (4.000 passos), pesos do
-# minimo. Grava em results/disent/v2/validacao/.
+# O desenvolvimento do POC II: so a validacao. Encoder `poc2` (a CNN do POC I +
+# media no tempo + filtros (32, 64, 96, 128)), ate 20.000 passos, parada pelo erro
+# de validacao com paciencia de 8 avaliacoes (4.000 passos), pesos do minimo.
+# Grava em results/disent/v2/validacao/. O teste fica para scripts/poc2_teste.sh.
 #
 # Uso: bash scripts/poc2_validacao.sh    (~6 h de GPU)
 set -euo pipefail
@@ -21,8 +21,6 @@ done
 
 echo "== sondas $(date)"
 gefx disent probe
-echo "== entre niveis $(date)"
-gefx disent between --run supcon --run supcon_s2 --run supcon_s3
 echo "== figuras $(date)"
 gefx disent plots
 echo "== fim $(date)"

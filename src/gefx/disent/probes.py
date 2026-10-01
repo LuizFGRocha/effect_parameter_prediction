@@ -104,7 +104,7 @@ def load_run(run_dir: Path):
 def embed_run(
     run_dir: Path,
     dataset_root: Path = Path("datasets/disent_v2"),
-    split: str = "catalog",
+    split: str = "val_catalog",
     feature: str = "Spec",
 ):
     """`(manifesto, frame, z_e)` de uma execucao, com os arms e o padronizador dela."""
@@ -124,7 +124,7 @@ def probe_study(
     results_dir: Path,
     dataset_root: Path = Path("datasets/disent_v2"),
     runs: Optional[Sequence[str]] = None,
-    split: str = "catalog",
+    split: str = "val_catalog",
     folds: int = DEFAULT_FOLDS,
     seed: int = 0,
 ) -> pd.DataFrame:

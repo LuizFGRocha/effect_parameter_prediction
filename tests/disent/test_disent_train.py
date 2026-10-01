@@ -138,8 +138,8 @@ def test_split_frames_refuses_a_slice_that_empties_a_partition(tmp_path):
 def test_a_run_writes_every_artifact_that_makes_it_reproducible(tmp_path):
     manifest = train_module.train(_config(tmp_path), verbose=False)
     out = tmp_path / "out"
-    for name in ("run.json", "metrics.json", "history.json", "predictions.csv",
-                 "standardizer.npz"):
+    for name in ("run.json", "metrics_validacao.json", "history.json",
+                 "predictions_validacao.csv", "standardizer.npz"):
         assert (out / name).exists(), name
     assert (out / "weights" / "encoder.weights.h5").exists()
     assert manifest["config"]["technique"] == "supcon"
@@ -193,9 +193,9 @@ def test_the_retrieval_never_answers_with_the_arm_that_asked(tmp_path):
     """O protocolo inteiro: sem isso a rede poderia acertar sem atravessar
     implementacao nenhuma, que e a pergunta do trabalho."""
     train_module.train(_config(tmp_path), verbose=False)
-    predictions = pd.read_csv(tmp_path / "out" / "predictions.csv")
+    predictions = pd.read_csv(tmp_path / "out" / "predictions_validacao.csv")
     assert not (predictions["query_arm"] == predictions["retrieved_arm"]).any()
-    assert not set(predictions["query_content"]) & set(CONTENTS["catalog"])
+    assert set(predictions["query_content"]) <= set(CONTENTS["train"])
 
 
 def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_path, monkeypatch):
@@ -234,7 +234,7 @@ def test_the_scalar_control_trains_reloads_and_is_read_without_a_catalog(tmp_pat
     from gefx.disent.probes import embed_run
 
     manifest = train_module.train(_config(tmp_path, technique="regressao"), verbose=False)
-    metrics = json.loads((tmp_path / "out" / "metrics.json").read_text())
+    metrics = json.loads((tmp_path / "out" / "metrics_validacao.json").read_text())
     assert metrics["direct_readout"]["drive_level"]["chance"] == pytest.approx(0.25)
     assert {"direct_drive_exact", "direct_mae_db"} <= set(manifest["summary"])
     _, frame, codes = embed_run(tmp_path / "out", manifest["config"]["dataset_root"])
@@ -246,7 +246,7 @@ def test_the_direct_readout_maps_the_unit_interval_back_onto_the_ladder(tmp_path
     frames = split_frames(_dataset(tmp_path))
     queries = frames["query"]
     exact = queries["drive_level"].to_numpy() / (len(DRIVES) - 1)
-    readout = train_module.direct_readout(frames, exact)
+    readout = train_module.direct_readout(queries, frames["train"], exact)
     assert readout["drive_level"]["exact"] == pytest.approx(1.0)
     assert readout["mae_db"] == pytest.approx(0.0, abs=1e-9)
 
@@ -264,7 +264,7 @@ def test_compare_reads_the_runs_from_disk_without_retraining(tmp_path):
 def test_compare_puts_the_baselines_that_retrieve_wrote_on_top(tmp_path):
     metricas = {"overall": {"drive_level": {"exact": 0.21}, "mae_db": 8.1},
                 "alphabet": {"drive_level": 8}}
-    (tmp_path / "b0.json").write_text(json.dumps(metricas), encoding="utf-8")
+    (tmp_path / "b0_validacao.json").write_text(json.dumps(metricas), encoding="utf-8")
     table = compare(tmp_path / "encoder")
     assert list(table["run"]) == ["chance", "B0"]
     assert table.set_index("run").loc["chance", "drive_exact"] == pytest.approx(0.125)
@@ -402,3 +402,24 @@ def test_the_validation_error_is_the_test_search_on_the_validation_split(tmp_pat
         PixelStandardizer.fit(stores["train"]), batch=8)
     assert result["same_arm"] is False
     assert 0.0 <= result["drive_exact"] <= 1.0 and result["mae_db"] >= 0.0
+
+
+# --- validacao no desenvolvimento, teste so no fim ---------------------------
+def test_training_reads_only_the_validation(tmp_path):
+    train_module.train(_config(tmp_path), verbose=False)
+    out = tmp_path / "out"
+    frames = split_frames(_dataset(tmp_path / "data"))
+    predictions = pd.read_csv(out / "predictions_validacao.csv")
+    assert set(predictions["query_content"]) == set(frames["val_query"]["content_id"])
+    assert not list(out.glob("*teste*"))
+
+
+def test_the_final_pass_scores_the_saved_model_on_the_test(tmp_path):
+    train_module.train(_config(tmp_path, output_dir=tmp_path / "study" / "supcon"),
+                       verbose=False)
+    table = train_module.evaluate_runs(tmp_path / "study", split="teste")
+    run_dir = tmp_path / "study" / "supcon"
+    predictions = pd.read_csv(run_dir / "predictions_teste.csv")
+    assert set(predictions["query_content"]) == set(CONTENTS["query"])
+    assert list(table["run"]) == ["supcon"]
+    assert json.loads((run_dir / "metrics_teste.json").read_text())["split"] == "teste"

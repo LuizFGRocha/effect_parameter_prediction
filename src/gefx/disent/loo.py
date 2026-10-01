@@ -16,10 +16,16 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from gefx.disent.grid import EVAL_SPLITS
 from gefx.disent.train import RESULTS_ROOT
 
 DEFAULT_ROOT = Path("datasets/disent_v2")
 DEFAULT_OUTPUT = RESULTS_ROOT / "loo"
+
+
+def summary_file(split: str) -> str:
+    """O resumo de cada particao; as execucoes sao as mesmas, so a busca muda."""
+    return f"resumo_{split}.csv"
 
 
 def strata(root: Path) -> Dict[str, str]:
@@ -32,7 +38,8 @@ def strata(root: Path) -> Dict[str, str]:
 
 def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[str],
                        catalog_arms: Optional[Sequence[str]] = None, batch: int = 64,
-                       extra: Optional[Dict[str, object]] = None) -> List[Dict[str, object]]:
+                       extra: Optional[Dict[str, object]] = None,
+                       split: str = "validacao") -> List[Dict[str, object]]:
     from gefx.disent.probes import load_run
     from gefx.disent.features import FeatureStore, PixelStandardizer
     from gefx.disent.retrieval import center_by_arm, retrieve_by_arm
@@ -43,15 +50,16 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
     standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
 
     frames = split_frames(root)
+    query_key, catalog_key = EVAL_SPLITS[split]
     # Na curva de diversidade o catalogo fica fixo enquanto o treino cresce.
     pool = list(catalog_arms) if catalog_arms is not None else list(seen)
-    catalog = frames["catalog"][frames["catalog"]["arm"].isin(pool)]
+    catalog = frames[catalog_key][frames[catalog_key]["arm"].isin(pool)]
     catalog = catalog.reset_index(drop=True)
     z_catalog = embed(model, FeatureStore(root, catalog, "Spec"), standardizer, batch)
 
     rows: List[Dict[str, object]] = []
     for label, arms in (("transferencia", [held_out]), ("vistos", list(seen))):
-        queries = frames["query"][frames["query"]["arm"].isin(arms)].reset_index(drop=True)
+        queries = frames[query_key][frames[query_key]["arm"].isin(arms)].reset_index(drop=True)
         z_query = embed(model, FeatureStore(root, queries, "Spec"), standardizer, batch)
         # `centrado`: cada arm menos a propria media (`center_by_arm`), inclusive o
         # retirado, cuja media sai das consultas dele, sem rotulo.
@@ -64,8 +72,8 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
             overall = result.metrics["overall"]
             rows.append({
                 "arm_retirado": held_out,
-                "estrato": str(frames["query"].loc[frames["query"]["arm"] == held_out,
-                                                   "stratum"].iloc[0]),
+                "estrato": str(frames[query_key].loc[frames[query_key]["arm"] == held_out,
+                                                     "stratum"].iloc[0]),
                 "condicao": label, "centrado": centered, **(extra or {}),
                 "drive_exact": float(overall["drive_level"]["exact"]),
                 "within_one": float(overall["drive_level"]["within_one"]),
@@ -82,6 +90,7 @@ def leave_one_arm_out(
     seed: int = 20260908,
     seeds: Optional[Sequence[int]] = None,
     verbose: bool = True,
+    split: str = "validacao",
 ) -> pd.DataFrame:
     """Uma execucao por (arm retirado, semente); reaproveita o que ja esta em disco.
 
@@ -109,13 +118,13 @@ def leave_one_arm_out(
                                   output_dir=run_dir),
                       verbose=False)
             rows.extend(_evaluate_held_out(run_dir, root, held_out, seen,
-                                           extra={"seed": semente}))
+                                           extra={"seed": semente}, split=split))
             if verbose:
                 for row in rows[-4:]:
                     print(f"  {row['condicao']:14s} {'centrado' if row['centrado'] else '':8s} "
                           f"{row['drive_exact']*100:5.1f}%  "
                           f"{row['mae_db']:5.2f} dB", flush=True)
-            pd.DataFrame(rows).to_csv(output_dir / "resumo.csv", index=False)
+            pd.DataFrame(rows).to_csv(output_dir / summary_file(split), index=False)
     return pd.DataFrame(rows)
 
 
@@ -129,6 +138,7 @@ def arm_diversity_curve(
     seed: int = 20260908,
     reuse: Optional[Path] = DEFAULT_OUTPUT,
     verbose: bool = True,
+    split: str = "validacao",
 ) -> pd.DataFrame:
     """B2 e B3 na mesma curva: treinar com 1, 2, ... N-1 implementacoes.
 
@@ -165,6 +175,7 @@ def arm_diversity_curve(
             extra={"k": k, "arms_treinados": "|".join(treinados),
                    "estratos": len({estratos[arm] for arm in treinados}),
                    "run_dir": str(run_dir)},
+            split=split,
         )
         rows.extend(novas)
         if verbose:
@@ -172,7 +183,7 @@ def arm_diversity_curve(
                 print(f"  {row['condicao']:14s} {'centrado' if row['centrado'] else '':8s} "
                       f"{row['drive_exact']*100:5.1f}%  "
                       f"{row['mae_db']:5.2f} dB", flush=True)
-        pd.DataFrame(rows).to_csv(output_dir / "resumo.csv", index=False)
+        pd.DataFrame(rows).to_csv(output_dir / summary_file(split), index=False)
     return pd.DataFrame(rows)
 
 
@@ -185,7 +196,7 @@ def centered_rows(table: pd.DataFrame) -> pd.Series:
 
 def transfer_cost(
     loo: pd.DataFrame,
-    seen_metrics: Path = RESULTS_ROOT / "supcon" / "metrics.json",
+    seen_metrics: Path = RESULTS_ROOT / "supcon" / "metrics_validacao.json",
 ) -> pd.DataFrame:
     """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo
     no encoder treinado com todos."""

@@ -129,18 +129,19 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
 
 
 def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
-              out_dir: Optional[Path] = None) -> List[Path]:
+              out_dir: Optional[Path] = None, split: str = "validacao") -> List[Path]:
     """As tres figuras do relatorio, as que tiverem dado em disco: a escada, o
     custo de transferencia (leave-one-arm-out) e a curva de diversidade.
 
-    Baselines em `<results_dir>/b0.json` e `b1.json` (de `gefx disent retrieve`);
-    o encoder em `<results_dir>/encoder/`.
+    Baselines em `<results_dir>/b0_<split>.json` e `b1_<split>.json` (de `gefx
+    disent retrieve`); o encoder em `<results_dir>/encoder/`. Uma pasta de figuras
+    por particao: o teste so tem as suas depois da passada final.
     """
     from gefx.disent.train import compare
 
     results_dir = Path(results_dir)
     encoder_dir = results_dir / "encoder"
-    out_dir = Path(out_dir or results_dir / "figuras")
+    out_dir = Path(out_dir or results_dir / f"figuras_{split}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def carrega(caminho: Path):
@@ -153,21 +154,21 @@ def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
         desenha(*dados, alvo)
         escritos.append(alvo)
 
-    treinado = encoder_dir / "supcon" / "metrics.json"
+    treinado = encoder_dir / "supcon" / f"metrics_{split}.json"
     if not treinado.exists():
         return escritos
     metricas = carrega(treinado)
     chance = drive_chance(metricas)
 
-    grava("escada.png", plot_ladder, compare(encoder_dir, baselines_dir=results_dir),
+    grava("escada.png", plot_ladder, compare(encoder_dir, baselines_dir=results_dir, split=split),
           grid_step_db(metricas))
 
-    custo = encoder_dir / "loo" / "custo_de_transferencia.csv"
+    custo = encoder_dir / "loo" / f"custo_de_transferencia_{split}.csv"
     if custo.exists():
         grava("custo_de_transferencia.png", plot_transfer_cost, pd.read_csv(custo), chance)
 
     # Uma pasta por semente: `diversidade`, `diversidade_s2`, ...
-    curvas = sorted(encoder_dir.glob("diversidade*/resumo.csv"))
+    curvas = sorted(encoder_dir.glob(f"diversidade*/resumo_{split}.csv"))
     if curvas:
         dados = pd.concat([pd.read_csv(caminho) for caminho in curvas], ignore_index=True)
         arm = str(dados["arm_retirado"].iloc[0])
