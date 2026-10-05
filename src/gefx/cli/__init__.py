@@ -545,7 +545,7 @@ def build_parser() -> argparse.ArgumentParser:
                                    "so, o drive em dB, por MSE.")
     disent_train.add_argument("--arm", action="append", default=None,
                               help="Restringe as implementacoes.")
-    disent_train.add_argument("--steps", type=int, default=10000,
+    disent_train.add_argument("--steps", type=int, default=20000,
                               help="O teto; o treino para antes pela validacao.")
     disent_train.add_argument("--patience", type=int, default=16,
                               help="Avaliacoes sem descer o erro de validacao antes "
