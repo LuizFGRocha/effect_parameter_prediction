@@ -547,7 +547,7 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Restringe as implementacoes.")
     disent_train.add_argument("--steps", type=int, default=20000,
                               help="O teto; o treino para antes pela validacao.")
-    disent_train.add_argument("--patience", type=int, default=16,
+    disent_train.add_argument("--patience", type=int, default=0,
                               help="Avaliacoes sem descer o erro de validacao antes "
                                    "de parar (0: roda todos os passos). Os pesos do "
                                    "minimo sao os que ficam.")

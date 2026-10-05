@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # O desenvolvimento do POC II: so a validacao. Encoder `poc2` (a CNN do POC I +
 # media no tempo + filtros (32, 64, 96, 128)), ate 20.000 passos com a taxa em
-# cosseno (como o SupCon oficial), parada pelo erro de validacao com paciencia de
-# 16 avaliacoes (8.000 passos), pesos do minimo.
+# cosseno (como o SupCon oficial), rodado inteiro; ficam os pesos do minimo do erro
+# de validacao.
 # Grava em results/disent/v2/validacao/. O teste fica para scripts/poc2_teste.sh.
 #
 # Uso: bash scripts/poc2_validacao.sh    (~3 h de GPU, com o XLA)
