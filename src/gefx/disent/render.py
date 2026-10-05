@@ -1,4 +1,4 @@
-"""Renderizador da grade completa conteudo x configuracao x arm.
+"""Renderizador da grade completa conteudo x nivel de drive x arm.
 
 Cadeia de cada render, a do POC I:
 
@@ -13,7 +13,6 @@ de drive vem do arquivo de niveis; ele e o roster sao copiados para a raiz do da
 """
 from __future__ import annotations
 
-import json
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -24,7 +23,7 @@ import numpy as np
 
 from gefx.audio import export_audio, load_audio_file, normalize_loudness
 from gefx.disent.arms import DEFAULT_LEVELS, DEFAULT_ROSTER, Arm, LoadedArm, load_roster
-from gefx.disent.grid import Config, all_configs, render_name, split_contents
+from gefx.disent.grid import level_key, render_name, split_contents
 from gefx.disent.sidecar import (
     EFFECT_FOLDER,
     DisentRecord,
@@ -93,7 +92,6 @@ def content_items(options: RenderOptions) -> List[ContentItem]:
 def _render_chunk(
     spec: Arm,
     items: Sequence[ContentItem],
-    configs: Sequence[Config],
     reference_levels: Sequence[float],
     output_root: str,
     segment_seconds: float,
@@ -110,11 +108,10 @@ def _render_chunk(
         segment = normalize_loudness(
             audio[:, item.segment_start : item.segment_start + frames], sr
         )
-        for index, config in enumerate(configs):
-            drive = spec.levels[config.drive_level]
+        for level, drive in enumerate(spec.levels):
             wet = normalize_loudness(loaded.render(segment, sr, drive), sr)
 
-            name = render_name(item.content_id, config, index)
+            name = render_name(item.content_id, level)
             export_audio(wet, sr, folder / name)
             rows.append(
                 DisentRecord(
@@ -124,12 +121,12 @@ def _render_chunk(
                     content_id=item.content_id,
                     source_audio_id=Path(item.source_path).name,
                     segment_start=item.segment_start,
-                    config_index=index,
-                    config_key=config.key,
-                    drive_level=config.drive_level,
+                    config_index=level,
+                    config_key=level_key(level),
+                    drive_level=level,
                     drive_knob=float(drive),
                     # Pareado pelo Rnonlin: o nivel vale o que a referencia vale nele.
-                    drive_db_equivalente=float(reference_levels[config.drive_level]),
+                    drive_db_equivalente=float(reference_levels[level]),
                     split=item.split,
                 ).as_row()
             )
@@ -151,10 +148,10 @@ def render(options: RenderOptions) -> Dict[str, int]:
     items = content_items(options)
     if options.splits:
         items = [item for item in items if item.split in options.splits]
-    configs = all_configs(roster.drive_levels)
+    levels = roster.drive_levels
     print(f"{len(items)} conteudos ({options.n_contents} gravacoes x "
-          f"{options.segments_per_file} trechos) x {len(configs)} configuracoes x {len(arms)} arms "
-          f"= {len(items) * len(configs) * len(arms)} renders")
+          f"{options.segments_per_file} trechos) x {levels} niveis x {len(arms)} arms "
+          f"= {len(items) * levels * len(arms)} renders")
 
     root.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(options.roster, root / "roster.yaml")
@@ -165,7 +162,7 @@ def render(options: RenderOptions) -> Dict[str, int]:
         with ProcessPoolExecutor(max_workers=options.workers) as pool:
             futures = [
                 pool.submit(
-                    _render_chunk, spec, chunk, configs, roster.reference_levels(),
+                    _render_chunk, spec, chunk, roster.reference_levels(),
                     str(root), options.segment_seconds,
                 )
                 for chunk in chunks
@@ -176,10 +173,6 @@ def render(options: RenderOptions) -> Dict[str, int]:
         write_sidecar(root / spec.key / SIDECAR_FILENAME, [DisentRecord(**row) for row in rows])
         totals[spec.key] = len(rows)
         print(f"  {spec.key:16s} {len(rows)} renders")
-
-    (root / "content_items.json").write_text(
-        json.dumps([item.__dict__ for item in items], indent=2), encoding="utf-8"
-    )
 
     summary = validate_pairing(root)
     print(f"grade pareada: {summary}")

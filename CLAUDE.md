@@ -268,7 +268,10 @@ less new code.
 - Confidence intervals by recording: `scipy.stats.bootstrap(..., paired=True)` over
   per-recording means (valid because every recording has the same number of queries in
   the crossed grid). It reproduced RnC vs SupCon, +0.26 [−1.05; +1.57]; don't write our
-  own grouped bootstrap again.
+  own grouped bootstrap again. It lives in `gefx/disent/bootstrap.py`, run as
+  `gefx disent compare --a <run> ... --b <run> ...` (one pair per seed plus the seeds
+  pooled per recording); it reproduces SupCon − regression on validation, +3.15
+  [+1.17; +4.95] (with the patience-16 SupCon s3 in `validacao/teto/paciencia16/`).
 - Migrating to PyTorch (+ pytorch-metric-learning, whose `SupConLoss` and
   `AccuracyCalculator` match ours numerically) was evaluated on 2026-09-28 and **not
   done**: it would cut ~200 lines but require re-running every POC II result and keeping
@@ -342,7 +345,15 @@ default) is the POC I CNN (`ARCHITECTURES["poc1"]`, tested layer by layer agains
   validation split, the cosine and best-checkpoint selection, so HEAD can't reproduce
   them whatever the options; check out 501e018 / 617ea20 for that. Their exclusive
   options (`time_pool="max"`, the fixed rate `lr_schedule="constant"`, `--time-pool`)
-  were removed; `poc1` and `flatten` stay.
+  were removed. HEAD also no longer loads their runs (nor the old `encoder/` ones):
+  the defaults for manifests without `time_pool`/`trunk_layers` and for LOO summaries
+  without `centrado` were removed on 2026-10-05.
+- **The ladder is rerun under the current protocol** (decided 2026-10-05, so the
+  encoder choices no longer rest on the test split): every rung is a named
+  architecture (`ARCHITECTURES`, in order, each one field away from the previous:
+  `poc1`, `poc1_media`, `poc1_media_largo`, `poc2`; `--arch`), and
+  `scripts/poc2_escada.sh` trains them over 3 seeds into
+  `results/disent/v2/validacao/escada/<rung>/` (`poc2` is `validacao/encoder/`).
 
 Protocol: up to 20,000 steps with the learning rate on a cosine from 1e-3 to 1e-6 over the
 budget (`--cosine` of the official SupContrast, `lr * 0.1 ** 3`; Keras `CosineDecay`),

@@ -4,16 +4,16 @@
 
 O encoder e a CNN do POC I (`ARCHITECTURES["poc1"]`, a rede de
 `training/architecture.py` com `experiments/base.yaml`, conferida camada a camada)
-com tres mudancas, cada uma medida num degrau da escada do POC I ao POC II
-(SupCon, 3 sementes, recuperacao entre implementacoes):
+com tres mudancas, uma por degrau da escada do POC I ao POC II (`ARCHITECTURES`,
+na ordem; `scripts/poc2_escada.sh` roda cada degrau):
 
-- media no eixo do tempo depois das convolucoes: +8,6 pontos, em toda semente;
-- filtros de (6, 12) para (32, 64): +3,1;
-- quatro blocos, (32, 64, 96, 128): +1,5.
+- media no eixo do tempo depois das convolucoes (`poc1_media`);
+- filtros de (6, 12) para (32, 64) (`poc1_media_largo`);
+- quatro blocos, (32, 64, 96, 128) (`poc2`).
 
 As duas densas de 64 do POC I ficam. Uma densa de 256 (o encoder anterior) dava
-+1,5 ponto e mais que dobrava o conteudo legivel em `z_e` (19% -> 44%).
-`time_pool="flatten"` (sem reducao) fica para a CNN do POC I.
++1,5 ponto e mais que dobrava o conteudo legivel em `z_e` (19% -> 44%; protocolo
+antigo, no teste). `time_pool="flatten"` (sem reducao) e o da CNN do POC I.
 """
 from __future__ import annotations
 
@@ -22,9 +22,6 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
-
-#: Campos que os manifestos antigos nao tem, com o valor com que eles rodaram.
-LEGACY_FIELDS: Dict[str, object] = {"time_pool": "mean", "trunk_layers": 1}
 
 #: Como o tronco trata o eixo do tempo antes da camada densa. O `max` da ablacao
 #: (`results/disent/v2/ablacao_tempo/`) saiu: perdeu para a media.
@@ -61,7 +58,6 @@ class EncoderConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, object]) -> "EncoderConfig":
-        data = {**LEGACY_FIELDS, **data}
         return cls(**{k: tuple(v) if isinstance(v, list) else v  # type: ignore[arg-type]
                       for k, v in data.items()})
 
@@ -98,7 +94,7 @@ def build_trunk(config: EncoderConfig):
             name="time_pool",
         )(x)
     x = layers.Flatten(name="flat")(x)
-    # A primeira camada guarda os nomes antigos, para os pesos gravados carregarem.
+    # Os nomes (`trunk_dense`, `trunk_dense1`) estao nos pesos gravados.
     for index in range(config.trunk_layers):
         suffix = str(index) if index else ""
         x = layers.Dense(config.trunk_units, activation="relu",
@@ -146,10 +142,12 @@ def build_model(config: EncoderConfig, technique: str):
     return build_regressor(config) if technique == REGRESSION else build_encoder(config)
 
 
-#: Arquiteturas nomeadas. `poc2` e o encoder; `poc1`, a CNN do POC I: dois blocos
-#: de 6 e 12 filtros, sem reducao do tempo, duas densas de 64.
+#: A escada do POC I ao POC II, na ordem: cada degrau muda um campo do anterior.
+#: `poc1` e a CNN do POC I (dois blocos de 6 e 12 filtros, sem reducao do tempo,
+#: duas densas de 64); `poc2`, o encoder do relatorio.
 ARCHITECTURES: Dict[str, EncoderConfig] = {
+    "poc1": EncoderConfig(filters=(6, 12), time_pool="flatten"),
+    "poc1_media": EncoderConfig(filters=(6, 12)),
+    "poc1_media_largo": EncoderConfig(filters=(32, 64)),
     "poc2": EncoderConfig(),
-    "poc1": EncoderConfig(filters=(6, 12), time_pool="flatten", trunk_units=64,
-                          trunk_layers=2),
 }

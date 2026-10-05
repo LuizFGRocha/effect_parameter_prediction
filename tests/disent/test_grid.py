@@ -7,31 +7,18 @@ import pytest
 from gefx.disent.grid import (
     DEFAULT_SPLIT_FRACTIONS,
     SPLITS,
-    Config,
-    all_configs,
+    level_key,
     render_name,
     split_contents,
 )
-
-DRIVE_LEVELS = 8
-
-
-def test_grid_has_the_declared_size():
-    configs = all_configs(DRIVE_LEVELS)
-    assert len(configs) == DRIVE_LEVELS
-    assert len(set(configs)) == len(configs)
-
-
-def test_canonical_order_is_the_drive_level():
-    assert all_configs(3) == [Config(0), Config(1), Config(2)]
-
 
 # --- nome do render -----------------------------------------------------------
 def test_render_name_is_identical_across_arms():
     # O nome nao carrega o arm: e o que permite ao oraculo parear <A>/<n> com
     # <B>/<n> sabendo que so a implementacao mudou.
-    config = Config(3)
-    assert render_name("src", config, 7) == "src__d3__00007.wav"
+    # O indice e o proprio nivel: os nomes do `disent_v2` saem iguais.
+    assert render_name("src", 3) == "src__d3__00003.wav"
+    assert level_key(3) == "d3"
 
 
 # --- particao ------------------------------------------------------------------

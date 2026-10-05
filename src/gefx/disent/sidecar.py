@@ -68,12 +68,6 @@ def read_dataset(root: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def recording_of(frame: pd.DataFrame) -> pd.Series:
-    """A gravacao de cada linha; sem `source_audio_id`, o proprio conteudo."""
-    column = "source_audio_id" if "source_audio_id" in frame.columns else "content_id"
-    return frame[column].astype(str)
-
-
 def split_frames(
     root: Path,
     arms: Optional[Sequence[str]] = None,
@@ -94,7 +88,7 @@ def split_frames(
     }
     if not frames["train"].empty:
         train = frames["train"]
-        recording = recording_of(train)
+        recording = train["source_audio_id"].astype(str)
         sides = validation_recordings(recording, validation)
         for name in ("train", *VALIDATION_SPLITS):
             frames[name] = train[recording.isin(sides[name])].reset_index(drop=True)

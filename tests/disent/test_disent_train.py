@@ -49,6 +49,8 @@ def _dataset(tmp_path, seed=0):
                         "arm": arm,
                         "stratum": "S1",
                         "content_id": content,
+                        "source_audio_id": f"{content}.wav",
+                    "source_audio_id": f"{content}.wav",
                         "config_index": drive,
                         "config_key": f"d{drive}",
                         "drive_level": drive,

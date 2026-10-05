@@ -6,7 +6,6 @@ import pandas as pd
 import pytest
 
 from gefx.disent.retrieval import (
-    LEVEL_AXES,
     alphabet,
     nearest,
     retrieve,
@@ -65,6 +64,7 @@ def _frame(arm, contents, split, levels=(0, 1, 2, 3)):
                     "arm": arm,
                     "stratum": "S1",
                     "content_id": content,
+                    "source_audio_id": f"{content}.wav",
                     "split": split,
                     "config_index": drive,
                     "drive_level": drive,
@@ -144,7 +144,6 @@ def test_alphabet_reads_the_slice_and_not_the_full_grid():
     # inflaria o resultado.
     frame = _frame("a", ["c1"], "query", levels=(0, 1))
     assert alphabet(frame) == {"drive_level": 2}
-    assert set(alphabet(frame)) == set(LEVEL_AXES)
 
 
 def _multi_arm(arms, contents, split):

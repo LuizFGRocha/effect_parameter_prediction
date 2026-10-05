@@ -26,7 +26,7 @@ def _resumo():
          "drive_exact": 0.139, "mae_db": 11.18, "n": 800},
         {"arm_retirado": "byod-bigmuff", "estrato": "S3", "condicao": "vistos",
          "drive_exact": 0.533, "mae_db": 2.44, "n": 4800},
-    ])
+    ]).assign(centrado=False)
 
 
 def _metrics(tmp_path):
@@ -64,7 +64,7 @@ def test_an_arm_missing_from_the_reference_is_skipped(tmp_path):
     resumo = _resumo()
     resumo.loc[len(resumo)] = {"arm_retirado": "arm-novo", "condicao": "transferencia",
                                "drive_exact": 0.4, "mae_db": 3.0, "n": 800,
-                               "estrato": "S2"}
+                               "estrato": "S2", "centrado": False}
     assert "arm-novo" not in set(transfer_cost(resumo, _metrics(tmp_path))["arm"])
 
 
@@ -183,7 +183,7 @@ def test_leave_one_out_trains_on_the_dataset_it_evaluates(tmp_path, monkeypatch)
 
 def test_transfer_cost_leaves_out_the_centered_search(tmp_path):
     """O custo e o da busca como esta; a centrada e outra pergunta."""
-    resumo = _resumo().assign(centrado=False)
+    resumo = _resumo()
     centrada = resumo.assign(centrado=True, drive_exact=0.99)
     custo = transfer_cost(pd.concat([resumo, centrada]), _metrics(tmp_path)).set_index("arm")
     assert custo.loc["lsp-tanh", "custo_pontos"] == pytest.approx(2.2, abs=0.05)

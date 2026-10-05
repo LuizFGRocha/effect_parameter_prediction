@@ -189,13 +189,6 @@ def arm_diversity_curve(
     return pd.DataFrame(rows)
 
 
-def centered_rows(table: pd.DataFrame) -> pd.Series:
-    """Linhas da busca com `center_by_arm`; resumos antigos nao tem a coluna."""
-    if "centrado" not in table.columns:
-        return pd.Series(False, index=table.index)
-    return table["centrado"].astype(str).str.lower() == "true"
-
-
 def transfer_cost(
     loo: pd.DataFrame,
     seen_metrics: Path = RESULTS_ROOT / "supcon" / metrics_file("validacao"),
@@ -203,7 +196,7 @@ def transfer_cost(
     """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo
     no encoder treinado com todos."""
     reference = json.loads(Path(seen_metrics).read_text(encoding="utf-8"))["per_query_arm"]
-    transferencia = loo[(loo["condicao"] == "transferencia") & ~centered_rows(loo)]
+    transferencia = loo[(loo["condicao"] == "transferencia") & ~loo["centrado"].astype(bool)]
     rows: List[Dict[str, object]] = []
     for arm, grupo in transferencia.groupby("arm_retirado", sort=False):
         arm = str(arm)

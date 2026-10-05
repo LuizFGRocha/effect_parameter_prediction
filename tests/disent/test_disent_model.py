@@ -76,12 +76,6 @@ def test_flatten_keeps_the_time_axis_and_the_mean_does_not():
     assert dense_inputs("flatten") > dense_inputs("mean")
 
 
-def test_a_manifest_from_before_the_ablation_loads_with_the_mean():
-    """Os `run.json` anteriores nao tem `time_pool`: rodaram com a media."""
-    old = {k: v for k, v in SMALL.as_dict().items() if k != "time_pool"}
-    assert EncoderConfig.from_dict(old).time_pool == "mean"
-
-
 def test_an_unknown_time_pool_is_refused():
     with pytest.raises(ValueError):
         EncoderConfig(time_pool="max")
@@ -141,8 +135,7 @@ def test_the_poc1_encoder_changes_only_the_head():
     assert encoder[-2][0] == "Dense" and encoder[-1][0] == "UnitNormalization"
 
 
-def test_the_extra_dense_layers_keep_the_old_names_for_the_first():
-    """Os pesos gravados com uma densa so continuam a carregar."""
+def test_the_dense_layers_keep_the_names_of_the_saved_weights():
     model = build_encoder(EncoderConfig(**{**SMALL.as_dict(), "trunk_layers": 2}))
     names = {layer.name for layer in model.layers}
     assert {"trunk_dense", "trunk_dense1"} <= names
@@ -152,9 +145,11 @@ def test_the_default_architecture_is_the_report_encoder():
     assert ARCHITECTURES["poc2"] == EncoderConfig()
 
 
-def test_a_manifest_of_the_old_encoder_rebuilds_its_single_dense_layer():
-    """Os `run.json` do encoder com uma densa de 256 nao tem `trunk_layers`."""
-    old = {"input_shape": [32, 24, 1], "filters": [8, 16], "kernel_size": 3,
-           "trunk_units": 256, "dropout": 0.2, "effect_dim": 4}
-    config = EncoderConfig.from_dict(old)
-    assert (config.trunk_layers, config.trunk_units, config.time_pool) == (1, 256, "mean")
+def test_each_rung_of_the_ladder_changes_one_thing():
+    """A escada so mede uma mudanca por degrau se cada um diferir do anterior num
+    campo so, e ela vai do POC I ao encoder."""
+    rungs = [config.as_dict() for config in ARCHITECTURES.values()]
+    for before, after in zip(rungs, rungs[1:]):
+        assert sum(before[key] != after[key] for key in before) == 1
+    assert list(ARCHITECTURES)[0] == "poc1" and list(ARCHITECTURES)[-1] == "poc2"
+

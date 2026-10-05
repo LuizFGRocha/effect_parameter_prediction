@@ -82,7 +82,7 @@ def test_build_all_of_an_empty_directory_writes_nothing(tmp_path):
 def _curva():
     return pd.DataFrame([
         {"arm_retirado": "byod-mxr", "condicao": condicao, "k": k, "estratos": estratos,
-         "drive_exact": acerto, "mae_db": 4.0, "n": 800}
+         "drive_exact": acerto, "mae_db": 4.0, "n": 800, "centrado": False}
         for k, estratos, acerto in [(1, 1, 0.20), (3, 2, 0.28), (6, 3, 0.33)]
         for condicao, acerto in (("transferencia", acerto), ("vistos", acerto + 0.1))
     ])

@@ -312,6 +312,15 @@ def _cmd_disent_evaluate(args: argparse.Namespace) -> None:
                  raiz / split_file("escada", args.split, "csv"))
 
 
+def _cmd_disent_compare(args: argparse.Namespace) -> None:
+    from gefx.disent.bootstrap import compare_runs
+
+    tabela = compare_runs([Path(run) for run in args.a], [Path(run) for run in args.b],
+                          split=args.split)
+    print(f"acerto exato do nivel (%), A - B com IC95% por gravacao, {args.split}:")
+    print(tabela.to_string(index=False))
+
+
 def _cmd_disent_validate(args: argparse.Namespace) -> None:
     from gefx.disent.sidecar import validate_pairing
 
@@ -564,9 +573,10 @@ def build_parser() -> argparse.ArgumentParser:
                                    "isto a semente fixa so a inicializacao e duas execucoes "
                                    "identicas divergem.")
     disent_train.add_argument("--arch", default="poc2", choices=list(ARCHITECTURES),
-                              help="poc2: o encoder do relatorio. poc1: a CNN do POC I "
-                                   "(2 blocos de 6 e 12 filtros, sem media no tempo, "
-                                   "duas densas de 64).")
+                              help="Os degraus da escada, na ordem: poc1 (a CNN do POC "
+                                   "I), poc1_media (+ media no tempo), poc1_media_largo "
+                                   "(+ filtros 32, 64), poc2 (+ quatro blocos: o encoder "
+                                   "do relatorio).")
     disent_train.set_defaults(func=_cmd_disent_train)
 
     disent_between = disent_sub.add_parser(
@@ -646,6 +656,16 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="Repetivel. Padrao: toda execucao em --results-dir.")
     _add_split(disent_evaluate, "teste")
     disent_evaluate.set_defaults(func=_cmd_disent_evaluate)
+
+    disent_compare = disent_sub.add_parser(
+        "compare",
+        help="Diferenca pareada A - B no acerto, com IC95%% por bootstrap sobre gravacoes.")
+    disent_compare.add_argument("--a", action="append", required=True,
+                                help="Pasta de uma execucao. Repetivel, uma por semente.")
+    disent_compare.add_argument("--b", action="append", required=True,
+                                help="Idem, na mesma ordem de sementes que --a.")
+    _add_split(disent_compare)
+    disent_compare.set_defaults(func=_cmd_disent_compare)
 
     disent_validate = disent_sub.add_parser(
         "validate", help="Confere que a grade esta cruzada e pareada entre os arms."

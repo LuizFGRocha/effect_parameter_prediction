@@ -17,9 +17,6 @@ import pandas as pd
 from gefx.disent.grid import EVAL_SPLITS
 from gefx.disent.sidecar import EFFECT_FOLDER, read_dataset, split_frames
 
-LEVEL_AXES: Tuple[str, ...] = ("drive_level",)
-
-
 def nearest(queries: np.ndarray, catalog: np.ndarray,
             k: int = 1) -> Tuple[np.ndarray, np.ndarray]:
     """Indices `(n, k)` dos `k` itens de catalogo mais proximos de cada consulta, do
@@ -67,9 +64,7 @@ def retrieve(
 ) -> pd.DataFrame:
     """Uma linha por consulta, com o que foi recuperado e o que era certo."""
     # Por gravacao, nao so por trecho: dois trechos da mesma execucao tambem vazam.
-    keys = [key for key in ("content_id", "source_audio_id")
-            if key in query_frame.columns and key in catalog_frame.columns]
-    if any(set(query_frame[key]) & set(catalog_frame[key]) for key in keys):
+    if set(query_frame["source_audio_id"]) & set(catalog_frame["source_audio_id"]):
         raise ValueError(
             "consulta e catalogo compartilham conteudo: o acerto poderia vir de "
             "reconhecer a execucao, e nao o ajuste"
@@ -87,38 +82,37 @@ def retrieve(
             "retrieved_arm": hit["arm"].to_numpy(),
         }
     )
-    for axis in LEVEL_AXES:
-        out[f"true_{axis}"] = query_frame[axis].to_numpy()
-        out[f"pred_{axis}"] = hit[axis].to_numpy()
+    out["true_drive_level"] = query_frame["drive_level"].to_numpy()
+    out["pred_drive_level"] = hit["drive_level"].to_numpy()
     out["true_drive_db"] = query_frame["drive_db_equivalente"].to_numpy()
     out["pred_drive_db"] = hit["drive_db_equivalente"].to_numpy()
     return out
 
 
 def score(predictions: pd.DataFrame, alphabet: Mapping[str, int]) -> Dict[str, object]:
-    """Acerto exato, acerto a um nivel e erro medio por eixo, com o acaso do eixo."""
-    out: Dict[str, object] = {"n": int(len(predictions))}
-    for axis, size in alphabet.items():
-        true = predictions[f"true_{axis}"].to_numpy()
-        pred = predictions[f"pred_{axis}"].to_numpy()
-        out[axis] = {
+    """Acerto exato, acerto a um nivel e erro medio, com o acaso ao lado."""
+    true = predictions["true_drive_level"].to_numpy()
+    pred = predictions["pred_drive_level"].to_numpy()
+    return {
+        "n": int(len(predictions)),
+        "drive_level": {
             "exact": float(np.mean(true == pred)),
-            "chance": 1.0 / size,
+            "chance": 1.0 / alphabet["drive_level"],
             "mae_levels": float(np.mean(np.abs(true - pred))),
             "within_one": float(np.mean(np.abs(true - pred) <= 1)),
-        }
-    out["mae_db"] = float(
-        np.mean(np.abs(predictions["true_drive_db"] - predictions["pred_drive_db"]))
-    )
-    out["cross_implementation"] = bool(
-        not (predictions["query_arm"] == predictions["retrieved_arm"]).any()
-    )
-    return out
+        },
+        "mae_db": float(
+            np.mean(np.abs(predictions["true_drive_db"] - predictions["pred_drive_db"]))
+        ),
+        "cross_implementation": bool(
+            not (predictions["query_arm"] == predictions["retrieved_arm"]).any()
+        ),
+    }
 
 
 def alphabet(frame: pd.DataFrame) -> Dict[str, int]:
-    """Quantos niveis cada eixo tem neste recorte; o acaso sai daqui, nao da grade cheia."""
-    return {axis: int(frame[axis].nunique()) for axis in LEVEL_AXES}
+    """Quantos niveis ha neste recorte; o acaso sai daqui, nao da grade cheia."""
+    return {"drive_level": int(frame["drive_level"].nunique())}
 
 
 def drive_ladder(frame: pd.DataFrame) -> np.ndarray:

@@ -1,8 +1,9 @@
 """Grade de configuracoes e particao de conteudo do POC II.
 
-- A grade: os niveis de drive. O nivel e um indice; o valor de knob depende do
-  arm e sai do arquivo de niveis. Nao ha tone: a EQ propria de cada pedal, que
-  em alguns muda com o ganho, impedia um fator de tone igual em todos.
+- A grade: os niveis de drive. O nivel e um indice (no sidecar, `config_index ==
+  drive_level`); o valor de knob depende do arm e sai do arquivo de niveis. Nao
+  ha tone: a EQ propria de cada pedal, que em alguns muda com o ganho, impedia
+  um fator de tone igual em todos.
 - A particao: treino / catalogo / consulta, disjuntas por conteudo, para a busca
   nao acertar reconhecendo o que foi tocado. A validacao sai do treino, na
   leitura (`validation_recordings`), com a mesma forma do teste: uma consulta e
@@ -10,7 +11,6 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
@@ -42,25 +42,14 @@ def split_file(stem: str, split: str, suffix: str) -> str:
 DEFAULT_SPLIT_FRACTIONS: Mapping[str, float] = {"train": 0.6, "catalog": 0.2, "query": 0.2}
 
 
-@dataclass(frozen=True, order=True)
-class Config:
-    """Uma configuracao da grade, em indices de nivel."""
-
-    drive_level: int
-
-    @property
-    def key(self) -> str:
-        return f"d{self.drive_level}"
+def level_key(level: int) -> str:
+    """O rotulo de um nivel de drive (`config_key` no sidecar): `d<nivel>`."""
+    return f"d{level}"
 
 
-def all_configs(drive_levels: int) -> List[Config]:
-    """As configuracoes na ordem canonica; o indice de classe e o nivel de drive."""
-    return [Config(drive) for drive in range(drive_levels)]
-
-
-def render_name(content_id: str, config: Config, index: int) -> str:
+def render_name(content_id: str, level: int) -> str:
     """Nome do wav, identico entre arms: e o que torna o pareamento verificavel."""
-    return f"{content_id}__{config.key}__{index:05d}.wav"
+    return f"{content_id}__{level_key(level)}__{level:05d}.wav"
 
 
 # --- particao por conteudo ----------------------------------------------------
