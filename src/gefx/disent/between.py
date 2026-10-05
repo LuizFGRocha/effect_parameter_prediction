@@ -21,8 +21,9 @@ from typing import Dict, List, Sequence
 import numpy as np
 import pandas as pd
 
-from gefx.disent.retrieval import nearest
-from gefx.disent.sidecar import read_dataset, split_frames
+from gefx.disent.grid import EVAL_SPLITS
+from gefx.disent.retrieval import drive_ladder, nearest, nearest_level
+from gefx.disent.sidecar import read_dataset
 
 DEFAULT_K = 10
 
@@ -73,22 +74,21 @@ def between_study(
     with_b1: bool = True,
 ) -> pd.DataFrame:
     """Uma linha por execucao (e o B1); as predicoes vao para `<results_dir>/entre_niveis/`."""
-    from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.probes import load_run
-    from gefx.disent.retrieval import baseline_b1
+    from gefx.disent.features import FeatureStore
+    from gefx.disent.probes import open_run
+    from gefx.disent.retrieval import b1_drive_db
     from gefx.disent.train import embed
 
+    query_key, catalog_key = EVAL_SPLITS["teste"]
     data = read_dataset(Path(between_root))
-    queries = data[data["split"] == "query"].reset_index(drop=True)
-    catalog = split_frames(Path(grid_root))["catalog"]
+    queries = data[data["split"] == query_key].reset_index(drop=True)
     out_dir = Path(results_dir) / "entre_niveis"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows: List[Dict[str, object]] = []
     for name in runs:
-        run_dir = Path(results_dir) / name
-        model, manifest = load_run(run_dir)
-        standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
+        model, manifest, standardizer, frames = open_run(Path(results_dir) / name, grid_root)
+        catalog = frames[catalog_key]
         z_query = embed(model, FeatureStore(Path(between_root), queries), standardizer)
         z_catalog = embed(model, FeatureStore(Path(grid_root), catalog), standardizer)
         predictions = between_predictions(queries, catalog, z_query, z_catalog, k)
@@ -97,16 +97,17 @@ def between_study(
                      **summarize(predictions)})
 
     if with_b1:
-        b1 = baseline_b1(Path(between_root)).predictions
-        ladder = np.array(sorted(catalog.groupby("drive_level")["drive_db_equivalente"].first()))
-        continuous = b1["pred_drive_db"].to_numpy()
-        level = np.abs(continuous[:, None] - ladder[None, :]).argmin(axis=1)
+        # O B1 ve as consultas direto, sem as particoes do dataset da grade.
+        continuous = b1_drive_db(Path(between_root), queries)
+        ladder = drive_ladder(read_dataset(Path(grid_root)))
+        level = nearest_level(continuous, ladder)
         # Como na busca: o nivel da grade mais proximo, e a saida continua no
         # lugar da media dos k vizinhos.
         b1 = pd.DataFrame({
-            "file_name": b1["file_name"], "query_arm": b1["query_arm"],
+            "file_name": queries["file_name"], "query_arm": queries["arm"],
             "source_audio_id": queries["source_audio_id"].to_numpy(),
-            "between": b1["true_drive_level"], "true_drive_db": b1["true_drive_db"],
+            "between": queries["drive_level"],
+            "true_drive_db": queries["drive_db_equivalente"],
             "pred_drive_level": level, "pred_drive_db": ladder[level],
             "knn_drive_db": continuous,
         })

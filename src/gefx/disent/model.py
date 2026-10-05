@@ -13,7 +13,7 @@ com tres mudancas, cada uma medida num degrau da escada do POC I ao POC II
 
 As duas densas de 64 do POC I ficam. Uma densa de 256 (o encoder anterior) dava
 +1,5 ponto e mais que dobrava o conteudo legivel em `z_e` (19% -> 44%).
-`time_pool` continua configuravel para a ablacao (`max`, `flatten`).
+`time_pool="flatten"` (sem reducao) fica para a CNN do POC I.
 """
 from __future__ import annotations
 
@@ -26,8 +26,9 @@ DEFAULT_FILTERS: Tuple[int, ...] = (32, 64, 96, 128)
 #: Campos que os manifestos antigos nao tem, com o valor com que eles rodaram.
 LEGACY_FIELDS: Dict[str, object] = {"time_pool": "mean", "trunk_layers": 1}
 
-#: Como o tronco trata o eixo do tempo antes da camada densa.
-TIME_POOLS: Tuple[str, ...] = ("mean", "max", "flatten")
+#: Como o tronco trata o eixo do tempo antes da camada densa. O `max` da ablacao
+#: (`results/disent/v2/ablacao_tempo/`) saiu: perdeu para a media.
+TIME_POOLS: Tuple[str, ...] = ("mean", "flatten")
 
 #: Onde cada execucao grava os pesos do encoder, relativo a pasta dela.
 WEIGHTS_FILE = Path("weights") / "encoder.weights.h5"
@@ -72,16 +73,6 @@ def _mean_over_time(tensor):
     return tf.reduce_mean(tensor, axis=2)
 
 
-def _max_over_time(tensor):
-    """(batch, frequencia, tempo, canal) -> (batch, frequencia, canal)."""
-    import tensorflow as tf
-
-    return tf.reduce_max(tensor, axis=2)
-
-
-_TIME_REDUCERS = {"mean": _mean_over_time, "max": _max_over_time}
-
-
 def build_trunk(config: EncoderConfig):
     """Conv2D -> BN -> pool empilhados, reducao do tempo, denso. Um `keras.Model`.
 
@@ -100,9 +91,9 @@ def build_trunk(config: EncoderConfig):
         if index:
             x = layers.Dropout(config.dropout, name=f"drop{index}")(x)
 
-    if config.time_pool in _TIME_REDUCERS:
+    if config.time_pool == "mean":
         x = layers.Lambda(
-            _TIME_REDUCERS[config.time_pool],
+            _mean_over_time,
             output_shape=lambda shape: (shape[0], shape[1], shape[3]),
             name="time_pool",
         )(x)
@@ -132,6 +123,9 @@ def build_encoder(config: EncoderConfig):
 
 #: A tecnica cujo modelo e o regressor escalar, e nao o encoder.
 REGRESSION = "regressao"
+
+#: As tecnicas de `gefx disent train` (ver `train.py`).
+TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon", REGRESSION)
 
 
 def build_regressor(config: EncoderConfig):

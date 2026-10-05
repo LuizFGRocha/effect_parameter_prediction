@@ -93,9 +93,9 @@ def split_frames(
         for name in ("train", "catalog", "query")
     }
     if not frames["train"].empty:
-        sides = validation_recordings(recording_of(frames["train"]), validation)
         train = frames["train"]
         recording = recording_of(train)
+        sides = validation_recordings(recording, validation)
         for name in ("train", *VALIDATION_SPLITS):
             frames[name] = train[recording.isin(sides[name])].reset_index(drop=True)
     empty = [name for name, frame in frames.items() if frame.empty]

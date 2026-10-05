@@ -59,7 +59,7 @@ def test_a_manifest_with_fields_this_encoder_does_not_have_is_refused():
         EncoderConfig.from_dict({**SMALL.as_dict(), "content_dim": 64})
 
 
-@pytest.mark.parametrize("time_pool", ["mean", "max", "flatten"])
+@pytest.mark.parametrize("time_pool", ["mean", "flatten"])
 def test_every_time_pool_gives_the_effect_code_on_the_sphere(time_pool):
     config = EncoderConfig(**{**SMALL.as_dict(), "time_pool": time_pool})
     z_e = np.asarray(build_encoder(config)(_batch()))
@@ -67,14 +67,12 @@ def test_every_time_pool_gives_the_effect_code_on_the_sphere(time_pool):
     assert np.allclose(np.linalg.norm(z_e, axis=1), 1.0, atol=1e-5)
 
 
-def test_flatten_keeps_the_time_axis_and_the_reductions_do_not():
-    """Com `flatten` a camada densa ve frequencia x tempo; com `mean` e `max`,
-    so frequencia, e as duas reducoes tem o mesmo numero de pesos."""
+def test_flatten_keeps_the_time_axis_and_the_mean_does_not():
+    """Com `flatten` a camada densa ve frequencia x tempo; com `mean`, so frequencia."""
     def dense_inputs(time_pool):
         model = build_encoder(EncoderConfig(**{**SMALL.as_dict(), "time_pool": time_pool}))
         return model.get_layer("trunk_dense").kernel.shape[0]
 
-    assert dense_inputs("mean") == dense_inputs("max")
     assert dense_inputs("flatten") > dense_inputs("mean")
 
 
@@ -86,7 +84,7 @@ def test_a_manifest_from_before_the_ablation_loads_with_the_mean():
 
 def test_an_unknown_time_pool_is_refused():
     with pytest.raises(ValueError):
-        EncoderConfig(time_pool="median")
+        EncoderConfig(time_pool="max")
 
 
 def test_the_regressor_gives_one_drive_value_in_the_unit_interval():
