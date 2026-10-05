@@ -339,7 +339,7 @@ default) is the POC I CNN (`ARCHITECTURES["poc1"]`, tested layer by layer agains
 - 16,000-step curves (1 seed) flatten after ~10k; at 16k the chosen encoder reached
   70.5% with content 7% / pedal 50% in the probes, the Dense(256) one 72.9% / 24% / 63%.
 
-Protocol: up to 20,000 steps with the learning rate on a cosine from 1e-3 to 1e-6 over the
+Protocol: up to 10,000 steps with the learning rate on a cosine from 1e-3 to 1e-6 over the
 budget (`--cosine` of the official SupContrast, `lr * 0.1 ** 3`; Keras `CosineDecay`),
 validation error (the test's cross-arm search, in dB) every 500 steps, stop after 16
 evaluations without improvement (Prechelt 1998: slower criteria generalize slightly
@@ -350,6 +350,16 @@ so the minimum was an isolated dip (seed 1 stopped while the moving average stil
 and the regression's best-checkpoint number was optimistic (selection bias, Cawley &
 Talbot 2010). A moving average of the metric was considered and dropped: no published
 reference.
+The cap was chosen on 2026-10-05 (SupCon, val, paired by-recording bootstrap over 3
+seeds): 10k vs 20k −0.32 pt [−1.28; +0.59]; 40k (1 seed) no better, and with patience 16
+it stopped before the cosine annealed — the gain comes from the cosine's end, not from
+more steps. Same-seed reruns differ by up to ±2.5 pt (GPU nondeterminism), so never
+decide on one seed. Steps and the inference pass are XLA-compiled (`jit_compile`,
+off under `--deterministic`, which lacks a deterministic XLA MaxPool gradient) and the
+next batch is read in a thread: 59 → 13 min per SupCon run at 10k. XLA vs no XLA over
+3 seeds at 20k: −0.10 pt [−1.57; +1.24]; regression matched too. Mixed precision
+(36 vs 68 ms/step on the GPU) was not adopted: the memmap read (~54 ms/batch) would
+dominate. Dropping conv blocks only saves 15–25%.
 Validation = 2 × 20 of the 240 train recordings (`val_query`, `val_catalog`), carved at
 load time by `grid.validation_recordings`, so the sidecar and the test split are
 unchanged. **During development only the validation is read** (user's rule,
