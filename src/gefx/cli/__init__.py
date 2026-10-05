@@ -251,6 +251,7 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
             lr_schedule=args.lr_schedule,
             seed=args.seed,
             deterministic=args.deterministic,
+            jit_compile=not args.sem_xla,
             output_dir=raiz / pasta,
             encoder=encoder,
         ))
@@ -562,6 +563,9 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Nucleos deterministicos do TensorFlow. Sem isto a "
                                    "semente fixa so a inicializacao e duas execucoes "
                                    "identicas divergem. Custa ~20%% de velocidade.")
+    disent_train.add_argument("--sem-xla", action="store_true",
+                              help="Passos sem a compilacao do XLA (~2,3x mais lentos), "
+                                   "para conferir que ela nao muda o resultado.")
     disent_train.add_argument("--arch", default="poc2", choices=["poc2", "poc1"],
                               help="poc2: o encoder do relatorio. poc1: a CNN do POC I "
                                    "(2 blocos de 6 e 12 filtros, sem media no tempo, "
