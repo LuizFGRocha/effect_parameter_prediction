@@ -11,12 +11,13 @@
 
 Os quatro rodam pelo mesmo codigo, arquitetura, amostrador e semente.
 
-Protocolo: ate `steps` passos, com o erro de validacao (a mesma busca do teste,
-em dB, sobre `val_query` e `val_catalog`) medido a cada `eval_every`. O treino
-para quando ele passa `patience` avaliacoes sem descer, e os pesos do minimo sao
-os que ficam -- a semantica de `keras.callbacks.EarlyStopping` com
-`restore_best_weights=True` (Goodfellow et al. 2016, alg. 7.1; a paciencia longa
-segue Prechelt 1998, em que criterios mais lentos generalizam um pouco melhor).
+Protocolo: `steps` passos, com o erro de validacao (a mesma busca do teste, em
+dB, sobre `val_query` e `val_catalog`) medido a cada `eval_every`, e os pesos do
+minimo sao os que ficam (Goodfellow et al. 2016, alg. 7.1). Por padrao o treino
+nao para antes: como no SupCon oficial, o cosseno roda inteiro. Com `patience` > 0
+ele para depois de tantas avaliacoes sem descer -- a semantica de
+`keras.callbacks.EarlyStopping` com `restore_best_weights=True` --, mas com o
+cosseno isso cortava a taxa antes do fim (o minimo e no fim do cosseno).
 
 A taxa de aprendizado decai em cosseno ao longo de `steps`, de `learning_rate` a
 `learning_rate * lr_min_fraction`, como no `SupConLoss` oficial (`--cosine` em
@@ -95,7 +96,8 @@ class TrainConfig:
     temperature: float = DEFAULT_TEMPERATURE
     eval_every: int = 500
     #: Avaliacoes sem descer o erro de validacao antes de parar; 0 nao para.
-    patience: int = 16
+    #: 16 cortava o cosseno: o SupCon da semente 3 parou em 17.500 (melhor 9.500).
+    patience: int = 0
     #: Gravacoes de cada lado da validacao, tiradas do treino.
     validation_recordings: int = VALIDATION_RECORDINGS
     embed_batch: int = 128

@@ -341,10 +341,12 @@ default) is the POC I CNN (`ARCHITECTURES["poc1"]`, tested layer by layer agains
 
 Protocol: up to 20,000 steps with the learning rate on a cosine from 1e-3 to 1e-6 over the
 budget (`--cosine` of the official SupContrast, `lr * 0.1 ** 3`; Keras `CosineDecay`),
-validation error (the test's cross-arm search, in dB) every 500 steps, stop after 16
-evaluations without improvement (Prechelt 1998: slower criteria generalize slightly
-better), keep the minimum's weights (Goodfellow et al. 2016, alg. 7.1). The cosine and
-the longer patience came after the first validation runs: at POC I's fixed rate the
+validation error (the test's cross-arm search, in dB) every 500 steps, keep the
+minimum's weights (Goodfellow et al. 2016, alg. 7.1). **No early stopping** since
+2026-10-05 (`patience` 0): with patience 16 (Prechelt 1998) the cosine was cut before
+it annealed (SupCon seed 3 stopped at 17,500 with its best at 9,500; the 40k test
+likewise), and the official SupContrast trains the whole budget. The cosine and
+a longer patience came after the first validation runs: at POC I's fixed rate the
 validation curve jittered 0.08 dB (SupCon) / 0.32 dB (regression) between evaluations,
 so the minimum was an isolated dip (seed 1 stopped while the moving average still fell)
 and the regression's best-checkpoint number was optimistic (selection bias, Cawley &
