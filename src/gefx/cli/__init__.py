@@ -119,13 +119,6 @@ def _cmd_disent_calibrate(args: argparse.Namespace) -> None:
     )
 
 
-def _cmd_disent_tune(args: argparse.Namespace) -> None:
-    from gefx.disent.tune import Tuner, serve
-
-    serve(Tuner(Path(args.recording), Path(args.roster), Path(args.levels)),
-          port=args.port, open_browser=not args.no_browser)
-
-
 def _cmd_disent_render(args: argparse.Namespace) -> None:
     from gefx.disent.render import RenderOptions, render
 
@@ -469,16 +462,6 @@ def build_parser() -> argparse.ArgumentParser:
                                        "em Rnonlin.")
     disent_calibrate.add_argument("--n-levels", type=int, default=8)
     disent_calibrate.set_defaults(func=_cmd_disent_calibrate)
-
-    disent_tune = disent_sub.add_parser(
-        "tune", help="Pagina local para ouvir os niveis de cada arm, com A/B contra a "
-                     "referencia. So escuta: nao altera os niveis.")
-    disent_tune.add_argument("--recording", required=True, help="Sua gravacao de guitarra (wav).")
-    disent_tune.add_argument("--roster", default="experiments/disent_roster.yaml")
-    disent_tune.add_argument("--levels", default="experiments/disent_levels.yaml")
-    disent_tune.add_argument("--port", type=int, default=8765)
-    disent_tune.add_argument("--no-browser", action="store_true")
-    disent_tune.set_defaults(func=_cmd_disent_tune)
 
     disent_render = disent_sub.add_parser(
         "render", help="Renderiza a grade combinatoria conteudo x configuracao x arm."

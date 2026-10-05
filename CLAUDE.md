@@ -195,7 +195,6 @@ equivalence is what the cross-arm retrieval tests. Two files:
 
 ```bash
 gefx disent calibrate                       # ~3.5 min, 8 processes; rewrites the levels file
-gefx disent tune --recording guitar.wav     # localhost page to listen: A/B or L/R vs reference
 gefx disent render                          # uses `levels`; copies roster + levels into the dataset
 ```
 
@@ -211,8 +210,9 @@ Decisions already made — don't reopen without new evidence:
 
 - **Levels are always the automatic Rnonlin matching.** Manual adjustment by ear (sliders
   and saving in `gefx disent tune`, and the Reaper JSFX) was dropped on 2026-09-27;
-  `unmatched` levels are accepted as they come out. `tune` stays as a **read-only**
-  listening page — it has no save route and must not get one back.
+  `unmatched` levels are accepted as they come out. The read-only listening page that
+  replaced it (`gefx disent tune`) was removed on 2026-10-05 too: it isn't part of the
+  report. Don't bring manual levels back.
 - **Crest-factor drop was tried and rejected**: it saturates at high drive and is fooled
   by filtering after the clipper (BYOD read as half-scale; boosting the input doesn't
   help). Spectral descriptors (centroid, flatness) and % clipped samples were also worse.
