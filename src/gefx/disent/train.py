@@ -81,10 +81,10 @@ class TrainConfig:
     feature: str = "Spec"
     technique: str = "supcon"
     arms: Optional[Tuple[str, ...]] = None
-    #: O teto, que e tambem o comprimento do cosseno. Com 3 sementes do SupCon,
-    #: 10.000 passos empataram com 20.000 na validacao (-0,3 pt, IC95 [-1,3; +0,6]),
-    #: e 40.000 nao melhoraram (1 semente): o ganho vem do fim do cosseno.
-    steps: int = 10000
+    #: O teto, que e tambem o comprimento do cosseno. 40.000 nao melhoraram o
+    #: SupCon (1 semente); 10.000 custaram 2,8 pt a regressao (3 sementes, todas
+    #: abaixo) e ~1 pt ao SupCon (6 execucoes de cada).
+    steps: int = 20000
     configs_per_batch: int = 8
     views_per_config: int = 8
     learning_rate: float = 1e-3
