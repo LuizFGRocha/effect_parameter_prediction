@@ -215,7 +215,7 @@ def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_pa
 def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):
     from gefx.disent.features import FeatureStore, PixelStandardizer
     from gefx.disent.model import build_encoder
-    from gefx.disent.train import embed
+    from gefx.disent.train import embed, forward
 
     config = _config(tmp_path)
     frame = split_frames(config.dataset_root)["catalog"]
@@ -225,7 +225,8 @@ def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_pat
 
     codes = embed(model, store, standardizer, batch=8)
     assert codes.shape == (len(frame), config.encoder.effect_dim)
-    direto = model(standardizer.transform(store.take(np.arange(3))), training=False)
+    # A mesma passada compilada: o teste e da ordem das linhas, nao do XLA.
+    direto = forward(model)(standardizer.transform(store.take(np.arange(3))))
     assert np.allclose(codes[:3], np.asarray(direto), atol=1e-6)
 
 
