@@ -81,8 +81,10 @@ class TrainConfig:
     feature: str = "Spec"
     technique: str = "supcon"
     arms: Optional[Tuple[str, ...]] = None
-    #: O teto. Acima do ponto em que as curvas de 16.000 passos se achataram (~10k).
-    steps: int = 20000
+    #: O teto, que e tambem o comprimento do cosseno. Com 3 sementes do SupCon,
+    #: 10.000 passos empataram com 20.000 na validacao (-0,3 pt, IC95 [-1,3; +0,6]),
+    #: e 40.000 nao melhoraram (1 semente): o ganho vem do fim do cosseno.
+    steps: int = 10000
     configs_per_batch: int = 8
     views_per_config: int = 8
     learning_rate: float = 1e-3
