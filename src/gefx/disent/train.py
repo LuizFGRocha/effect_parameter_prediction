@@ -24,6 +24,13 @@ HobbitLong/SupContrast: ate `lr * 0.1 ** 3`). E o `keras.optimizers.schedules.
 CosineDecay`. O POC I tinha taxa fixa; com ela a validacao oscilava o bastante
 (0,08 dB no SupCon, 0,32 dB na regressao) para o minimo ser um vale isolado.
 
+Velocidade: os passos e a projecao rodam compilados pelo XLA (`jit_compile`), com
+a mesma conta em float32 -- so a fusao das operacoes e o algoritmo de convolucao
+mudam. As saidas diferem ~1e-4 da execucao sem XLA, a ordem do TF32 que a GPU ja
+usa nas convolucoes (padrao do TensorFlow nas placas Ampere). O lote seguinte e lido do
+disco numa thread enquanto a GPU roda o atual; os lotes sao sorteados na thread
+principal, na mesma ordem de antes. Mediu-se 158 -> 68 ms por passo so com o XLA.
+
 O treino so le a validacao: as metricas que grava (`metrics_validacao.json`) sao
 dela. O teste fica para `evaluate_runs(split="teste")`, uma passada no fim com os
 modelos finais.
@@ -32,10 +39,11 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -92,6 +100,9 @@ class TrainConfig:
     seed: int = 20260908
     #: Sem isto a semente so fixa a inicializacao, e duas execucoes divergem.
     deterministic: bool = False
+    #: Passos compilados pelo XLA: a mesma conta, ~2,3x mais rapido. Desligado com
+    #: `deterministic`: o gradiente do MaxPool no XLA nao tem versao deterministica.
+    jit_compile: bool = True
     #: Desligar quando quem mede e outra coisa (curva de diversidade).
     evaluate_at_end: bool = True
     output_dir: Optional[Path] = None
@@ -128,12 +139,12 @@ def make_optimizer(config: TrainConfig):
     return keras.optimizers.Adam(learning_rate=learning_rate(config))
 
 
-def make_step(model, optimizer, temperature: float):
+def make_step(model, optimizer, temperature: float, jit_compile: bool = False):
     import tensorflow as tf
 
     variables = model.trainable_variables
 
-    @tf.function(reduce_retracing=True)
+    @tf.function(jit_compile=jit_compile, reduce_retracing=True)
     def step(x, config_label):
         with tf.GradientTape() as tape:
             z_e = model(x, training=True)
@@ -147,13 +158,13 @@ def make_step(model, optimizer, temperature: float):
     return step
 
 
-def make_regression_step(model, optimizer):
+def make_regression_step(model, optimizer, jit_compile: bool = False):
     """MSE entre a saida sigmoide e o drive em [0, 1], como o regressor do POC I."""
     import tensorflow as tf
 
     variables = model.trainable_variables
 
-    @tf.function(reduce_retracing=True)
+    @tf.function(jit_compile=jit_compile, reduce_retracing=True)
     def step(x, drive):
         with tf.GradientTape() as tape:
             loss = tf.reduce_mean(tf.square(model(x, training=True) - drive))
@@ -170,25 +181,57 @@ def drive_range(frame: pd.DataFrame) -> Tuple[float, float]:
     return float(values.min()), float(values.max())
 
 
-def make_bn_step(model):
+def make_bn_step(model, jit_compile: bool = False):
     """Passo para frente em modo de treino: so as medias moveis da BatchNorm mudam."""
     import tensorflow as tf
 
-    @tf.function(reduce_retracing=True)
+    @tf.function(jit_compile=jit_compile, reduce_retracing=True)
     def step(x):
         model(x, training=True)
 
     return step
 
 
+def prefetched(load: Callable, items: Iterable) -> Iterator:
+    """`load(item)` de cada item, em ordem, com o proximo ja lendo numa thread.
+
+    A leitura do memmap e a padronizacao (CPU, disco) correm enquanto a GPU
+    trabalha no anterior. Quem sorteia os itens continua sendo quem chama.
+    """
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = None
+        for item in items:
+            future = pool.submit(load, item)
+            if pending is not None:
+                yield pending.result()
+            pending = future
+        if pending is not None:
+            yield pending.result()
+
+
 # --- avaliacao ----------------------------------------------------------------
+def forward(model):
+    """A passada de inferencia compilada pelo XLA, uma por modelo."""
+    import tensorflow as tf
+
+    if getattr(model, "_gefx_forward", None) is None:
+        # Fora do rastreio de atributos do Keras: nao e camada nem variavel.
+        object.__setattr__(model, "_gefx_forward", tf.function(
+            lambda x: model(x, training=False), jit_compile=True, reduce_retracing=True))
+    return model._gefx_forward
+
+
 def embed(model, store: FeatureStore, standardizer: PixelStandardizer,
           batch: int = 128) -> np.ndarray:
     """`z_e` de todas as linhas do `store`, na ordem do `frame`."""
     out = np.empty((len(store), model.output_shape[-1]), dtype=np.float32)
-    for block, features in store.stream(np.arange(len(store)), chunk=batch):
-        out[block] = np.asarray(
-            model(standardizer.transform(features), training=False))
+    rows = np.arange(len(store))
+    blocks = [rows[start:start + batch] for start in range(0, len(rows), batch)]
+    run = forward(model)
+    loaded = prefetched(lambda block: (block, standardizer.transform(store.take(block))),
+                        blocks)
+    for block, features in loaded:
+        out[block] = np.asarray(run(features))
     return out
 
 
@@ -280,6 +323,7 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         raise KeyError(f"tecnica desconhecida: {config.technique!r}. Ha {list(TECHNIQUES)}")
     if config.deterministic:
         tf.config.experimental.enable_op_determinism()
+        config = replace(config, jit_compile=False)
     keras.utils.set_random_seed(config.seed)
 
     root = Path(config.dataset_root)
@@ -305,13 +349,14 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
 
     steps = 0 if config.technique == "random_encoder" else config.steps
     if config.technique == "bn_only":
-        step = make_bn_step(model)
+        step = make_bn_step(model, config.jit_compile)
     elif config.technique == REGRESSION:
-        step = make_regression_step(model, make_optimizer(config))
+        step = make_regression_step(model, make_optimizer(config), config.jit_compile)
         lo, hi = drive_range(index.frame)
         drive = ((index.frame["drive_db_equivalente"].to_numpy() - lo) / (hi - lo))
     else:
-        step = make_step(model, make_optimizer(config), config.temperature)
+        step = make_step(model, make_optimizer(config), config.temperature,
+                         config.jit_compile)
 
     rng = np.random.default_rng(config.seed)
     history: List[Dict[str, float]] = []
@@ -320,12 +365,15 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     waited, executed = 0, 0
     started = time.time()
 
-    for number in range(1, steps + 1):
+    # Os lotes saem do `rng` aqui, em ordem; so a leitura vai para a thread.
+    batches = (class_balanced_batch(index, rng, config.configs_per_batch,
+                                    config.views_per_config) for _ in range(steps))
+    loaded = prefetched(
+        lambda batch: (batch, standardizer.transform(stores["train"].take(batch.rows))),
+        batches)
+    for number, (batch, features) in enumerate(loaded, start=1):
         executed = number
-        batch = class_balanced_batch(
-            index, rng, config.configs_per_batch, config.views_per_config
-        )
-        features = tf.constant(standardizer.transform(stores["train"].take(batch.rows)))
+        features = tf.constant(features)
         if config.technique == "bn_only":
             step(features)
         else:
