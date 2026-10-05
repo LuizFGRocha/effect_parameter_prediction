@@ -16,8 +16,8 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
-from gefx.disent.grid import EVAL_SPLITS
-from gefx.disent.train import RESULTS_ROOT
+from gefx.disent.grid import EVAL_SPLITS, split_file
+from gefx.disent.train import RESULTS_ROOT, metrics_file
 
 DEFAULT_ROOT = Path("datasets/disent_v2")
 DEFAULT_OUTPUT = RESULTS_ROOT / "loo"
@@ -25,7 +25,11 @@ DEFAULT_OUTPUT = RESULTS_ROOT / "loo"
 
 def summary_file(split: str) -> str:
     """O resumo de cada particao; as execucoes sao as mesmas, so a busca muda."""
-    return f"resumo_{split}.csv"
+    return split_file("resumo", split, "csv")
+
+
+def cost_file(split: str) -> str:
+    return split_file("custo_de_transferencia", split, "csv")
 
 
 def strata(root: Path) -> Dict[str, str]:
@@ -40,16 +44,13 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
                        catalog_arms: Optional[Sequence[str]] = None, batch: int = 64,
                        extra: Optional[Dict[str, object]] = None,
                        split: str = "validacao") -> List[Dict[str, object]]:
-    from gefx.disent.probes import load_run
-    from gefx.disent.features import FeatureStore, PixelStandardizer
+    from gefx.disent.probes import open_run
+    from gefx.disent.features import FeatureStore
     from gefx.disent.retrieval import center_by_arm, retrieve_by_arm
-    from gefx.disent.sidecar import split_frames
     from gefx.disent.train import embed
 
-    model, _ = load_run(run_dir)
-    standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
-
-    frames = split_frames(root)
+    # Todos os arms: o retirado tambem e consultado.
+    model, _, standardizer, frames = open_run(run_dir, root, all_arms=True)
     query_key, catalog_key = EVAL_SPLITS[split]
     # Na curva de diversidade o catalogo fica fixo enquanto o treino cresce.
     pool = list(catalog_arms) if catalog_arms is not None else list(seen)
@@ -68,7 +69,7 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
                       if centered else (z_query, z_catalog))
             # Na transferencia o arm retirado ja esta fora do catalogo.
             result = retrieve_by_arm(queries, catalog, zq, zc,
-                                     same_arm=(held_out not in pool and label == "transferencia"))
+                                     same_arm=(label == "transferencia"))
             overall = result.metrics["overall"]
             rows.append({
                 "arm_retirado": held_out,
@@ -82,13 +83,19 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
     return rows
 
 
+def _print_rows(rows: Sequence[Dict[str, object]]) -> None:
+    for row in rows:
+        print(f"  {row['condicao']:14s} {'centrado' if row['centrado'] else '':8s} "
+              f"{row['drive_exact']*100:5.1f}%  "
+              f"{row['mae_db']:5.2f} dB", flush=True)
+
+
 def leave_one_arm_out(
     root: Path = DEFAULT_ROOT,
     output_dir: Path = DEFAULT_OUTPUT,
     arms: Optional[Sequence[str]] = None,
     steps: Optional[int] = None,
-    seed: int = 20260908,
-    seeds: Optional[Sequence[int]] = None,
+    seeds: Sequence[int] = (20260908,),
     verbose: bool = True,
     split: str = "validacao",
 ) -> pd.DataFrame:
@@ -103,27 +110,25 @@ def leave_one_arm_out(
     todos = list(arms) if arms else [path.name for path in arm_dirs(root)]
     if len(todos) < 3:
         raise ValueError(f"leave-one-out precisa de ao menos 3 arms, ha {len(todos)}")
-    todas_sementes = list(seeds) if seeds else [seed]
 
     rows: List[Dict[str, object]] = []
     for held_out in todos:
         seen = [arm for arm in todos if arm != held_out]
-        for indice, semente in enumerate(todas_sementes):
+        for indice, semente in enumerate(seeds):
             run_dir = output_dir / (held_out if indice == 0 else f"{held_out}_s{semente}")
             if verbose:
                 print(f"[{held_out} fora, semente {semente}]", flush=True)
             if not (run_dir / "run.json").exists():
+                # Quem pontua e `_evaluate_held_out`, logo abaixo.
                 train(TrainConfig(dataset_root=root, arms=tuple(seen),
                                   steps=steps or TrainConfig.steps, seed=semente,
-                                  output_dir=run_dir),
+                                  evaluate_at_end=False, output_dir=run_dir),
                       verbose=False)
-            rows.extend(_evaluate_held_out(run_dir, root, held_out, seen,
-                                           extra={"seed": semente}, split=split))
+            novas = _evaluate_held_out(run_dir, root, held_out, seen,
+                                       extra={"seed": semente}, split=split)
+            rows.extend(novas)
             if verbose:
-                for row in rows[-4:]:
-                    print(f"  {row['condicao']:14s} {'centrado' if row['centrado'] else '':8s} "
-                          f"{row['drive_exact']*100:5.1f}%  "
-                          f"{row['mae_db']:5.2f} dB", flush=True)
+                _print_rows(novas)
             pd.DataFrame(rows).to_csv(output_dir / summary_file(split), index=False)
     return pd.DataFrame(rows)
 
@@ -179,10 +184,7 @@ def arm_diversity_curve(
         )
         rows.extend(novas)
         if verbose:
-            for row in novas:
-                print(f"  {row['condicao']:14s} {'centrado' if row['centrado'] else '':8s} "
-                      f"{row['drive_exact']*100:5.1f}%  "
-                      f"{row['mae_db']:5.2f} dB", flush=True)
+            _print_rows(novas)
         pd.DataFrame(rows).to_csv(output_dir / summary_file(split), index=False)
     return pd.DataFrame(rows)
 
@@ -196,7 +198,7 @@ def centered_rows(table: pd.DataFrame) -> pd.Series:
 
 def transfer_cost(
     loo: pd.DataFrame,
-    seen_metrics: Path = RESULTS_ROOT / "supcon" / "metrics_validacao.json",
+    seen_metrics: Path = RESULTS_ROOT / "supcon" / metrics_file("validacao"),
 ) -> pd.DataFrame:
     """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo
     no encoder treinado com todos."""

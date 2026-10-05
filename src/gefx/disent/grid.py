@@ -27,6 +27,18 @@ EVAL_SPLITS: Mapping[str, Tuple[str, str]] = {
     "validacao": ("val_query", "val_catalog"),
     "teste": ("query", "catalog"),
 }
+
+
+def split_file(stem: str, split: str, suffix: str) -> str:
+    """O nome de um resultado de uma busca: `<stem>_<validacao|teste>.<suffix>`.
+
+    Quem grava e quem le passam por aqui, para os nomes nao divergirem.
+    """
+    if split not in EVAL_SPLITS:
+        raise ValueError(f"particao desconhecida: {split!r}. Ha {list(EVAL_SPLITS)}")
+    return f"{stem}_{split}.{suffix}"
+
+
 DEFAULT_SPLIT_FRACTIONS: Mapping[str, float] = {"train": 0.6, "catalog": 0.2, "query": 0.2}
 
 

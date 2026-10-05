@@ -20,15 +20,16 @@ from gefx.disent.sidecar import EFFECT_FOLDER, read_dataset, split_frames
 LEVEL_AXES: Tuple[str, ...] = ("drive_level",)
 
 
-def nearest(queries: np.ndarray, catalog: np.ndarray, k: int = 1,
-            metric: str = "cosine") -> Tuple[np.ndarray, np.ndarray]:
+def nearest(queries: np.ndarray, catalog: np.ndarray,
+            k: int = 1) -> Tuple[np.ndarray, np.ndarray]:
     """Indices `(n, k)` dos `k` itens de catalogo mais proximos de cada consulta, do
     mais proximo ao mais distante, e as distancias. Busca exata do sklearn.
 
-    Cosseno para `z_e`, que vive na esfera; `euclidean` para o controle escalar,
-    em que o cosseno so enxergaria o sinal."""
+    Cosseno para `z_e`, que vive na esfera; euclidiana para um codigo de uma
+    dimensao (o controle escalar), em que o cosseno so enxergaria o sinal."""
     from sklearn.neighbors import NearestNeighbors
 
+    metric = "euclidean" if np.shape(catalog)[1] == 1 else "cosine"
     search = NearestNeighbors(n_neighbors=k, metric=metric, algorithm="brute")
     dists, picks = search.fit(catalog).kneighbors(queries)
     return picks, dists
@@ -63,7 +64,6 @@ def retrieve(
     catalog_frame: pd.DataFrame,
     query_vectors: np.ndarray,
     catalog_vectors: np.ndarray,
-    metric: str = "cosine",
 ) -> pd.DataFrame:
     """Uma linha por consulta, com o que foi recuperado e o que era certo."""
     # Por gravacao, nao so por trecho: dois trechos da mesma execucao tambem vazam.
@@ -74,7 +74,7 @@ def retrieve(
             "consulta e catalogo compartilham conteudo: o acerto poderia vir de "
             "reconhecer a execucao, e nao o ajuste"
         )
-    picks, dists = nearest(query_vectors, catalog_vectors, metric=metric)
+    picks, dists = nearest(query_vectors, catalog_vectors)
     picks, dists = picks[:, 0], dists[:, 0]
     hit = catalog_frame.iloc[picks]
     out = pd.DataFrame(
@@ -121,12 +121,16 @@ def alphabet(frame: pd.DataFrame) -> Dict[str, int]:
     return {axis: int(frame[axis].nunique()) for axis in LEVEL_AXES}
 
 
+def drive_ladder(frame: pd.DataFrame) -> np.ndarray:
+    """A escada de dB da referencia, um degrau por nivel de drive, em ordem."""
+    return np.sort(frame.groupby("drive_level")["drive_db_equivalente"].first().to_numpy(float))
+
+
 def _context(frame: pd.DataFrame) -> Dict[str, object]:
     """O que as figuras precisam saber do dataset sem reler o roster: a escada de
     dB da referencia e o estrato de cada arm."""
     return {
-        "drive_db_ladder": sorted(
-            float(v) for v in frame.groupby("drive_level")["drive_db_equivalente"].first()),
+        "drive_db_ladder": [float(v) for v in drive_ladder(frame)],
         "strata": {str(arm): str(stratum) for arm, stratum
                    in frame.groupby("arm")["stratum"].first().items()},
     }
@@ -138,7 +142,6 @@ def retrieve_by_arm(
     query_vectors: np.ndarray,
     catalog_vectors: np.ndarray,
     same_arm: bool = False,
-    metric: str = "cosine",
 ) -> RetrievalResult:
     """A tarefa do POC II sobre uma representacao qualquer das duas particoes.
 
@@ -165,7 +168,6 @@ def retrieve_by_arm(
                 catalog.iloc[c_where].reset_index(drop=True),
                 query_vectors[q_where],
                 catalog_vectors[c_where],
-                metric,
             )
         )
     predictions = pd.concat(parts, ignore_index=True)
@@ -230,6 +232,69 @@ def nearest_level(values: np.ndarray, ladder: np.ndarray) -> np.ndarray:
     return np.abs(np.asarray(values)[:, None] - np.asarray(ladder)[None, :]).argmin(axis=1)
 
 
+def readout(queries: pd.DataFrame, drive_db: np.ndarray, source: str,
+            **extra: object) -> RetrievalResult:
+    """Uma saida continua em dB lida sem catalogo: o degrau da escada mais proximo.
+
+    E como o B1 e o controle escalar entram na mesma tabela da busca.
+    """
+    out = pd.DataFrame(
+        {
+            "file_name": queries["file_name"].to_numpy(),
+            "query_arm": queries["arm"].to_numpy(),
+            "query_content": queries["content_id"].to_numpy(),
+            "retrieved_arm": source,
+            "retrieved_file": "",
+            "distance": np.nan,
+            "true_drive_level": queries["drive_level"].to_numpy(),
+            "pred_drive_level": nearest_level(drive_db, drive_ladder(queries)),
+            "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
+            "pred_drive_db": drive_db,
+        }
+    )
+    sizes = alphabet(queries)
+    metrics: Dict[str, object] = {
+        "overall": score(out, sizes),
+        "per_query_arm": {
+            str(arm): score(part, sizes)
+            for arm, part in out.groupby("query_arm", sort=True)
+        },
+        **extra,
+        "alphabet": sizes,
+        **_context(queries),
+    }
+    return RetrievalResult(predictions=out, metrics=metrics)
+
+
+def b1_drive_db(
+    root: Path,
+    queries: pd.DataFrame,
+    model_dir: Path = POC1_MODEL_DIR,
+    feature_name: str = "Spec",
+    batch: int = 256,
+) -> np.ndarray:
+    """A saida do regressor do POC I em `drive_db`, uma por linha de `queries`."""
+    from gefx.data.features import extract_feature, stack_features
+    from gefx.effects.catalog import EFFECT_PARAMETER_RANGES
+    from gefx.training.inference import load_trained_chain
+
+    spec = EFFECT_PARAMETER_RANGES["distortion"][0]
+    lo, hi = float(spec["min"]), float(spec["max"])
+    chain = load_trained_chain(model_dir)
+    predicted = np.empty(len(queries), dtype=float)
+    for start in range(0, len(queries), batch):
+        part = queries.iloc[start : start + batch]
+        stacked = stack_features(
+            [
+                extract_feature(Path(root) / arm / EFFECT_FOLDER / name, feature_name)
+                for arm, name in zip(part["arm"], part["file_name"])
+            ],
+            feature_name,
+        )
+        predicted[start : start + batch] = chain.predict(stacked)[:, 0]
+    return lo + predicted * (hi - lo)
+
+
 def baseline_b1(
     root: Path,
     model_dir: Path = POC1_MODEL_DIR,
@@ -244,56 +309,7 @@ def baseline_b1(
     sai em dB sem conversao. Em `pedalboard-tanh`, a mesma implementacao do
     treino, so muda a faixa de niveis.
     """
-    from gefx.data.features import extract_feature, stack_features
-    from gefx.effects.catalog import EFFECT_PARAMETER_RANGES
-    from gefx.training.inference import load_trained_chain
-
-    spec = EFFECT_PARAMETER_RANGES["distortion"][0]
-    lo, hi = float(spec["min"]), float(spec["max"])
-
     queries = split_frames(Path(root), arms)[EVAL_SPLITS[split][0]]
-
-    chain = load_trained_chain(model_dir)
-    predicted = np.empty(len(queries), dtype=float)
-    for start in range(0, len(queries), batch):
-        part = queries.iloc[start : start + batch]
-        stacked = stack_features(
-            [
-                extract_feature(Path(root) / arm / EFFECT_FOLDER / name, feature_name)
-                for arm, name in zip(part["arm"], part["file_name"])
-            ],
-            feature_name,
-        )
-        predicted[start : start + batch] = chain.predict(stacked)[:, 0]
-
-    drive_db = lo + predicted * (hi - lo)
-    ladder = np.array(
-        sorted(queries.groupby("drive_level")["drive_db_equivalente"].first())
-    )
-    out = pd.DataFrame(
-        {
-            "file_name": queries["file_name"].to_numpy(),
-            "query_arm": queries["arm"].to_numpy(),
-            "query_content": queries["content_id"].to_numpy(),
-            "retrieved_arm": "(regressor POC I)",
-            "retrieved_file": "",
-            "distance": np.nan,
-            "true_drive_level": queries["drive_level"].to_numpy(),
-            "pred_drive_level": nearest_level(drive_db, ladder),
-            "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
-            "pred_drive_db": drive_db,
-        }
-    )
-    sizes = alphabet(queries)
-    metrics: Dict[str, object] = {
-        "overall": score(out, sizes),
-        "per_query_arm": {
-            str(arm): score(part, sizes)
-            for arm, part in out.groupby("query_arm", sort=True)
-        },
-        "model_dir": str(model_dir),
-        "feature": feature_name,
-        "alphabet": sizes,
-        **_context(queries),
-    }
-    return RetrievalResult(predictions=out, metrics=metrics)
+    drive_db = b1_drive_db(root, queries, model_dir, feature_name, batch)
+    return readout(queries, drive_db, "(regressor POC I)",
+                   model_dir=str(model_dir), feature=feature_name)

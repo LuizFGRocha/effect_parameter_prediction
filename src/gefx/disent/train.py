@@ -13,14 +13,12 @@ Os quatro rodam pelo mesmo codigo, arquitetura, amostrador e semente.
 
 Protocolo: `steps` passos, com o erro de validacao (a mesma busca do teste, em
 dB, sobre `val_query` e `val_catalog`) medido a cada `eval_every`, e os pesos do
-minimo sao os que ficam (Goodfellow et al. 2016, alg. 7.1). Por padrao o treino
-nao para antes: como no SupCon oficial, o cosseno roda inteiro. Com `patience` > 0
-ele para depois de tantas avaliacoes sem descer -- a semantica de
-`keras.callbacks.EarlyStopping` com `restore_best_weights=True` --, mas com o
-cosseno isso cortava a taxa antes do fim (o minimo e no fim do cosseno).
+minimo sao os que ficam (Goodfellow et al. 2016, alg. 7.1). O treino nao para
+antes: como no SupCon oficial, o cosseno roda inteiro. A parada antecipada (16
+avaliacoes sem descer) cortava a taxa antes do fim e saiu.
 
 A taxa de aprendizado decai em cosseno ao longo de `steps`, de `learning_rate` a
-`learning_rate * lr_min_fraction`, como no `SupConLoss` oficial (`--cosine` em
+`learning_rate * lr_min_fraction`, como no SupCon oficial (`--cosine` em
 HobbitLong/SupContrast: ate `lr * 0.1 ** 3`). E o `keras.optimizers.schedules.
 CosineDecay`. O POC I tinha taxa fixa; com ela a validacao oscilava o bastante
 (0,08 dB no SupCon, 0,32 dB na regressao) para o minimo ser um vale isolado.
@@ -28,7 +26,9 @@ CosineDecay`. O POC I tinha taxa fixa; com ela a validacao oscilava o bastante
 Velocidade: os passos e a projecao rodam compilados pelo XLA (`jit_compile`), com
 a mesma conta em float32 -- so a fusao das operacoes e o algoritmo de convolucao
 mudam. As saidas diferem ~1e-4 da execucao sem XLA, a ordem do TF32 que a GPU ja
-usa nas convolucoes (padrao do TensorFlow nas placas Ampere). O lote seguinte e lido do
+usa nas convolucoes (padrao do TensorFlow nas placas Ampere); com e sem XLA deram o
+mesmo resultado (3 sementes a 20k). Fica desligado com `deterministic`: o gradiente
+do MaxPool no XLA nao tem versao deterministica. O lote seguinte e lido do
 disco numa thread enquanto a GPU roda o atual; os lotes sao sorteados na thread
 principal, na mesma ordem de antes. Mediu-se 158 -> 68 ms por passo so com o XLA.
 
@@ -52,13 +52,11 @@ import pandas as pd
 from gefx.config import git_revision
 from gefx.disent.features import FeatureStore, PixelStandardizer
 from gefx.disent.losses import DEFAULT_TEMPERATURE, sup_con_loss
-from gefx.disent.model import REGRESSION, WEIGHTS_FILE, EncoderConfig, build_model
-from gefx.disent.retrieval import alphabet, nearest_level, retrieve_by_arm, score
-from gefx.disent.grid import EVAL_SPLITS, VALIDATION_RECORDINGS
+from gefx.disent.model import REGRESSION, TECHNIQUES, WEIGHTS_FILE, EncoderConfig, build_model
+from gefx.disent.retrieval import readout, retrieve_by_arm
+from gefx.disent.grid import EVAL_SPLITS, VALIDATION_RECORDINGS, split_file
 from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
 from gefx.disent.sidecar import split_frames
-
-TECHNIQUES: Tuple[str, ...] = ("random_encoder", "bn_only", "supcon", REGRESSION)
 
 RESULTS_ROOT = Path("results/disent/v2/validacao/encoder")
 
@@ -67,11 +65,11 @@ BASELINES: Dict[str, str] = {"B0": "b0", "B1": "b1"}
 
 
 def metrics_file(split: str) -> str:
-    return f"metrics_{split}.json"
+    return split_file("metrics", split, "json")
 
 
 def predictions_file(split: str) -> str:
-    return f"predictions_{split}.csv"
+    return split_file("predictions", split, "csv")
 
 
 @dataclass
@@ -89,24 +87,17 @@ class TrainConfig:
     configs_per_batch: int = 8
     views_per_config: int = 8
     learning_rate: float = 1e-3
-    #: "cosine" (o SupCon oficial) ou "constant" (o POC I).
-    lr_schedule: str = "cosine"
     #: O fim do cosseno, em fracao da taxa inicial: `0.1 ** 3`, como no original.
     lr_min_fraction: float = 1e-3
     temperature: float = DEFAULT_TEMPERATURE
     eval_every: int = 500
-    #: Avaliacoes sem descer o erro de validacao antes de parar; 0 nao para.
-    #: 16 cortava o cosseno: o SupCon da semente 3 parou em 17.500 (melhor 9.500).
-    patience: int = 0
     #: Gravacoes de cada lado da validacao, tiradas do treino.
     validation_recordings: int = VALIDATION_RECORDINGS
     embed_batch: int = 128
     seed: int = 20260908
-    #: Sem isto a semente so fixa a inicializacao, e duas execucoes divergem.
+    #: Sem isto a semente so fixa a inicializacao, e duas execucoes divergem. Desliga
+    #: o XLA.
     deterministic: bool = False
-    #: Passos compilados pelo XLA: a mesma conta, ~2,3x mais rapido. Desligado com
-    #: `deterministic`: o gradiente do MaxPool no XLA nao tem versao deterministica.
-    jit_compile: bool = True
     #: Desligar quando quem mede e outra coisa (curva de diversidade).
     evaluate_at_end: bool = True
     output_dir: Optional[Path] = None
@@ -126,35 +117,23 @@ class TrainConfig:
 
 # --- passo de treino ----------------------------------------------------------
 def learning_rate(config: TrainConfig):
-    """A taxa de `config`: fixa, ou o `CosineDecay` do Keras ao longo de `steps`."""
+    """O `CosineDecay` do Keras ao longo de `steps`, como o `--cosine` do SupCon oficial."""
     import keras
 
-    if config.lr_schedule == "constant":
-        return config.learning_rate
-    if config.lr_schedule == "cosine":
-        return keras.optimizers.schedules.CosineDecay(
-            config.learning_rate, decay_steps=config.steps, alpha=config.lr_min_fraction)
-    raise ValueError(f"lr_schedule desconhecido: {config.lr_schedule!r}")
+    return keras.optimizers.schedules.CosineDecay(
+        config.learning_rate, decay_steps=config.steps, alpha=config.lr_min_fraction)
 
 
-def make_optimizer(config: TrainConfig):
-    import keras
-
-    return keras.optimizers.Adam(learning_rate=learning_rate(config))
-
-
-def make_step(model, optimizer, temperature: float, jit_compile: bool = False):
+def make_step(model, optimizer, loss_fn: Callable, jit_compile: bool = False):
+    """Um passo de gradiente de `loss_fn(saida, rotulo)`."""
     import tensorflow as tf
 
     variables = model.trainable_variables
 
     @tf.function(jit_compile=jit_compile, reduce_retracing=True)
-    def step(x, config_label):
+    def step(x, label):
         with tf.GradientTape() as tape:
-            z_e = model(x, training=True)
-            # Uma vista por linha: [bsz, n_views=1, dim], como o SupConLoss pede.
-            # O rotulo e o nivel de drive (`config_index == drive_level`).
-            loss = sup_con_loss(z_e[:, None, :], config_label, temperature)
+            loss = loss_fn(model(x, training=True), label)
         gradients = tape.gradient(loss, variables)
         optimizer.apply_gradients(zip(gradients, variables))
         return loss
@@ -162,21 +141,21 @@ def make_step(model, optimizer, temperature: float, jit_compile: bool = False):
     return step
 
 
-def make_regression_step(model, optimizer, jit_compile: bool = False):
+def supcon_loss(temperature: float) -> Callable:
+    """O SupCon sobre `z_e`, rotulado pelo nivel de drive (`config_index == drive_level`)."""
+
+    def loss(z_e, config_label):
+        # Uma vista por linha: [bsz, n_views=1, dim], como o SupConLoss pede.
+        return sup_con_loss(z_e[:, None, :], config_label, temperature)
+
+    return loss
+
+
+def mse_loss(drive, target):
     """MSE entre a saida sigmoide e o drive em [0, 1], como o regressor do POC I."""
     import tensorflow as tf
 
-    variables = model.trainable_variables
-
-    @tf.function(jit_compile=jit_compile, reduce_retracing=True)
-    def step(x, drive):
-        with tf.GradientTape() as tape:
-            loss = tf.reduce_mean(tf.square(model(x, training=True) - drive))
-        gradients = tape.gradient(loss, variables)
-        optimizer.apply_gradients(zip(gradients, variables))
-        return loss
-
-    return step
+    return tf.reduce_mean(tf.square(drive - target))
 
 
 def drive_range(frame: pd.DataFrame) -> Tuple[float, float]:
@@ -214,29 +193,40 @@ def prefetched(load: Callable, items: Iterable) -> Iterator:
 
 
 # --- avaliacao ----------------------------------------------------------------
-def forward(model):
-    """A passada de inferencia compilada pelo XLA, uma por modelo."""
-    import tensorflow as tf
-
-    if getattr(model, "_gefx_forward", None) is None:
-        # Fora do rastreio de atributos do Keras: nao e camada nem variavel.
-        object.__setattr__(model, "_gefx_forward", tf.function(
-            lambda x: model(x, training=False), jit_compile=True, reduce_retracing=True))
-    return model._gefx_forward
-
-
 def embed(model, store: FeatureStore, standardizer: PixelStandardizer,
           batch: int = 128) -> np.ndarray:
-    """`z_e` de todas as linhas do `store`, na ordem do `frame`."""
+    """`z_e` de todas as linhas do `store`, na ordem do `frame`.
+
+    `predict_on_batch` e a passada de inferencia do Keras, compilada pelo XLA uma vez
+    por modelo (e sem ele quando o determinismo do TensorFlow esta ligado).
+    """
     out = np.empty((len(store), model.output_shape[-1]), dtype=np.float32)
     rows = np.arange(len(store))
     blocks = [rows[start:start + batch] for start in range(0, len(rows), batch)]
-    run = forward(model)
     loaded = prefetched(lambda block: (block, standardizer.transform(store.take(block))),
                         blocks)
     for block, features in loaded:
-        out[block] = np.asarray(run(features))
+        out[block] = model.predict_on_batch(features)
     return out
+
+
+def search(
+    model,
+    frames: Mapping[str, pd.DataFrame],
+    stores: Mapping[str, FeatureStore],
+    standardizer: PixelStandardizer,
+    split: str,
+    batch: int = 128,
+    same_arms: Sequence[bool] = (False,),
+):
+    """A busca de `split` com o codigo de `model`: um resultado por `same_arm`, e os
+    codigos das consultas."""
+    query_key, catalog_key = EVAL_SPLITS[split]
+    z_query = embed(model, stores[query_key], standardizer, batch)
+    z_catalog = embed(model, stores[catalog_key], standardizer, batch)
+    results = [retrieve_by_arm(frames[query_key], frames[catalog_key], z_query, z_catalog,
+                               same_arm=same_arm) for same_arm in same_arms]
+    return results, z_query
 
 
 def evaluate(
@@ -256,21 +246,14 @@ def evaluate(
             f"catalogo, ha {sorted(arms)}. Use evaluate_at_end=False e meca "
             f"por fora."
         )
-    queries, catalog = frames[query_key], frames[catalog_key]
-    z_query = embed(model, stores[query_key], standardizer, batch)
-    z_catalog = embed(model, stores[catalog_key], standardizer, batch)
-    scalar = z_query.shape[1] == 1
-
-    metric = "euclidean" if scalar else "cosine"
-    cross = retrieve_by_arm(queries, catalog, z_query, z_catalog,
-                            same_arm=False, metric=metric)
-    same = retrieve_by_arm(queries, catalog, z_query, z_catalog,
-                           same_arm=True, metric=metric)
+    (cross, same), z_query = search(model, frames, stores, standardizer, split, batch,
+                                    same_arms=(False, True))
     metrics: Dict[str, object] = dict(cross.metrics)
     metrics["split"] = split
     metrics["same_arm_control"] = same.metrics["overall"]
-    if scalar:
-        metrics["direct_readout"] = direct_readout(queries, frames["train"], z_query[:, 0])
+    if z_query.shape[1] == 1:
+        metrics["direct_readout"] = direct_readout(frames[query_key], frames["train"],
+                                                   z_query[:, 0])
     return cross.predictions, metrics
 
 
@@ -281,19 +264,14 @@ def validation_error(
     standardizer: PixelStandardizer,
     batch: int = 128,
 ) -> Dict[str, float]:
-    """A busca do teste sobre a validacao: o erro em dB que decide a parada.
+    """A busca do teste sobre a validacao: o erro em dB que escolhe os pesos.
 
     Entre implementacoes, como o teste; com um arm so no treino (a curva de
     diversidade), dentro dele, que e a unica busca possivel sem olhar o retirado.
     """
-    queries, catalog = frames["val_query"], frames["val_catalog"]
-    z_query = embed(model, stores["val_query"], standardizer, batch)
-    z_catalog = embed(model, stores["val_catalog"], standardizer, batch)
-    same_arm = catalog["arm"].nunique() < 2
-    result = retrieve_by_arm(
-        queries, catalog, z_query, z_catalog, same_arm=same_arm,
-        metric="euclidean" if z_query.shape[1] == 1 else "cosine",
-    )
+    same_arm = frames["val_catalog"]["arm"].nunique() < 2
+    (result,), _ = search(model, frames, stores, standardizer, "validacao", batch,
+                          same_arms=(same_arm,))
     overall = result.metrics["overall"]
     return {"mae_db": float(overall["mae_db"]),
             "drive_exact": float(overall["drive_level"]["exact"]),
@@ -304,20 +282,23 @@ def direct_readout(queries: pd.DataFrame, train_frame: pd.DataFrame,
                    predicted: np.ndarray) -> Dict[str, object]:
     """O regressor lido sem catalogo: o degrau da escada mais proximo, como no B1."""
     lo, hi = drive_range(train_frame)
-    drive_db = lo + predicted * (hi - lo)
-    ladder = np.array(sorted(queries.groupby("drive_level")["drive_db_equivalente"].first()))
-    out = pd.DataFrame({
-        "query_arm": queries["arm"].to_numpy(),
-        "retrieved_arm": "(leitura direta)",
-        "true_drive_level": queries["drive_level"].to_numpy(),
-        "pred_drive_level": nearest_level(drive_db, ladder),
-        "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
-        "pred_drive_db": drive_db,
-    })
-    return score(out, alphabet(queries))
+    return readout(queries, lo + predicted * (hi - lo), "(leitura direta)").metrics["overall"]
 
 
 # --- laco ---------------------------------------------------------------------
+#: Padronizadores ja ajustados neste processo. O ajuste depende so das linhas de
+#: treino e da feature, nao da tecnica nem da semente, e custa uma passada pelo
+#: memmap do treino (~70 s): as execucoes de um mesmo comando o reaproveitam.
+_STANDARDIZERS: Dict[Tuple[str, str, int], PixelStandardizer] = {}
+
+
+def fitted_standardizer(store: FeatureStore, root: Path, feature: str) -> PixelStandardizer:
+    key = (str(Path(root).resolve()), feature, hash(tuple(store.frame["file_name"])))
+    if key not in _STANDARDIZERS:
+        _STANDARDIZERS[key] = PixelStandardizer.fit(store)
+    return _STANDARDIZERS[key]
+
+
 def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     """Treina (ou so calibra) uma tecnica e grava o que a torna reproduzivel."""
     import keras
@@ -327,8 +308,9 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         raise KeyError(f"tecnica desconhecida: {config.technique!r}. Ha {list(TECHNIQUES)}")
     if config.deterministic:
         tf.config.experimental.enable_op_determinism()
-        config = replace(config, jit_compile=False)
+    jit_compile = not config.deterministic
     keras.utils.set_random_seed(config.seed)
+    started = time.time()
 
     root = Path(config.dataset_root)
     frames = split_frames(root, config.arms, config.validation_recordings)
@@ -342,7 +324,7 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
             "o indice da grade e o cache de features estao em ordens diferentes"
         )
 
-    standardizer = PixelStandardizer.fit(stores["train"])
+    standardizer = fitted_standardizer(stores["train"], root, config.feature)
 
     # O manifesto grava a config que rodou, nao a pedida: `load_run` depende disso.
     config = replace(
@@ -352,22 +334,22 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
     model = build_model(config.encoder, config.technique)
 
     steps = 0 if config.technique == "random_encoder" else config.steps
+    optimizer = keras.optimizers.Adam(learning_rate=learning_rate(config))
     if config.technique == "bn_only":
-        step = make_bn_step(model, config.jit_compile)
+        step, label = make_bn_step(model, jit_compile), None
     elif config.technique == REGRESSION:
-        step = make_regression_step(model, make_optimizer(config), config.jit_compile)
+        step = make_step(model, optimizer, mse_loss, jit_compile)
         lo, hi = drive_range(index.frame)
-        drive = ((index.frame["drive_db_equivalente"].to_numpy() - lo) / (hi - lo))
+        drive = (index.frame["drive_db_equivalente"].to_numpy() - lo) / (hi - lo)
+        label = lambda batch: tf.constant(drive[batch.rows][:, None], dtype=tf.float32)
     else:
-        step = make_step(model, make_optimizer(config), config.temperature,
-                         config.jit_compile)
+        step = make_step(model, optimizer, supcon_loss(config.temperature), jit_compile)
+        label = lambda batch: tf.constant(batch.config, dtype=tf.int32)
 
     rng = np.random.default_rng(config.seed)
     history: List[Dict[str, float]] = []
     checkpoints: List[Dict[str, object]] = []
     best: Dict[str, object] = {"mae_db": float("inf"), "step": 0, "weights": None}
-    waited, executed = 0, 0
-    started = time.time()
 
     # Os lotes saem do `rng` aqui, em ordem; so a leitura vai para a thread.
     batches = (class_balanced_batch(index, rng, config.configs_per_batch,
@@ -376,15 +358,11 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         lambda batch: (batch, standardizer.transform(stores["train"].take(batch.rows))),
         batches)
     for number, (batch, features) in enumerate(loaded, start=1):
-        executed = number
         features = tf.constant(features)
-        if config.technique == "bn_only":
+        if label is None:
             step(features)
         else:
-            label = (tf.constant(drive[batch.rows][:, None], dtype=tf.float32)
-                     if config.technique == REGRESSION
-                     else tf.constant(batch.config, dtype=tf.int32))
-            loss = float(step(features, label))
+            loss = float(step(features, label(batch)))
             history.append({"loss": loss, "step": number})
             if verbose and (number == 1 or number % 100 == 0):
                 print(f"  passo {number:5d}/{steps}  {config.technique}={loss:.4f}", flush=True)
@@ -400,14 +378,6 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
             if validation["mae_db"] < best["mae_db"]:  # type: ignore[operator]
                 best = {"mae_db": validation["mae_db"], "step": number,
                         "weights": model.get_weights()}
-                waited = 0
-            else:
-                waited += 1
-                if config.patience and waited >= config.patience:
-                    if verbose:
-                        print(f"  parada: {waited} avaliacoes sem descer desde o "
-                              f"passo {best['step']}", flush=True)
-                    break
 
     if best["weights"] is not None:
         model.set_weights(best["weights"])
@@ -434,10 +404,10 @@ def train(config: TrainConfig, verbose: bool = True) -> Dict[str, object]:
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git_revision": git_revision(),
         "elapsed_seconds": round(elapsed, 1),
-        "config": config.as_dict(),
+        "config": {**config.as_dict(), "jit_compile": jit_compile},
         "splits": {name: int(len(frame)) for name, frame in frames.items()},
-        "steps_executed": executed,
-        "best_step": best["step"] or executed,
+        "steps_executed": steps,
+        "best_step": best["step"] or steps,
         "best_val_mae_db": best["mae_db"] if best["weights"] is not None else None,
         "checkpoints": checkpoints,
         # Da validacao; o teste vai para `metrics_teste.json`, no fim.
@@ -469,7 +439,7 @@ def load_baselines(baselines_dir: Path, split: str = "validacao") -> List[Dict[s
     """Uma linha por baseline gravado, mais o acaso de drive tirado do alfabeto dele."""
     rows: List[Dict[str, object]] = []
     for name, stem in BASELINES.items():
-        path = Path(baselines_dir) / f"{stem}_{split}.json"
+        path = Path(baselines_dir) / split_file(stem, split, "json")
         if not path.exists():
             continue
         metrics = json.loads(path.read_text(encoding="utf-8"))
@@ -495,9 +465,11 @@ def compare(
     que ja foram avaliadas em `split`. Os baselines saem de `baselines_dir`, por
     padrao a pasta acima de `results_dir`.
     """
+    from gefx.disent.probes import list_runs
+
     results_dir = Path(results_dir)
     if runs is None:
-        runs = sorted(path.parent.name for path in results_dir.glob("*/run.json"))
+        runs = list_runs(results_dir)
     rows = load_baselines(baselines_dir or results_dir.parent, split)
     for name in runs:
         manifest_path = results_dir / name / "run.json"
@@ -510,7 +482,6 @@ def compare(
             "run": name,
             "technique": manifest["config"]["technique"],
             "seed": manifest["config"]["seed"],
-            "time_pool": manifest["config"].get("encoder", {}).get("time_pool", "mean"),
             **summarize(metrics),
             "steps": manifest["steps_executed"],
             "best_step": manifest.get("best_step"),
@@ -530,21 +501,18 @@ def evaluate_runs(
     `predictions_<split>.csv` em cada execucao e devolve a escada dessa particao.
     Le cada execucao com os arms e a validacao com que ela treinou.
     """
-    from gefx.disent.probes import load_run
+    from gefx.disent.probes import list_runs, open_run
 
     results_dir = Path(results_dir)
     if runs is None:
-        runs = sorted(path.parent.name for path in results_dir.glob("*/run.json"))
+        runs = list_runs(results_dir)
     for name in runs:
         run_dir = results_dir / name
-        model, manifest = load_run(run_dir)
+        model, manifest, standardizer, frames = open_run(run_dir, dataset_root)
         run_config = manifest["config"]
         root = Path(dataset_root or run_config["dataset_root"])
-        frames = split_frames(root, run_config.get("arms"),
-                              run_config.get("validation_recordings", VALIDATION_RECORDINGS))
         stores = {key: FeatureStore(root, frames[key], run_config["feature"])
                   for key in EVAL_SPLITS[split]}
-        standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
         predictions, metrics = evaluate(model, frames, stores, standardizer,
                                         run_config.get("embed_batch", 128), split=split)
         predictions.to_csv(run_dir / predictions_file(split), index=False)

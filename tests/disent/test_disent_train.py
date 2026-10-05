@@ -215,7 +215,7 @@ def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_pa
 def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):
     from gefx.disent.features import FeatureStore, PixelStandardizer
     from gefx.disent.model import build_encoder
-    from gefx.disent.train import embed, forward
+    from gefx.disent.train import embed
 
     config = _config(tmp_path)
     frame = split_frames(config.dataset_root)["catalog"]
@@ -226,8 +226,8 @@ def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_pat
     codes = embed(model, store, standardizer, batch=8)
     assert codes.shape == (len(frame), config.encoder.effect_dim)
     # A mesma passada compilada: o teste e da ordem das linhas, nao do XLA.
-    direto = forward(model)(standardizer.transform(store.take(np.arange(3))))
-    assert np.allclose(codes[:3], np.asarray(direto), atol=1e-6)
+    direto = model.predict_on_batch(standardizer.transform(store.take(np.arange(3))))
+    assert np.allclose(codes[:3], direto, atol=1e-6)
 
 
 # --- o controle escalar -------------------------------------------------------
@@ -361,33 +361,20 @@ def _scripted_validation(monkeypatch, errors):
     return seen
 
 
-def test_training_stops_after_patience_evaluations_without_improvement(tmp_path, monkeypatch):
-    _scripted_validation(monkeypatch, [3.0, 2.0, 1.0, 1.5, 1.2, 0.5, 0.4])
-    manifest = train_module.train(
-        _config(tmp_path, steps=7, eval_every=1, patience=2), verbose=False)
-    assert manifest["steps_executed"] == 5
-    assert manifest["best_step"] == 3
-    assert manifest["best_val_mae_db"] == 1.0
-
-
 def test_the_weights_that_stay_are_those_of_the_validation_minimum(tmp_path, monkeypatch):
     from gefx.disent.model import WEIGHTS_FILE, build_encoder
 
     seen = _scripted_validation(monkeypatch, [3.0, 1.0, 2.0, 2.5])
-    config = _config(tmp_path, steps=4, eval_every=1, patience=2)
-    train_module.train(config, verbose=False)
+    config = _config(tmp_path, steps=4, eval_every=1)
+    manifest = train_module.train(config, verbose=False)
     model = build_encoder(config.encoder)
     model.load_weights(tmp_path / "out" / WEIGHTS_FILE)
     for saved, at_minimum in zip(model.get_weights(), seen[1]):
         assert np.array_equal(saved, at_minimum)
-
-
-def test_patience_zero_runs_every_step(tmp_path, monkeypatch):
-    _scripted_validation(monkeypatch, [1.0, 2.0, 3.0, 4.0])
-    manifest = train_module.train(
-        _config(tmp_path, steps=4, eval_every=1, patience=0), verbose=False)
+    # O treino nao para antes: roda todos os passos e guarda o minimo.
     assert manifest["steps_executed"] == 4
-    assert manifest["best_step"] == 1
+    assert manifest["best_step"] == 2
+    assert manifest["best_val_mae_db"] == 1.0
 
 
 def test_the_validation_error_is_the_test_search_on_the_validation_split(tmp_path):
@@ -435,11 +422,3 @@ def test_the_cosine_goes_from_the_rate_to_the_supcon_floor_over_the_budget():
     assert float(schedule(500)) == pytest.approx(1e-3 * (1 + 1e-3) / 2, rel=1e-4)
     assert float(schedule(1000)) == pytest.approx(1e-6, rel=1e-3)
 
-
-def test_the_constant_schedule_is_the_poc1_fixed_rate():
-    assert train_module.learning_rate(TrainConfig(lr_schedule="constant")) == 1e-3
-
-
-def test_an_unknown_schedule_is_refused():
-    with pytest.raises(ValueError, match="lr_schedule"):
-        train_module.learning_rate(TrainConfig(lr_schedule="step"))

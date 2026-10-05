@@ -338,12 +338,17 @@ default) is the POC I CNN (`ARCHITECTURES["poc1"]`, tested layer by layer agains
 - Without the time mean (flatten) the previous encoder lost 3.1 pt, IC95 [+2.2; +4.0].
 - 16,000-step curves (1 seed) flatten after ~10k; at 16k the chosen encoder reached
   70.5% with content 7% / pedal 50% in the probes, the Dense(256) one 72.9% / 24% / 63%.
+- The ladder (`escada/`) and the time-mean ablation (`ablacao_tempo/`) predate the
+  validation split, the cosine and best-checkpoint selection, so HEAD can't reproduce
+  them whatever the options; check out 501e018 / 617ea20 for that. Their exclusive
+  options (`time_pool="max"`, the fixed rate `lr_schedule="constant"`, `--time-pool`)
+  were removed; `poc1` and `flatten` stay.
 
 Protocol: up to 20,000 steps with the learning rate on a cosine from 1e-3 to 1e-6 over the
 budget (`--cosine` of the official SupContrast, `lr * 0.1 ** 3`; Keras `CosineDecay`),
 validation error (the test's cross-arm search, in dB) every 500 steps, keep the
 minimum's weights (Goodfellow et al. 2016, alg. 7.1). **No early stopping** since
-2026-10-05 (`patience` 0): with patience 16 (Prechelt 1998) the cosine was cut before
+2026-10-05 (the `patience` option was removed afterwards): with patience 16 (Prechelt 1998) the cosine was cut before
 it annealed (SupCon seed 3 stopped at 17,500 with its best at 9,500; the 40k test
 likewise), and the official SupContrast trains the whole budget. The cosine and
 a longer patience came after the first validation runs: at POC I's fixed rate the
@@ -361,17 +366,18 @@ by the budget, so 20k stays. **The by-recording bootstrap CI does not include tr
 variance**: two identical 3-seed batches of SupCon at 10k differed by −1.45 pt
 [−2.54; −0.31], and same-seed reruns differ by up to ±2.5 pt (GPU nondeterminism).
 Never decide on one seed, and read a by-recording CI as a lower bound on the
-uncertainty; compare at the seed level (or more seeds) when the gap is ~1–2 pt. Steps and the inference pass are XLA-compiled (`jit_compile`,
-off under `--deterministic`, which lacks a deterministic XLA MaxPool gradient) and the
-next batch is read in a thread: 59 → 13 min per SupCon run at 10k. XLA vs no XLA over
+uncertainty; compare at the seed level (or more seeds) when the gap is ~1–2 pt. Steps and the inference pass are XLA-compiled (the
+inference is Keras `predict_on_batch`; both off under `--deterministic`, which lacks a
+deterministic XLA MaxPool gradient — the `--sem-xla` flag used for the check was removed)
+and the next batch is read in a thread: 59 → 13 min per SupCon run at 10k. XLA vs no XLA over
 3 seeds at 20k: −0.10 pt [−1.57; +1.24]; regression matched too. Mixed precision
 (36 vs 68 ms/step on the GPU) was not adopted: the memmap read (~54 ms/batch) would
 dominate. Dropping conv blocks only saves 15–25%.
 Validation = 2 × 20 of the 240 train recordings (`val_query`, `val_catalog`), carved at
 load time by `grid.validation_recordings`, so the sidecar and the test split are
 unchanged. **During development only the validation is read** (user's rule,
-2026-10-01): `train`, `retrieve`, `probe` (`val_catalog`), `loo`, `diversity` and
-`plots` default to it and write `*_validacao.*`. The test is read once, at the end, with
+2026-10-01): `train`, `retrieve`, `probe` (it probes the split's catalog), `loo`, `diversity` and
+`plots` default to it and write `*_validacao.*` (names from `grid.split_file`). The test is read once, at the end, with
 the final models: `scripts/poc2_teste.sh` (`gefx disent evaluate --split teste`, the
 `--split teste` flags, `between`, which only exists on test recordings). Defaults write
 to `results/disent/v2/validacao/` (`scripts/poc2_validacao.sh`). Everything under `results/disent/v2/encoder/` and

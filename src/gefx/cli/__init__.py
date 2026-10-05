@@ -189,12 +189,14 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
               f"MAE {item['drive_level']['mae_levels']:.2f}  "
               f"{item['mae_db']:.2f} dB")
 
-    destino = Path(args.results_dir) / f"{args.baseline}_{args.split}"
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    result.predictions.to_csv(destino.with_suffix(".csv"), index=False)
-    destino.with_suffix(".json").write_text(json.dumps(result.metrics, indent=2),
-                                            encoding="utf-8")
-    print(f"\nescrito em {destino}.{{csv,json}}")
+    from gefx.disent.grid import split_file
+
+    raiz = Path(args.results_dir)
+    raiz.mkdir(parents=True, exist_ok=True)
+    result.predictions.to_csv(raiz / split_file(args.baseline, args.split, "csv"), index=False)
+    destino = raiz / split_file(args.baseline, args.split, "json")
+    destino.write_text(json.dumps(result.metrics, indent=2), encoding="utf-8")
+    print(f"\nescrito em {destino.with_suffix('')}.{{csv,json}}")
 
 
 def _cmd_disent_plots(args: argparse.Namespace) -> None:
@@ -207,7 +209,12 @@ def _cmd_disent_plots(args: argparse.Namespace) -> None:
         print(f"  {caminho}")
 
 
-_SPLIT_HELP = "validacao: o que o desenvolvimento le. teste: so na passada final."
+def _add_split(parser: argparse.ArgumentParser, default: str = "validacao",
+               help: str = "validacao: o que o desenvolvimento le. teste: so na passada "
+                           "final.") -> None:
+    from gefx.disent.grid import EVAL_SPLITS
+
+    parser.add_argument("--split", default=default, choices=list(EVAL_SPLITS), help=help)
 
 
 def _write_table(tabela, destino: Path) -> None:
@@ -218,46 +225,37 @@ def _write_table(tabela, destino: Path) -> None:
     print(f"\ntabela em {destino}")
 
 
+#: Flags de `gefx disent train` que vao direto para o `TrainConfig`. Sem a flag,
+#: fica o padrao do `TrainConfig`: os numeros nao se repetem aqui.
+_TRAIN_FLAGS = ("feature", "steps", "configs_per_batch", "views_per_config",
+                "learning_rate", "temperature", "eval_every", "seed")
+
+
 def _cmd_disent_train(args: argparse.Namespace) -> None:
     from dataclasses import replace
 
+    from gefx.disent.grid import split_file
     from gefx.disent.model import ARCHITECTURES
-    from gefx.disent.train import RESULTS_ROOT, TECHNIQUES, TrainConfig, compare, train
+    from gefx.disent.train import TrainConfig, compare, train
 
-    escolhidas = list(dict.fromkeys(args.technique or ["supcon"]))
-    desconhecidas = [nome for nome in escolhidas if nome not in TECHNIQUES]
-    if desconhecidas:
-        raise SystemExit(f"tecnica desconhecida: {desconhecidas}. Ha {list(TECHNIQUES)}")
-    encoder = ARCHITECTURES[args.arch]
-    if args.time_pool:
-        encoder = replace(encoder, time_pool=args.time_pool)
+    flags = {name: getattr(args, name) for name in _TRAIN_FLAGS
+             if getattr(args, name) is not None}
+    base = TrainConfig(
+        dataset_root=Path(args.output_root),
+        arms=tuple(args.arm) if args.arm else None,
+        deterministic=args.deterministic,
+        encoder=ARCHITECTURES[args.arch],
+        **flags,
+    )
     raiz = Path(args.results_dir)
-    for nome in escolhidas:
+    for nome in dict.fromkeys(args.technique or ["supcon"]):
         # A semente padrao fica em `<tecnica>/`; as outras, ao lado.
-        pasta = nome if args.seed == TrainConfig.seed else f"{nome}_s{args.seed}"
+        pasta = nome if base.seed == TrainConfig.seed else f"{nome}_s{base.seed}"
         print(f"[{pasta}]")
-        train(TrainConfig(
-            dataset_root=Path(args.output_root),
-            feature=args.feature,
-            technique=nome,
-            arms=tuple(args.arm) if args.arm else None,
-            steps=args.steps,
-            configs_per_batch=args.configs_per_batch,
-            views_per_config=args.views_per_config,
-            learning_rate=args.learning_rate,
-            temperature=args.temperature,
-            eval_every=args.eval_every,
-            patience=args.patience,
-            lr_schedule=args.lr_schedule,
-            seed=args.seed,
-            deterministic=args.deterministic,
-            jit_compile=not args.sem_xla,
-            output_dir=raiz / pasta,
-            encoder=encoder,
-        ))
+        train(replace(base, technique=nome, output_dir=raiz / pasta))
 
     print()
-    _write_table(compare(raiz), raiz / "escada_validacao.csv")
+    _write_table(compare(raiz), raiz / split_file("escada", "validacao", "csv"))
 
 
 def _cmd_disent_probe(args: argparse.Namespace) -> None:
@@ -267,11 +265,13 @@ def _cmd_disent_probe(args: argparse.Namespace) -> None:
         Path(args.results_dir), Path(args.output_root),
         runs=args.run, split=args.split, folds=args.folds, seed=args.seed,
     )
-    _write_table(tabela, Path(args.results_dir) / f"sondas_{args.split}.csv")
+    from gefx.disent.grid import split_file
+
+    _write_table(tabela, Path(args.results_dir) / split_file("sondas", args.split, "csv"))
 
 
 def _cmd_disent_diversity(args: argparse.Namespace) -> None:
-    from gefx.disent.loo import arm_diversity_curve
+    from gefx.disent.loo import arm_diversity_curve, summary_file
 
     tabela = arm_diversity_curve(
         args.held_out, Path(args.output_root), Path(args.results_dir),
@@ -280,36 +280,36 @@ def _cmd_disent_diversity(args: argparse.Namespace) -> None:
     )
     print()
     print(tabela.to_string(index=False))
-    print(f"\ntabela em {Path(args.results_dir) / f'resumo_{args.split}.csv'}")
+    print(f"\ntabela em {Path(args.results_dir) / summary_file(args.split)}")
 
 
 def _cmd_disent_loo(args: argparse.Namespace) -> None:
-    from gefx.disent.loo import leave_one_arm_out, transfer_cost
+    from gefx.disent.loo import cost_file, leave_one_arm_out, transfer_cost
+    from gefx.disent.train import metrics_file
 
     tabela = leave_one_arm_out(
-        Path(args.output_root), Path(args.results_dir),
-        steps=args.steps, seed=args.seed,
-        seeds=[args.seed] + [s for s in (args.extra_seed or []) if s != args.seed],
+        Path(args.output_root), Path(args.results_dir), steps=args.steps,
+        seeds=list(dict.fromkeys([args.seed, *(args.extra_seed or [])])),
         split=args.split,
     )
     # O encoder treinado com todos os arms, na pasta acima da do leave-one-out.
     custo = transfer_cost(tabela, Path(args.results_dir).parent / "supcon"
-                          / f"metrics_{args.split}.json")
+                          / metrics_file(args.split))
     print()
     print(custo.to_string(index=False))
     print(f"\ncusto medio de nunca ter visto a implementacao: "
           f"{custo.custo_pontos.mean():+.1f} pontos")
     print(custo.groupby("estrato").custo_pontos.mean().round(1).to_string())
-    custo.to_csv(Path(args.results_dir) / f"custo_de_transferencia_{args.split}.csv",
-                 index=False)
+    custo.to_csv(Path(args.results_dir) / cost_file(args.split), index=False)
 
 
 def _cmd_disent_evaluate(args: argparse.Namespace) -> None:
+    from gefx.disent.grid import split_file
     from gefx.disent.train import evaluate_runs
 
     raiz = Path(args.results_dir)
     _write_table(evaluate_runs(raiz, args.run, split=args.split),
-                 raiz / f"escada_{args.split}.csv")
+                 raiz / split_file("escada", args.split, "csv"))
 
 
 def _cmd_disent_validate(args: argparse.Namespace) -> None:
@@ -438,6 +438,8 @@ def build_parser() -> argparse.ArgumentParser:
     cross_eval.set_defaults(func=_cmd_cross_impl_eval)
 
     # gefx disent
+    from gefx.disent.model import ARCHITECTURES, TECHNIQUES
+
     disent = sub.add_parser("disent", help="POC II: recuperacao por um codigo de efeito desemaranhado.")
     disent_sub = disent.add_subparsers(dest="disent_command", required=True)
 
@@ -503,8 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_retrieve.add_argument("--results-dir", default="results/disent/v2/validacao",
                                  help="Grava <results-dir>/<baseline>_<split>.{csv,json}, "
                                       "onde a escada e as figuras os procuram.")
-    disent_retrieve.add_argument("--split", default="validacao",
-                                 choices=["validacao", "teste"], help=_SPLIT_HELP)
+    _add_split(disent_retrieve)
     disent_retrieve.add_argument("--arm", action="append", default=None,
                                  help="Restringe o roster. Padrao: todos.")
     disent_retrieve.set_defaults(func=_cmd_disent_retrieve)
@@ -515,8 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Baselines na raiz, o encoder em <results-dir>/encoder.")
     disent_plots.add_argument("--out-dir", default=None,
                               help="Padrao: <results-dir>/figuras_<split>.")
-    disent_plots.add_argument("--split", default="validacao",
-                              choices=["validacao", "teste"], help=_SPLIT_HELP)
+    _add_split(disent_plots)
     disent_plots.set_defaults(func=_cmd_disent_plots)
 
     disent_cache = disent_sub.add_parser(
@@ -535,49 +535,38 @@ def build_parser() -> argparse.ArgumentParser:
     disent_train.add_argument("--output-root", default="datasets/disent_v2",
                               help="Raiz do dataset do POC II.")
     disent_train.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
-    disent_train.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
+    disent_train.add_argument("--feature", default=None, choices=FEATURE_CHOICES,
+                              help="Padrao: Spec.")
     disent_train.add_argument("--technique", action="append", default=None,
-                              choices=["supcon", "random_encoder", "bn_only",
-                                       "regressao"],
+                              choices=list(TECHNIQUES),
                               help="Repetivel. Padrao: supcon. random_encoder: "
                                    "zero passos. bn_only: so calibra a BatchNorm, sem "
                                    "gradiente. regressao: o mesmo tronco com uma saida "
                                    "so, o drive em dB, por MSE.")
     disent_train.add_argument("--arm", action="append", default=None,
                               help="Restringe as implementacoes.")
-    disent_train.add_argument("--steps", type=int, default=20000,
-                              help="O teto; o treino para antes pela validacao.")
-    disent_train.add_argument("--patience", type=int, default=0,
-                              help="Avaliacoes sem descer o erro de validacao antes "
-                                   "de parar (0: roda todos os passos). Os pesos do "
-                                   "minimo sao os que ficam.")
-    disent_train.add_argument("--configs-per-batch", type=int, default=8)
-    disent_train.add_argument("--views-per-config", type=int, default=8)
-    disent_train.add_argument("--learning-rate", type=float, default=1e-3)
-    disent_train.add_argument("--temperature", type=float, default=0.07)
-    disent_train.add_argument("--eval-every", type=int, default=500,
-                              help="0 desliga a validacao, e com ela a parada.")
-    disent_train.add_argument("--seed", type=int, default=20260908,
+    # Sem padrao aqui: sem a flag, vale o do `TrainConfig`.
+    disent_train.add_argument("--steps", type=int, default=None,
+                              help="Os passos, e o comprimento do cosseno (padrao 20.000). "
+                                   "Ficam os pesos do minimo do erro de validacao.")
+    disent_train.add_argument("--configs-per-batch", type=int, default=None)
+    disent_train.add_argument("--views-per-config", type=int, default=None)
+    disent_train.add_argument("--learning-rate", type=float, default=None,
+                              help="A taxa do inicio do cosseno (padrao 1e-3).")
+    disent_train.add_argument("--temperature", type=float, default=None)
+    disent_train.add_argument("--eval-every", type=int, default=None,
+                              help="Passos entre avaliacoes na validacao (padrao 500); "
+                                   "0 desliga, e ficam os pesos do fim.")
+    disent_train.add_argument("--seed", type=int, default=None,
                               help="Fora do padrao, grava em <tecnica>_s<semente>.")
     disent_train.add_argument("--deterministic", action="store_true",
-                              help="Nucleos deterministicos do TensorFlow. Sem isto a "
-                                   "semente fixa so a inicializacao e duas execucoes "
-                                   "identicas divergem. Custa ~20%% de velocidade.")
-    disent_train.add_argument("--sem-xla", action="store_true",
-                              help="Passos sem a compilacao do XLA (~2,3x mais lentos), "
-                                   "para conferir que ela nao muda o resultado.")
-    disent_train.add_argument("--arch", default="poc2", choices=["poc2", "poc1"],
+                              help="Nucleos deterministicos do TensorFlow, sem o XLA. Sem "
+                                   "isto a semente fixa so a inicializacao e duas execucoes "
+                                   "identicas divergem.")
+    disent_train.add_argument("--arch", default="poc2", choices=list(ARCHITECTURES),
                               help="poc2: o encoder do relatorio. poc1: a CNN do POC I "
                                    "(2 blocos de 6 e 12 filtros, sem media no tempo, "
                                    "duas densas de 64).")
-    disent_train.add_argument("--lr-schedule", default="cosine",
-                              choices=["cosine", "constant"],
-                              help="cosine: decai ate 0,001 x a taxa ao longo de --steps, "
-                                   "como o SupCon oficial. constant: a taxa fixa do POC I.")
-    disent_train.add_argument("--time-pool", default=None,
-                              choices=["mean", "max", "flatten"],
-                              help="Reducao do eixo do tempo no tronco; sem isto, a da "
-                                   "arquitetura. max e flatten sao a ablacao do poc2.")
     disent_train.set_defaults(func=_cmd_disent_train)
 
     disent_between = disent_sub.add_parser(
@@ -609,9 +598,8 @@ def build_parser() -> argparse.ArgumentParser:
     disent_probe.add_argument("--output-root", default="datasets/disent_v2")
     disent_probe.add_argument("--run", action="append", default=None,
                               help="Repetivel. Padrao: toda execucao em --results-dir.")
-    disent_probe.add_argument("--split", default="val_catalog",
-                              help="Particao sondada. O catalogo e o padrao porque "
-                                   "e o que a busca de fato consulta.")
+    _add_split(disent_probe, help="Sonda o catalogo dessa busca, o que ela de fato "
+                                  "consulta.")
     disent_probe.add_argument("--folds", type=int, default=3)
     disent_probe.add_argument("--seed", type=int, default=0)
     disent_probe.set_defaults(func=_cmd_disent_probe)
@@ -627,8 +615,7 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Repetivel. Repete o leave-one-out inteiro com outra "
                                  "semente; e o unico jeito de por barra no custo por "
                                  "arm, que tem so 800 consultas.")
-    disent_loo.add_argument("--split", default="validacao",
-                            choices=["validacao", "teste"], help=_SPLIT_HELP)
+    _add_split(disent_loo)
     disent_loo.set_defaults(func=_cmd_disent_loo)
 
     disent_diversity = disent_sub.add_parser(
@@ -646,8 +633,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_diversity.add_argument("--reuse", default="results/disent/v2/validacao/encoder/loo",
                                   help="Diretorio do leave-one-out: o ultimo ponto da "
                                        "curva e a mesma execucao e nao e retreinado.")
-    disent_diversity.add_argument("--split", default="validacao",
-                                  choices=["validacao", "teste"], help=_SPLIT_HELP)
+    _add_split(disent_diversity)
     disent_diversity.set_defaults(func=_cmd_disent_diversity)
 
     disent_evaluate = disent_sub.add_parser(
@@ -658,8 +644,7 @@ def build_parser() -> argparse.ArgumentParser:
     disent_evaluate.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
     disent_evaluate.add_argument("--run", action="append", default=None,
                                  help="Repetivel. Padrao: toda execucao em --results-dir.")
-    disent_evaluate.add_argument("--split", default="teste",
-                                 choices=["validacao", "teste"], help=_SPLIT_HELP)
+    _add_split(disent_evaluate, "teste")
     disent_evaluate.set_defaults(func=_cmd_disent_evaluate)
 
     disent_validate = disent_sub.add_parser(

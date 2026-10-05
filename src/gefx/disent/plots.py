@@ -137,7 +137,8 @@ def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
     disent retrieve`); o encoder em `<results_dir>/encoder/`. Uma pasta de figuras
     por particao: o teste so tem as suas depois da passada final.
     """
-    from gefx.disent.train import compare
+    from gefx.disent.loo import cost_file, summary_file
+    from gefx.disent.train import compare, metrics_file
 
     results_dir = Path(results_dir)
     encoder_dir = results_dir / "encoder"
@@ -154,7 +155,7 @@ def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
         desenha(*dados, alvo)
         escritos.append(alvo)
 
-    treinado = encoder_dir / "supcon" / f"metrics_{split}.json"
+    treinado = encoder_dir / "supcon" / metrics_file(split)
     if not treinado.exists():
         return escritos
     metricas = carrega(treinado)
@@ -163,12 +164,12 @@ def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
     grava("escada.png", plot_ladder, compare(encoder_dir, baselines_dir=results_dir, split=split),
           grid_step_db(metricas))
 
-    custo = encoder_dir / "loo" / f"custo_de_transferencia_{split}.csv"
+    custo = encoder_dir / "loo" / cost_file(split)
     if custo.exists():
         grava("custo_de_transferencia.png", plot_transfer_cost, pd.read_csv(custo), chance)
 
     # Uma pasta por semente: `diversidade`, `diversidade_s2`, ...
-    curvas = sorted(encoder_dir.glob(f"diversidade*/resumo_{split}.csv"))
+    curvas = sorted(encoder_dir.glob(f"diversidade*/{summary_file(split)}"))
     if curvas:
         dados = pd.concat([pd.read_csv(caminho) for caminho in curvas], ignore_index=True)
         arm = str(dados["arm_retirado"].iloc[0])
