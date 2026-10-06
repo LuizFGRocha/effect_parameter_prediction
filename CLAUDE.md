@@ -286,7 +286,8 @@ less new code.
   own grouped bootstrap again. It lives in `evaluation/metrics.py` (`compare_runs`), run as
   `gefx disent compare --a <run> ... --b <run> ...` (one pair per seed plus the seeds
   pooled per recording); it reproduces SupCon − regression on validation, +3.15
-  [+1.17; +4.95] (with the patience-16 SupCon s3 in `validacao/teto/paciencia16/`).
+  [+1.17; +4.95] (old-loop runs, now in `removidos/validacao_laco_proprio/encoder/`, with
+the patience-16 SupCon s3 in `validacao/teto/paciencia16/`).
 - Migrating to PyTorch (+ pytorch-metric-learning, whose `SupConLoss` and
   `AccuracyCalculator` match ours numerically) was evaluated on 2026-09-28 and **not
   done**: it would cut ~200 lines but require re-running every POC II result and keeping
@@ -402,8 +403,10 @@ callback and `EarlyStopping(restore_best_weights=True)` with no patience; `bn_on
 the same fit at rate 0), replacing our own loop. Every POC II run before that came from
 the old loop, and HEAD can't load them (the manifest now stores `architecture` +
 `input_shape`), so the validation round, LOO, diversity and the ladder are to be rerun
-(`scripts/poc2_validacao.sh`, `gefx disent loo`, `gefx disent diversity`,
-`scripts/poc2_escada.sh`). The new evaluation path reproduced the old SupCon and B1
+(`scripts/poc2_validacao.sh`, which now also runs `loo` and `diversity`, then
+`scripts/poc2_escada.sh`). The old loop's validation round, LOO and diversity were
+moved to `results/disent/v2/removidos/validacao_laco_proprio/` before the rerun
+(launched 2026-10-05); `validacao/teto/` stayed in place. The new evaluation path reproduced the old SupCon and B1
 validation metrics exactly (the regression's direct readout within 1e-7). XLA vs no XLA over
 3 seeds at 20k: −0.10 pt [−1.57; +1.24]; regression matched too. Mixed precision
 (36 vs 68 ms/step on the GPU) was not adopted: the memmap read (~54 ms/batch) would
