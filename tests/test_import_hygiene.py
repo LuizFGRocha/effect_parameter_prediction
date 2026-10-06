@@ -39,3 +39,17 @@ def test_the_two_feature_lists_do_not_drift():
     # `config.FEATURE_CHOICES` (usada pelo `choices` do argparse) e
     # `features.FEATURE_NAMES` (usada pela extracao) sao listas duplicadas.
     assert FEATURE_CHOICES == FEATURE_NAMES
+
+
+def test_requirements_txt_lists_the_same_dependencies_as_pyproject():
+    # `requirements.txt` existe para quem instala sem o pacote; e uma copia da
+    # lista do `pyproject.toml`, e uma copia desatualizada falha na instalacao
+    # de outra maquina, nao aqui.
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    declared = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    lines = (root / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    listed = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+    assert listed == declared["project"]["dependencies"]

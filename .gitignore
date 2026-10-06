@@ -5,6 +5,7 @@ results
 plugins
 *.md
 *.pyc
+*.egg-info/
 !CLAUDE.md
 documents
 

@@ -1,3 +1,5 @@
+# Copia das dependencias de `pyproject.toml` (`pip install -r requirements.txt`).
+# `tests/test_import_hygiene.py` confere que as duas listas nao divergem.
 numpy
 scipy
 librosa
