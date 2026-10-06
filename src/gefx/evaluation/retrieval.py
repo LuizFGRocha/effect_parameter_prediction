@@ -3,7 +3,10 @@
 Consulta e catalogo vem de splits de conteudo disjuntos, e por padrao o catalogo
 exclui o arm da consulta: a resposta tem de atravessar implementacoes. A
 diagonal (mesmo arm) fica como controle. A busca e por cosseno, a mesma para o
-B0 e para o codigo aprendido.
+B0 e para o codigo aprendido (`evaluate`).
+
+O treino so le a validacao (`metrics_validacao.json`); o teste e lido uma vez,
+no fim, com os modelos finais (`evaluation/runner.py`).
 """
 from __future__ import annotations
 
@@ -14,8 +17,15 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from gefx.disent.grid import EVAL_SPLITS
-from gefx.disent.sidecar import EFFECT_FOLDER, read_dataset, split_frames
+from gefx.data.grid import EVAL_SPLITS, split_file, split_frames
+
+def metrics_file(split: str) -> str:
+    return split_file("metrics", split, "json")
+
+
+def predictions_file(split: str) -> str:
+    return split_file("predictions", split, "csv")
+
 
 def nearest(queries: np.ndarray, catalog: np.ndarray,
             k: int = 1) -> Tuple[np.ndarray, np.ndarray]:
@@ -203,7 +213,8 @@ def baseline_b0(
     Mesma feature e mesma padronizacao por pixel (ajustada no treino) que o encoder
     recebe: a diferenca entre os dois e so o aprendizado.
     """
-    from gefx.disent.features import FeatureStore, PixelStandardizer
+    from gefx.data.dataset import FeatureStore
+    from gefx.training.scaling import PixelStandardizer
 
     query_key, catalog_key = EVAL_SPLITS[split]
     frames = split_frames(Path(root), arms)
@@ -260,32 +271,21 @@ def readout(queries: pd.DataFrame, drive_db: np.ndarray, source: str,
     return RetrievalResult(predictions=out, metrics=metrics)
 
 
-def b1_drive_db(
-    root: Path,
-    queries: pd.DataFrame,
-    model_dir: Path = POC1_MODEL_DIR,
-    feature_name: str = "Spec",
-    batch: int = 256,
-) -> np.ndarray:
-    """A saida do regressor do POC I em `drive_db`, uma por linha de `queries`."""
-    from gefx.data.features import extract_feature, stack_features
+def b1_drive_db(store, model_dir: Path = POC1_MODEL_DIR, batch: int = 256) -> np.ndarray:
+    """A saida do regressor do POC I em `drive_db`, uma por linha do `store`.
+
+    O `store` le o cache do `Spec`, a feature com que ele foi treinado, e o
+    `TrainedChain` aplica os scalers dele, como no `crossimpl`.
+    """
     from gefx.effects.catalog import EFFECT_PARAMETER_RANGES
     from gefx.training.inference import load_trained_chain
 
     spec = EFFECT_PARAMETER_RANGES["distortion"][0]
     lo, hi = float(spec["min"]), float(spec["max"])
     chain = load_trained_chain(model_dir)
-    predicted = np.empty(len(queries), dtype=float)
-    for start in range(0, len(queries), batch):
-        part = queries.iloc[start : start + batch]
-        stacked = stack_features(
-            [
-                extract_feature(Path(root) / arm / EFFECT_FOLDER / name, feature_name)
-                for arm, name in zip(part["arm"], part["file_name"])
-            ],
-            feature_name,
-        )
-        predicted[start : start + batch] = chain.predict(stacked)[:, 0]
+    predicted = np.empty(len(store), dtype=float)
+    for block, features in store.stream(np.arange(len(store)), chunk=batch):
+        predicted[block] = chain.predict(features)[:, 0]
     return lo + predicted * (hi - lo)
 
 
@@ -294,8 +294,6 @@ def baseline_b1(
     model_dir: Path = POC1_MODEL_DIR,
     split: str = "validacao",
     arms: Optional[Sequence[str]] = None,
-    feature_name: str = "Spec",
-    batch: int = 256,
 ) -> RetrievalResult:
     """B1: o regressor do POC I, sem retreino, aplicado aos arms do POC II.
 
@@ -303,7 +301,70 @@ def baseline_b1(
     sai em dB sem conversao. Em `pedalboard-tanh`, a mesma implementacao do
     treino, so muda a faixa de niveis.
     """
+    from gefx.data.dataset import FeatureStore
+
     queries = split_frames(Path(root), arms)[EVAL_SPLITS[split][0]]
-    drive_db = b1_drive_db(root, queries, model_dir, feature_name, batch)
+    drive_db = b1_drive_db(FeatureStore(Path(root), queries, "Spec"), model_dir)
     return readout(queries, drive_db, "(regressor POC I)",
-                   model_dir=str(model_dir), feature=feature_name)
+                   model_dir=str(model_dir), feature="Spec")
+
+
+# --- o codigo aprendido -------------------------------------------------------
+def embed(model, store, standardizer, batch: int = 128) -> np.ndarray:
+    """A saida de `model` para todas as linhas do `store`, na ordem do `frame`.
+
+    E o `predict` do Keras sobre os lotes do `store`, lidos numa thread enquanto
+    a GPU roda o anterior.
+    """
+    rows = np.arange(len(store))
+    blocks = [rows[start:start + batch] for start in range(0, len(rows), batch)]
+    return np.asarray(model.predict(store.batches(blocks, standardizer), verbose=0))
+
+
+def search(model, frames: Mapping[str, pd.DataFrame], stores: Mapping[str, object],
+           standardizer, split: str, batch: int = 128,
+           same_arms: Sequence[bool] = (False,)):
+    """A busca de `split` com o codigo de `model`: um resultado por `same_arm`, e os
+    codigos das consultas."""
+    query_key, catalog_key = EVAL_SPLITS[split]
+    z_query = embed(model, stores[query_key], standardizer, batch)
+    z_catalog = embed(model, stores[catalog_key], standardizer, batch)
+    results = [retrieve_by_arm(frames[query_key], frames[catalog_key], z_query, z_catalog,
+                               same_arm=same_arm) for same_arm in same_arms]
+    return results, z_query
+
+
+def drive_range(frame: pd.DataFrame) -> Tuple[float, float]:
+    """Os extremos da escada em dB: o controle escalar preve dentro deles, em [0, 1]."""
+    values = frame["drive_db_equivalente"]
+    return float(values.min()), float(values.max())
+
+
+def direct_readout(queries: pd.DataFrame, train_frame: pd.DataFrame,
+                   predicted: np.ndarray) -> Dict[str, object]:
+    """O controle escalar lido sem catalogo: o degrau da escada mais proximo, como no B1."""
+    lo, hi = drive_range(train_frame)
+    return readout(queries, lo + predicted * (hi - lo), "(leitura direta)").metrics["overall"]
+
+
+def evaluate(model, frames: Mapping[str, pd.DataFrame], stores: Mapping[str, object],
+             standardizer, batch: int = 128,
+             split: str = "validacao") -> Tuple[pd.DataFrame, Dict[str, object]]:
+    """A tarefa do POC II sobre o codigo aprendido, pelo mesmo caminho do B0."""
+    query_key, catalog_key = EVAL_SPLITS[split]
+    arms = set(frames[catalog_key]["arm"].unique())
+    if len(arms) < 2:
+        raise ValueError(
+            f"a tarefa entre implementacoes precisa de ao menos 2 arms no "
+            f"catalogo, ha {sorted(arms)}. Use evaluate_at_end=False e meca "
+            f"por fora."
+        )
+    (cross, same), z_query = search(model, frames, stores, standardizer, split, batch,
+                                    same_arms=(False, True))
+    metrics: Dict[str, object] = dict(cross.metrics)
+    metrics["split"] = split
+    metrics["same_arm_control"] = same.metrics["overall"]
+    if z_query.shape[1] == 1:
+        metrics["direct_readout"] = direct_readout(frames[query_key], frames["train"],
+                                                   z_query[:, 0])
+    return cross.predictions, metrics

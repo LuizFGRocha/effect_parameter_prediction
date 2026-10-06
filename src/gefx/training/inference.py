@@ -3,12 +3,15 @@
 Existe para que o treino e o estudo cross-implementation passem pelo mesmo
 caminho de escala e predicao. Antes o `cross_impl` reimplementava o laco de
 `transform`, e uma divergencia silenciosa ali invalidaria a comparacao.
+
+`load_trained_chain` carrega um regressor do POC I; `open_run`, uma execucao do
+POC II (`training/encoder.py`), com as particoes que ela viu.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional
 
 import joblib
 import numpy as np
@@ -60,3 +63,44 @@ def clear_session() -> None:
 
     keras.backend.clear_session()
     gc.collect()
+
+
+def list_runs(results_dir: str | Path) -> List[str]:
+    """As execucoes do POC II gravadas em `results_dir`: toda subpasta com `run.json`."""
+    return sorted(path.parent.name for path in Path(results_dir).glob("*/run.json"))
+
+
+def load_run(run_dir: str | Path):
+    """`(modelo, manifesto)` de uma execucao do POC II."""
+    import json
+
+    from gefx.config import ArchitectureConfig
+    from gefx.training.architecture import build_network
+    from gefx.training.encoder import WEIGHTS_FILE
+
+    run_dir = Path(run_dir)
+    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    config = manifest["config"]
+    model = build_network(manifest["input_shape"], ArchitectureConfig(**config["architecture"]),
+                          config["technique"])
+    model.load_weights(run_dir / WEIGHTS_FILE)
+    return model, manifest
+
+
+def open_run(run_dir: str | Path, dataset_root: Optional[Path] = None, all_arms: bool = False):
+    """`(modelo, manifesto, padronizador, particoes)` de uma execucao do POC II.
+
+    As particoes sao as que ela viu: os arms (todos, com `all_arms`) e a validacao
+    do manifesto, sobre `dataset_root` (por padrao, o do treino).
+    """
+    from gefx.data.grid import split_frames
+    from gefx.training.encoder import STANDARDIZER_FILE
+    from gefx.training.scaling import PixelStandardizer
+
+    model, manifest = load_run(run_dir)
+    config = manifest["config"]
+    frames = split_frames(Path(dataset_root or config["dataset_root"]),
+                          None if all_arms else config["arms"],
+                          config["validation_recordings"])
+    standardizer = PixelStandardizer.load(Path(run_dir) / STANDARDIZER_FILE)
+    return model, manifest, standardizer, frames

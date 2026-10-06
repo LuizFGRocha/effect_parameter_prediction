@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from gefx.audio import export_audio
-from gefx.disent.render import RenderOptions, _chunks, content_items
+from gefx.data.render_grid import RenderOptions, _chunks, content_items
 
 SR = 44100
 

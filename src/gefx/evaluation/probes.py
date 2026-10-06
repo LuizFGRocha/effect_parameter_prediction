@@ -6,7 +6,6 @@ legivel; conteudo e implementacao, menos.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -89,43 +88,6 @@ def linear_probes(
     return out
 
 
-def list_runs(results_dir: Path) -> List[str]:
-    """As execucoes gravadas em `results_dir`: toda subpasta com `run.json`, em ordem."""
-    return sorted(path.parent.name for path in Path(results_dir).glob("*/run.json"))
-
-
-def load_run(run_dir: Path):
-    """`(modelo, manifesto)` de uma execucao gravada."""
-    from gefx.disent.model import WEIGHTS_FILE, EncoderConfig, build_model
-
-    run_dir = Path(run_dir)
-    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    model = build_model(EncoderConfig.from_dict(manifest["config"]["encoder"]),
-                        manifest["config"]["technique"])
-    model.load_weights(run_dir / WEIGHTS_FILE)
-    return model, manifest
-
-
-def open_run(run_dir: Path, dataset_root: Optional[Path] = None, all_arms: bool = False):
-    """`(modelo, manifesto, padronizador, particoes)` de uma execucao gravada.
-
-    As particoes sao as que ela viu: os arms (todos, com `all_arms`) e a validacao
-    do manifesto, sobre `dataset_root` (por padrao, o do treino).
-    """
-    from gefx.disent.features import PixelStandardizer
-    from gefx.disent.grid import VALIDATION_RECORDINGS
-    from gefx.disent.sidecar import split_frames
-
-    run_dir = Path(run_dir)
-    model, manifest = load_run(run_dir)
-    config = manifest["config"]
-    frames = split_frames(Path(dataset_root or config["dataset_root"]),
-                          None if all_arms else config.get("arms"),
-                          config.get("validation_recordings", VALIDATION_RECORDINGS))
-    standardizer = PixelStandardizer.load(run_dir / "standardizer.npz")
-    return model, manifest, standardizer, frames
-
-
 def embed_run(
     run_dir: Path,
     dataset_root: Path = Path("datasets/disent_v2"),
@@ -134,9 +96,10 @@ def embed_run(
 ):
     """`(manifesto, frame, z_e)` do catalogo de `split`, com os arms e o padronizador
     da execucao."""
-    from gefx.disent.features import FeatureStore
-    from gefx.disent.grid import EVAL_SPLITS
-    from gefx.disent.train import embed
+    from gefx.data.dataset import FeatureStore
+    from gefx.data.grid import EVAL_SPLITS
+    from gefx.evaluation.retrieval import embed
+    from gefx.training.inference import open_run
 
     model, manifest, standardizer, frames = open_run(run_dir, dataset_root)
     frame = frames[EVAL_SPLITS[split][1]]
@@ -156,6 +119,8 @@ def probe_study(
     toda subpasta com `run.json`."""
     results_dir = Path(results_dir)
     if runs is None:
+        from gefx.training.inference import list_runs
+
         runs = list_runs(results_dir)
     if not runs:
         raise FileNotFoundError(f"nenhuma execucao com run.json em {results_dir}")

@@ -11,13 +11,13 @@ import json
 
 import pandas as pd
 
-from gefx.disent.plots import (
+from gefx.evaluation.plots import (
     TECHNIQUE_LABEL,
     build_all,
     ordered_arms,
     plot_diversity_curve,
 )
-from gefx.disent.train import TECHNIQUES
+from gefx.training.architecture import TECHNIQUES
 
 STRATA = {"ref": "S1", "gemeo": "S1", "clip": "S2", "fuzz": "S3"}
 ARMS = list(STRATA)
@@ -56,6 +56,7 @@ def _run(root, nome, technique, drive_exact, mae_db, seed=1):
     (pasta / "run.json").write_text(json.dumps({
         "config": {"technique": technique, "seed": seed},
         "steps_executed": 0,
+        "best_step": 0,
         "summary": {"drive_exact": drive_exact, "mae_db": mae_db,
                     "same_arm_drive_exact": drive_exact + 0.01},
     }), encoding="utf-8")
@@ -89,7 +90,7 @@ def _curva():
 
 
 def test_the_diversity_curve_is_drawn_even_without_the_seen_reference(tmp_path):
-    from gefx.disent.plots import plot_diversity_curve
+    from gefx.evaluation.plots import plot_diversity_curve
 
     alvo = tmp_path / "curva.png"
     plot_diversity_curve(_curva(), 0.125, alvo)
@@ -119,7 +120,7 @@ def test_the_ladder_takes_the_baselines_from_what_retrieve_wrote(tmp_path):
 
 
 def test_the_transfer_cost_figure_is_written(tmp_path):
-    from gefx.disent.plots import plot_transfer_cost
+    from gefx.evaluation.plots import plot_transfer_cost
 
     custo = pd.DataFrame({"arm": ARMS, "estrato": [STRATA[a] for a in ARMS],
                           "visto": [0.7, 0.69, 0.68, 0.69], "inedito": [0.65, 0.6, 0.3, 0.32],

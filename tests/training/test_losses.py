@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from gefx.disent.losses import sup_con_loss
+from gefx.training.losses import sup_con_loss
 
 
 def _normalize(x):

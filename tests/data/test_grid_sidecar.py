@@ -5,11 +5,11 @@ import itertools
 
 import pytest
 
-from gefx.disent.sidecar import (
+from gefx.data.grid import (
     EFFECT_FOLDER,
     SIDECAR_COLUMNS,
     SIDECAR_FILENAME,
-    DisentRecord,
+    GridRecord,
     arm_dirs,
     read_dataset,
     read_sidecar,
@@ -22,7 +22,7 @@ DRIVES = [0, 1, 2]
 
 
 def _record(arm, content, config_index, drive, split="train"):
-    return DisentRecord(
+    return GridRecord(
         file_name=f"{content}__d{drive}__{config_index:05d}.wav",
         arm=arm,
         stratum="S1",
@@ -116,7 +116,7 @@ def test_validate_catches_a_factor_that_disagrees_between_arms(tmp_path):
         if arm != "m1":
             return records
         head, *rest = records
-        return [DisentRecord(**{**head.as_row(), "split": "query"}), *rest]
+        return [GridRecord(**{**head.as_row(), "split": "query"}), *rest]
 
     root = _build(tmp_path / "ds", mutate=shift_split)
     with pytest.raises(ValueError, match="difere .* na coluna 'split'"):

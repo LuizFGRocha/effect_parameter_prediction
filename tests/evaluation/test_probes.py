@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gefx.disent.probes import PROBE_FACTORS, linear_probes, probe_study
+from gefx.evaluation.probes import PROBE_FACTORS, linear_probes, probe_study
 
 
 def _frame(n_arms=2, n_contents=4, n_drive=2, repeats=6):
@@ -82,7 +82,7 @@ def test_probe_study_refuses_a_directory_without_runs(tmp_path):
 
 
 def test_probe_study_gives_one_row_per_run_and_factor(tmp_path, monkeypatch):
-    from gefx.disent import probes
+    from gefx.evaluation import probes
 
     for nome in ("supcon", "random_encoder"):
         (tmp_path / nome).mkdir()

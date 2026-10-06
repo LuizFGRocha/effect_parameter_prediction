@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gefx.disent.arms import Arm
-from gefx.disent.calibrate import arm_curve, arm_knobs, knob_for, rnonlin
+from gefx.effects.drive_arms import Arm
+from gefx.effects.levels import arm_curve, arm_knobs, knob_for, rnonlin
 
 SR = 44100
 

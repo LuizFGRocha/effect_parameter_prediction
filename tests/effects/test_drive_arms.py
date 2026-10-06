@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from gefx.disent.arms import (
+from gefx.effects.drive_arms import (
     DEFAULT_ROSTER,
     LoadedArm,
     load_levels,

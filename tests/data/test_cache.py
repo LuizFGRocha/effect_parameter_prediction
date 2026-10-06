@@ -58,7 +58,7 @@ def test_build_cache_requires_wavs(tmp_path, stub_extract):
 
 
 def test_build_cache_ignores_non_wav_files(chain_folder, stub_extract):
-    (chain_folder / "Spec.npz").touch()
+    (chain_folder / "Spec.npy").touch()
     (chain_folder / "nota.txt").touch()
     _, file_names = build_cache(chain_folder, "Spec")
     assert file_names.tolist() == ["a.wav", "b.wav", "c.wav"]
@@ -74,6 +74,13 @@ def test_save_load_round_trip(chain_folder):
     assert np.allclose(loaded_features, features)
     assert loaded_features.dtype == np.float32  # a leitura rebaixa para float32
     assert loaded_names.tolist() == names.tolist()
+
+
+def test_the_cache_can_be_mapped_from_disk(chain_folder):
+    save_cache(chain_folder, "Spec", np.ones((2, 2, 3), dtype=np.float32),
+               np.array(["a.wav", "b.wav"]))
+    mapped, _ = load_cache(chain_folder, "Spec", mmap_mode="r")
+    assert isinstance(mapped, np.memmap)
 
 
 def test_cache_exists_requires_both_artifacts(chain_folder):

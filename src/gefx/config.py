@@ -37,9 +37,17 @@ class DatasetConfig:
     legacy: bool = False
 
 
+#: Como a CNN trata o eixo do tempo antes das densas: `flatten` (o POC I) ou a media.
+TIME_POOLS = ("flatten", "mean")
+
+
 @dataclass
 class ArchitectureConfig:
-    """Hiperparametros da CNN. Os defaults sao os usados no POC I."""
+    """Hiperparametros da CNN. Os defaults sao os usados no POC I.
+
+    O encoder do POC II e esta mesma CNN (`training/architecture.py`); so ele usa
+    `effect_dim`, a largura do codigo de efeito no lugar da saida sigmoide.
+    """
 
     kernel_size: Tuple[int, int] = (3, 3)
     n_conv: int = 2
@@ -48,11 +56,15 @@ class ArchitectureConfig:
     n_filters: int = 6
     dropout: float = 0.2
     learning_rate: float = 0.001
+    time_pool: str = "flatten"
+    effect_dim: int = 32
 
     def __post_init__(self) -> None:
         # YAML entrega listas; a Keras espera tupla.
         if isinstance(self.kernel_size, list):
             self.kernel_size = tuple(self.kernel_size)
+        if self.time_pool not in TIME_POOLS:
+            raise ValueError(f"time_pool desconhecido: {self.time_pool!r}. Ha {list(TIME_POOLS)}")
 
 
 @dataclass

@@ -74,7 +74,7 @@ def test_raises_when_a_cached_wav_has_no_metadata_row(fake_dataset):
 
 
 def test_raises_when_the_cache_is_stale(fake_dataset):
-    # npz com 3 linhas e file_names.json com 2: e o estado que sobra quando a
+    # cache com 3 linhas e file_names.json com 2: e o estado que sobra quando a
     # extracao muda e o cache nao e reconstruido.
     root = fake_dataset(chains=[["distortion"]], samples=3)
     load_chain_dataset(root, "distortion", feature_name="Spec")
@@ -83,7 +83,7 @@ def test_raises_when_the_cache_is_stale(fake_dataset):
     names = json.loads(names_path.read_text(encoding="utf-8"))
     names_path.write_text(json.dumps(names[:2]), encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match="Feature/target size mismatch: X=3 y=2"):
+    with pytest.raises(RuntimeError, match="cache com 3 linhas e file_names.json com 2"):
         load_chain_dataset(root, "distortion", feature_name="Spec")
 
 

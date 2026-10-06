@@ -1,4 +1,8 @@
-"""Roster de implementacoes (arms) de distorcao do POC II, lido de dois YAMLs.
+"""As implementacoes (arms) de distorcao do POC II, lidas de dois YAMLs.
+
+O `registry.py` faz o mesmo para o estudo preliminar (`crossimpl`), em Python e
+com o mapeamento de cada parametro; aqui so o knob de drive muda.
+
 
 - `experiments/disent_roster.yaml`: os plugins, editado a mao. Trocar de plugin
   ou de maquina e editar o arquivo.
@@ -13,7 +17,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
-from pedalboard import Distortion, Pedalboard
 
 DEFAULT_ROSTER = Path("experiments/disent_roster.yaml")
 DEFAULT_LEVELS = Path("experiments/disent_levels.yaml")
@@ -216,8 +219,10 @@ class LoadedArm:
     def render(self, segment: np.ndarray, sr: int, drive_knob: float) -> np.ndarray:
         """A nao-linearidade do arm, sem normalizar a loudness."""
         if self.arm.backend == "pedalboard":
-            board = Pedalboard([Distortion(drive_db=float(drive_knob))])
-            return board(segment, sr, reset=True)
+            from gefx.effects.pedalboard_backend import build_chain
+
+            return build_chain(["distortion"], {"distortion": {"drive_db": float(drive_knob)}})(
+                segment, sr)
 
         from gefx.effects.vst_adapter import process_mono, set_parameter
 

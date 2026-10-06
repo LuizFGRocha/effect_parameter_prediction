@@ -1,4 +1,4 @@
-"""Etapa 7: leave-one-arm-out, a pergunta sobre um plugin que a rede nunca ouviu.
+"""Leave-one-arm-out e curva de diversidade: um plugin que a rede nunca ouviu.
 
 Cada execucao treina em N-1 arms e responde com o mesmo modelo:
 
@@ -16,8 +16,10 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
-from gefx.disent.grid import EVAL_SPLITS, split_file
-from gefx.disent.train import RESULTS_ROOT, metrics_file
+from gefx.data.dataset import FeatureStore
+from gefx.data.grid import EVAL_SPLITS, arm_dirs, read_dataset, split_file
+from gefx.evaluation.retrieval import center_by_arm, embed, metrics_file, retrieve_by_arm
+from gefx.training.encoder import RESULTS_ROOT
 
 DEFAULT_ROOT = Path("datasets/disent_v2")
 DEFAULT_OUTPUT = RESULTS_ROOT / "loo"
@@ -34,8 +36,6 @@ def cost_file(split: str) -> str:
 
 def strata(root: Path) -> Dict[str, str]:
     """Estrato de cada arm, como o render gravou no sidecar."""
-    from gefx.disent.sidecar import read_dataset
-
     return {str(arm): str(stratum) for arm, stratum
             in read_dataset(Path(root)).groupby("arm")["stratum"].first().items()}
 
@@ -44,10 +44,7 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
                        catalog_arms: Optional[Sequence[str]] = None, batch: int = 64,
                        extra: Optional[Dict[str, object]] = None,
                        split: str = "validacao") -> List[Dict[str, object]]:
-    from gefx.disent.probes import open_run
-    from gefx.disent.features import FeatureStore
-    from gefx.disent.retrieval import center_by_arm, retrieve_by_arm
-    from gefx.disent.train import embed
+    from gefx.training.inference import open_run
 
     # Todos os arms: o retirado tambem e consultado.
     model, _, standardizer, frames = open_run(run_dir, root, all_arms=True)
@@ -103,8 +100,7 @@ def leave_one_arm_out(
 
     A primeira semente grava em `<arm>/`, as demais em `<arm>_s<semente>/`.
     """
-    from gefx.disent.sidecar import arm_dirs
-    from gefx.disent.train import TrainConfig, train
+    from gefx.training.encoder import EncoderTrainConfig, train
 
     root, output_dir = Path(root), Path(output_dir)
     todos = list(arms) if arms else [path.name for path in arm_dirs(root)]
@@ -120,9 +116,9 @@ def leave_one_arm_out(
                 print(f"[{held_out} fora, semente {semente}]", flush=True)
             if not (run_dir / "run.json").exists():
                 # Quem pontua e `_evaluate_held_out`, logo abaixo.
-                train(TrainConfig(dataset_root=root, arms=tuple(seen),
-                                  steps=steps or TrainConfig.steps, seed=semente,
-                                  evaluate_at_end=False, output_dir=run_dir),
+                train(EncoderTrainConfig(dataset_root=root, arms=tuple(seen),
+                                         steps=steps or EncoderTrainConfig.steps, seed=semente,
+                                         evaluate_at_end=False, output_dir=run_dir),
                       verbose=False)
             novas = _evaluate_held_out(run_dir, root, held_out, seen,
                                        extra={"seed": semente}, split=split)
@@ -151,7 +147,7 @@ def arm_diversity_curve(
     ponto e a execucao do leave-one-out, reaproveitada de `reuse`. Sem `order`, o
     treino acumula por estrato (S1 antes de S2...), e dentro dele por nome.
     """
-    from gefx.disent.train import TrainConfig, train
+    from gefx.training.encoder import EncoderTrainConfig, train
 
     root, output_dir = Path(root), Path(output_dir)
     estratos = strata(root)
@@ -172,9 +168,9 @@ def arm_diversity_curve(
             print(f"[k={k}] {', '.join(treinados)}", flush=True)
         if not (run_dir / "run.json").exists():
             # Quem pontua e o arm retirado, contra o catalogo fixo, logo abaixo.
-            train(TrainConfig(dataset_root=root, arms=tuple(treinados),
-                              steps=steps or TrainConfig.steps, seed=seed,
-                              evaluate_at_end=False, output_dir=run_dir), verbose=False)
+            train(EncoderTrainConfig(dataset_root=root, arms=tuple(treinados),
+                                     steps=steps or EncoderTrainConfig.steps, seed=seed,
+                                     evaluate_at_end=False, output_dir=run_dir), verbose=False)
         novas = _evaluate_held_out(
             run_dir, root, held_out, treinados, catalog_arms=pool,
             extra={"k": k, "arms_treinados": "|".join(treinados),

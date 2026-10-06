@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gefx.disent.arms import load_levels, write_levels
-from gefx.disent.between import between_predictions, summarize
-from gefx.disent.calibrate import between_levels
+from gefx.effects.drive_arms import load_levels, write_levels
+from gefx.evaluation.between import between_predictions, summarize
+from gefx.effects.levels import between_levels
 
 
 def test_between_levels_fall_between_the_grid_knobs(tmp_path):

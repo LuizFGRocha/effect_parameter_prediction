@@ -21,9 +21,9 @@ from typing import Dict, List, Sequence
 import numpy as np
 import pandas as pd
 
-from gefx.disent.grid import EVAL_SPLITS
-from gefx.disent.retrieval import drive_ladder, nearest, nearest_level
-from gefx.disent.sidecar import read_dataset
+from gefx.data.dataset import FeatureStore
+from gefx.data.grid import EVAL_SPLITS, read_dataset
+from gefx.evaluation.retrieval import b1_drive_db, drive_ladder, embed, nearest, nearest_level
 
 DEFAULT_K = 10
 
@@ -74,10 +74,7 @@ def between_study(
     with_b1: bool = True,
 ) -> pd.DataFrame:
     """Uma linha por execucao (e o B1); as predicoes vao para `<results_dir>/entre_niveis/`."""
-    from gefx.disent.features import FeatureStore
-    from gefx.disent.probes import open_run
-    from gefx.disent.retrieval import b1_drive_db
-    from gefx.disent.train import embed
+    from gefx.training.inference import open_run
 
     query_key, catalog_key = EVAL_SPLITS["teste"]
     data = read_dataset(Path(between_root))
@@ -98,7 +95,7 @@ def between_study(
 
     if with_b1:
         # O B1 ve as consultas direto, sem as particoes do dataset da grade.
-        continuous = b1_drive_db(Path(between_root), queries)
+        continuous = b1_drive_db(FeatureStore(Path(between_root), queries, "Spec"))
         ladder = drive_ladder(read_dataset(Path(grid_root)))
         level = nearest_level(continuous, ladder)
         # Como na busca: o nivel da grade mais proximo, e a saida continua no

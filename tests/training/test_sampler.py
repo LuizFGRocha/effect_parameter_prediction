@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gefx.disent.sampler import GridIndex, build_index, class_balanced_batch
+from gefx.training.sampler import GridIndex, build_index, class_balanced_batch
 
 CONTENTS = ["c0", "c1", "c2", "c3"]
 CONFIGS = [0, 1, 2]

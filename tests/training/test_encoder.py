@@ -1,4 +1,4 @@
-"""O laco de treino e os dois controles que separam aprendizado de arquitetura.
+"""O treino do POC II e os controles que separam aprendizado de arquitetura.
 
 Os testes que carregam o peso deste arquivo sao os dos controles: um controle
 so vale como controle se ele de fato nao treinar -- e foram eles que mostraram
@@ -13,14 +13,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gefx.disent import train as train_module
-from gefx.disent.sidecar import split_frames
-from gefx.disent.train import (
-    RESULTS_ROOT,
-    TECHNIQUES,
-    TrainConfig,
-    compare,
-)
+from gefx.config import ArchitectureConfig
+from gefx.data.dataset import FeatureStore
+from gefx.data.grid import split_frames
+from gefx.evaluation.retrieval import direct_readout, embed
+from gefx.evaluation.runner import compare, evaluate_runs
+from gefx.training import encoder as train_module
+from gefx.training.architecture import TECHNIQUES, build_encoder
+from gefx.training.encoder import RESULTS_ROOT, WEIGHTS_FILE, EncoderTrainConfig
+from gefx.training.scaling import PixelStandardizer
 
 ARMS = ("a0", "a1", "a2")
 # 2 x 20 gravacoes de treino vao para a validacao (`grid.VALIDATION_RECORDINGS`).
@@ -50,7 +51,6 @@ def _dataset(tmp_path, seed=0):
                         "stratum": "S1",
                         "content_id": content,
                         "source_audio_id": f"{content}.wav",
-                    "source_audio_id": f"{content}.wav",
                         "config_index": drive,
                         "config_key": f"d{drive}",
                         "drive_level": drive,
@@ -62,6 +62,8 @@ def _dataset(tmp_path, seed=0):
         folder = tmp_path / arm / "distortion"
         folder.mkdir(parents=True)
         frame.to_csv(tmp_path / arm / "metadata.csv", index=False)
+        for name in frame["file_name"]:  # o treino confere o pareamento com os wavs
+            (folder / name).touch()
         # Sinal com estrutura: o nivel de drive move a media, o arm move o
         # offset. Sem estrutura nenhuma o treino nao teria o que aprender e os
         # testes de fim a fim nao distinguiriam funcionar de nao quebrar.
@@ -77,9 +79,11 @@ def _dataset(tmp_path, seed=0):
     return tmp_path
 
 
-def _config(tmp_path, technique="supcon", **kwargs):
-    from gefx.disent.model import EncoderConfig
+SMALL = ArchitectureConfig(n_filters=8, n_nodes=16, effect_dim=4, time_pool="mean")
+INPUT = (*SHAPE, 1)
 
+
+def _config(tmp_path, technique="supcon", **kwargs):
     defaults = dict(
         dataset_root=_dataset(tmp_path / "data"),
         technique=technique,
@@ -90,23 +94,21 @@ def _config(tmp_path, technique="supcon", **kwargs):
         embed_batch=8,
         seed=3,
         output_dir=tmp_path / "out",
-        encoder=EncoderConfig(
-            input_shape=(*SHAPE, 1), filters=(8, 16), trunk_units=16, effect_dim=4,
-        ),
+        architecture=SMALL,
     )
     defaults.update(kwargs)
-    return TrainConfig(**defaults)
+    return EncoderTrainConfig(**defaults)
 
 
 # --- configuracao -------------------------------------------------------------
 def test_an_unknown_technique_is_refused_before_anything_is_loaded(tmp_path):
     with pytest.raises(KeyError, match="desconhecida"):
-        train_module.train(TrainConfig(technique="full", dataset_root=tmp_path),
+        train_module.train(EncoderTrainConfig(technique="full", dataset_root=tmp_path),
                            verbose=False)
 
 
 def test_the_default_output_directory_is_named_after_the_technique():
-    assert TrainConfig(technique="bn_only").resolved_output() == RESULTS_ROOT / "bn_only"
+    assert EncoderTrainConfig(technique="bn_only").resolved_output() == RESULTS_ROOT / "bn_only"
 
 
 # --- dados --------------------------------------------------------------------
@@ -151,11 +153,11 @@ def test_a_run_writes_every_artifact_that_makes_it_reproducible(tmp_path):
                                         "same_arm_drive_exact"}
 
 
-def test_the_history_records_the_loss_at_every_step(tmp_path):
-    train_module.train(_config(tmp_path, steps=3), verbose=False)
+def test_the_history_records_the_loss_and_the_validation_of_every_epoch(tmp_path):
+    train_module.train(_config(tmp_path, steps=4, eval_every=2), verbose=False)
     history = json.loads((tmp_path / "out" / "history.json").read_text())
-    assert [row["step"] for row in history] == [1, 2, 3]
-    assert all(np.isfinite(row["loss"]) for row in history)
+    assert len(history["loss"]) == len(history["val_mae_db"]) == 2
+    assert all(np.isfinite(value) for value in history["loss"])
 
 
 def test_the_untrained_control_really_skips_optimization(tmp_path):
@@ -163,21 +165,21 @@ def test_the_untrained_control_really_skips_optimization(tmp_path):
         _config(tmp_path, technique="random_encoder", steps=50), verbose=False
     )
     assert manifest["steps_executed"] == 0
-    assert json.loads((tmp_path / "out" / "history.json").read_text()) == []
+    assert json.loads((tmp_path / "out" / "history.json").read_text()) == {}
 
 
 def test_the_batchnorm_control_moves_only_the_moving_statistics(tmp_path, monkeypatch):
     """`bn_only` so vale como controle se nenhum peso treinavel mudar. Se mudar,
     ele passa a medir aprendizado e a diferenca para o encoder treinado some."""
     vistos = []
-    original = train_module.build_model
+    original = train_module.build_network
 
-    def espiao(config, technique):
-        modelo = original(config, technique)
+    def espiao(input_dim, config, technique):
+        modelo = original(input_dim, config, technique)
         vistos.append((modelo, {v.path: np.array(v) for v in modelo.weights}))
         return modelo
 
-    monkeypatch.setattr(train_module, "build_model", espiao)
+    monkeypatch.setattr(train_module, "build_network", espiao)
     manifest = train_module.train(_config(tmp_path, technique="bn_only", steps=5),
                                   verbose=False)
     modelo, inicial = vistos[0]
@@ -188,7 +190,6 @@ def test_the_batchnorm_control_moves_only_the_moving_statistics(tmp_path, monkey
     assert not mudaram & treinaveis
     assert all("moving" in path for path in mudaram)
     assert manifest["steps_executed"] == 5
-    assert json.loads((tmp_path / "out" / "history.json").read_text()) == []
 
 
 def test_the_retrieval_never_answers_with_the_arm_that_asked(tmp_path):
@@ -215,18 +216,14 @@ def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_pa
 
 
 def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):
-    from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.model import build_encoder
-    from gefx.disent.train import embed
-
     config = _config(tmp_path)
     frame = split_frames(config.dataset_root)["catalog"]
     store = FeatureStore(config.dataset_root, frame, "Spec")
     standardizer = PixelStandardizer.fit(store)
-    model = build_encoder(config.encoder)
+    model = build_encoder(INPUT, config.architecture)
 
     codes = embed(model, store, standardizer, batch=8)
-    assert codes.shape == (len(frame), config.encoder.effect_dim)
+    assert codes.shape == (len(frame), config.architecture.effect_dim)
     # A mesma passada compilada: o teste e da ordem das linhas, nao do XLA.
     direto = model.predict_on_batch(standardizer.transform(store.take(np.arange(3))))
     assert np.allclose(codes[:3], direto, atol=1e-6)
@@ -234,7 +231,7 @@ def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_pat
 
 # --- o controle escalar -------------------------------------------------------
 def test_the_scalar_control_trains_reloads_and_is_read_without_a_catalog(tmp_path):
-    from gefx.disent.probes import embed_run
+    from gefx.evaluation.probes import embed_run
 
     manifest = train_module.train(_config(tmp_path, technique="regressao"), verbose=False)
     metrics = json.loads((tmp_path / "out" / "metrics_validacao.json").read_text())
@@ -249,7 +246,7 @@ def test_the_direct_readout_maps_the_unit_interval_back_onto_the_ladder(tmp_path
     frames = split_frames(_dataset(tmp_path))
     queries = frames["query"]
     exact = queries["drive_level"].to_numpy() / (len(DRIVES) - 1)
-    readout = train_module.direct_readout(queries, frames["train"], exact)
+    readout = direct_readout(queries, frames["train"], exact)
     assert readout["drive_level"]["exact"] == pytest.approx(1.0)
     assert readout["mae_db"] == pytest.approx(0.0, abs=1e-9)
 
@@ -341,7 +338,7 @@ def test_b0_searches_the_standardized_encoder_input_across_implementations(tmp_p
     """O B0 le a mesma feature e a mesma padronizacao do encoder: no dataset
     sintetico o nivel de drive move a media, entao sem aprender nada ele ja tem
     de passar do acaso -- e nunca responder com o proprio arm."""
-    from gefx.disent.retrieval import baseline_b0
+    from gefx.evaluation.retrieval import baseline_b0
 
     result = baseline_b0(_dataset(tmp_path))
     assert not (result.predictions["query_arm"] == result.predictions["retrieved_arm"]).any()
@@ -364,12 +361,10 @@ def _scripted_validation(monkeypatch, errors):
 
 
 def test_the_weights_that_stay_are_those_of_the_validation_minimum(tmp_path, monkeypatch):
-    from gefx.disent.model import WEIGHTS_FILE, build_encoder
-
     seen = _scripted_validation(monkeypatch, [3.0, 1.0, 2.0, 2.5])
     config = _config(tmp_path, steps=4, eval_every=1)
     manifest = train_module.train(config, verbose=False)
-    model = build_encoder(config.encoder)
+    model = build_encoder(INPUT, config.architecture)
     model.load_weights(tmp_path / "out" / WEIGHTS_FILE)
     for saved, at_minimum in zip(model.get_weights(), seen[1]):
         assert np.array_equal(saved, at_minimum)
@@ -380,15 +375,12 @@ def test_the_weights_that_stay_are_those_of_the_validation_minimum(tmp_path, mon
 
 
 def test_the_validation_error_is_the_test_search_on_the_validation_split(tmp_path):
-    from gefx.disent.features import FeatureStore, PixelStandardizer
-    from gefx.disent.model import build_encoder
-
     config = _config(tmp_path)
     frames = split_frames(config.dataset_root)
     stores = {name: FeatureStore(config.dataset_root, frames[name], "Spec")
               for name in ("train", "val_query", "val_catalog")}
     result = train_module.validation_error(
-        build_encoder(config.encoder), frames, stores,
+        build_encoder(INPUT, config.architecture), frames, stores,
         PixelStandardizer.fit(stores["train"]), batch=8)
     assert result["same_arm"] is False
     assert 0.0 <= result["drive_exact"] <= 1.0 and result["mae_db"] >= 0.0
@@ -407,7 +399,7 @@ def test_training_reads_only_the_validation(tmp_path):
 def test_the_final_pass_scores_the_saved_model_on_the_test(tmp_path):
     train_module.train(_config(tmp_path, output_dir=tmp_path / "study" / "supcon"),
                        verbose=False)
-    table = train_module.evaluate_runs(tmp_path / "study", split="teste")
+    table = evaluate_runs(tmp_path / "study", split="teste")
     run_dir = tmp_path / "study" / "supcon"
     predictions = pd.read_csv(run_dir / "predictions_teste.csv")
     assert set(predictions["query_content"]) == set(CONTENTS["query"])
@@ -418,9 +410,17 @@ def test_the_final_pass_scores_the_saved_model_on_the_test(tmp_path):
 # --- a taxa de aprendizado ----------------------------------------------------
 def test_the_cosine_goes_from_the_rate_to_the_supcon_floor_over_the_budget():
     """O `--cosine` do SupCon oficial: de `lr` a `lr * 0.1 ** 3` em `steps`."""
-    config = TrainConfig(steps=1000, learning_rate=1e-3)
+    config = EncoderTrainConfig(steps=1000)
     schedule = train_module.learning_rate(config)
     assert float(schedule(0)) == pytest.approx(1e-3)
     assert float(schedule(500)) == pytest.approx(1e-3 * (1 + 1e-3) / 2, rel=1e-4)
     assert float(schedule(1000)) == pytest.approx(1e-6, rel=1e-3)
 
+
+def test_the_batchnorm_control_runs_with_a_zero_rate():
+    assert train_module.learning_rate(EncoderTrainConfig(technique="bn_only")) == 0.0
+
+
+def test_a_budget_that_does_not_split_into_validation_epochs_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="multiplo"):
+        train_module.train(_config(tmp_path, steps=5, eval_every=2), verbose=False)

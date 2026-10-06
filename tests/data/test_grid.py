@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gefx.disent.grid import (
+from gefx.data.grid import (
     DEFAULT_SPLIT_FRACTIONS,
     SPLITS,
     level_key,

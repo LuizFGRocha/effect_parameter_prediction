@@ -111,12 +111,12 @@ it changes the dataset produced by a given seed. Rendered filenames carry a bina
 effect-presence suffix (`les_bridge_fing01__10000000__s0000.wav`).
 
 **`data/`** is the reader and cache layer, split by concern: `features.py` (extraction),
-`cache.py` (`.npz` + `file_names.json`), `metadata.py` (sidecar), `dataset.py`
-(`load_chain_dataset`). On first use of a (chain, feature) pair the features are
+`cache.py` (`.npy` + `file_names.json`), `metadata.py` (sidecar), `dataset.py`
+(`load_chain_dataset`; for POC II, `FeatureStore`). On first use of a (chain, feature) pair the features are
 extracted for every wav in the chain folder and cached **next to the audio, inside the
 dataset**. `file_names.json` is the canonical row ordering: `y` is built by looking each
 cached filename up in `metadata.csv`, so cache and sidecar must stay in sync. Delete the
-`.npz`/`file_names.json`, or pass `--rebuild-cache`, after changing feature extraction.
+`.npy`/`file_names.json`, or pass `--rebuild-cache`, after changing feature extraction.
 Features: `Spec` (rescaled STFT magnitude), `MFCC40`, `Chroma`, `GFCC40` (spafe,
 resampled to 16 kHz and axis-swapped).
 
@@ -129,6 +129,21 @@ on one code path is what makes the comparison meaningful. Each chain writes to
 `<results-root>/<chain_key>/`: `model.keras`, `feature_scalers.pkl`, `history.json`,
 `metrics.json`, `predictions.csv`, `split_indices.npz`. Keras sessions are cleared
 between chains to bound memory.
+
+**POC II lives in the same packages** (folded in from `gefx.disent` on 2026-10-05; the
+CLI group stays `gefx disent …`): `effects/drive_arms.py` (roster, `LoadedArm`) and
+`effects/levels.py` (Rnonlin, `calibrate`); `data/grid.py` (levels, partition, the
+per-arm sidecar, `validate_pairing`), `data/render_grid.py`, `data/dataset.FeatureStore`
+(arms' caches memory-mapped, built on first read like POC I's, and fed to Keras as a
+`PyDataset`); `training/architecture.py` (the POC I CNN *is* the encoder trunk:
+`ArchitectureConfig` gained `time_pool` and `effect_dim`, and `ARCHITECTURES` is the
+ladder), `training/encoder.py` (the trainer, `model.fit` like POC I),
+`training/losses.py` (SupCon), `training/sampler.py` (P×K), `training/scaling.
+PixelStandardizer` (POC I's per-row `StandardScaler`s already standardize per pixel;
+this is the same computation streamed), `training/inference.open_run`;
+`evaluation/retrieval.py` (the task, B0, B1, `embed`/`evaluate`), `probes.py`,
+`between.py`, `loo.py`, `runner.py` (`compare`, `evaluate_runs`), `metrics.compare_runs`
+(bootstrap) and `plots.py` (figures). `crossimpl/` was left as its own package.
 
 **`evaluation/`** consumes only those per-chain files: `metrics.py` recomputes
 per-parameter MAE/MSE with standard errors from `predictions.csv` rather than trusting
@@ -167,14 +182,14 @@ probe); some parameters are only addressable via their displayed string (`BY_DIS
   read them from disk, don't expect them in git history. `CLAUDE.md` survives the `*.md`
   rule through an explicit `!CLAUDE.md` negation.
 - Feature caches live inside the dataset directory, so copying a dataset copies stale
-  caches with it. `datasets/default` is ~98 GB, of which ~57 GB is cache (`Spec.npz`
+  caches with it. `datasets/default` is ~98 GB, of which ~57 GB is cache (`Spec`
   alone is 41 GB).
-- The POC II caches are `<arm>/distortion/<feature>.npy` (not the POC I `.npz`), opened
-  with `np.load(..., mmap_mode="r")` because the arms' caches don't fit in RAM together.
-  `datasets/disent_v2` and `disent_v2_entre` were converted on 2026-09-28 and their old
-  `Spec.npz` files deleted after checking shape and dtype against the `.npy`. An older dataset that
-  only has the `.npz` converts without re-extracting (`np.savez` doesn't compress):
-  `unzip -p Spec.npz arr_0.npy > Spec.npy`.
+- Caches are `<feature>.npy` for both POCs since 2026-10-05 (POC II opens them with
+  `mmap_mode="r"`, because the arms' caches don't fit in RAM together). A `.npz` cache
+  converts without re-extracting (`np.savez` doesn't compress):
+  `unzip -p Spec.npz arr_0.npy > Spec.npy`. `datasets/disent_v2` and `disent_v2_entre`
+  were converted on 2026-09-28; the POC I datasets (`default`, `cross_impl`,
+  `other_dataset_structured`) on 2026-10-05.
 - `datasets/other_dataset_structured` is the reference paper's data restructured into
   this repo's chain-key layout, and feeds `results/teste_artigo`. **It is not reproducible
   from code in this repo** — the script that produced it was never committed, and the raw
@@ -198,7 +213,7 @@ gefx disent calibrate                       # ~3.5 min, 8 processes; rewrites th
 gefx disent render                          # uses `levels`; copies roster + levels into the dataset
 ```
 
-How `calibrate` works (`gefx/disent/calibrate.py`): every arm's knob is swept and
+How `calibrate` works (`gefx/effects/levels.py`): every arm's knob is swept and
 scored with **Rnonlin** (Tan, Moore, Zacharov & Mattila, JAES 2004 — gammatone band
 cross-correlation between dry and wet; 1 = clean). The reference (`pedalboard-tanh`)
 spans `--ref-db 18.45 39` with levels **equally spaced in 1 − Rnonlin**, and each other
@@ -254,10 +269,10 @@ Decisions already made — don't reopen without new evidence:
 method to rest on published code, so they can review it against the original and write
 less new code.
 
-- `losses.py` is a line-by-line TensorFlow translation of `SupConLoss` from the official
+- `training/losses.py` is a line-by-line TensorFlow translation of `SupConLoss` from the official
   repo (HobbitLong/SupContrast, commit 72fd989, BSD-2), temperature 0.07, with the
   original's English comments; only `mask` and `contrast_mode='one'` are left out. Keep
-  it a translation; don't "improve" it. `test_disent_losses.py` pins it to values the
+  it a translation; don't "improve" it. `tests/training/test_losses.py` pins it to values the
   official PyTorch code gave on the same inputs (difference ~1e-7), so reviewing the
   translation is that test passing.
 - The sampler is the P×K batch of Hermans et al. 2017 (P drive levels × K views); the
@@ -268,7 +283,7 @@ less new code.
 - Confidence intervals by recording: `scipy.stats.bootstrap(..., paired=True)` over
   per-recording means (valid because every recording has the same number of queries in
   the crossed grid). It reproduced RnC vs SupCon, +0.26 [−1.05; +1.57]; don't write our
-  own grouped bootstrap again. It lives in `gefx/disent/bootstrap.py`, run as
+  own grouped bootstrap again. It lives in `evaluation/metrics.py` (`compare_runs`), run as
   `gefx disent compare --a <run> ... --b <run> ...` (one pair per seed plus the seeds
   pooled per recording); it reproduces SupCon − regression on validation, +3.15
   [+1.17; +4.95] (with the patience-16 SupCon s3 in `validacao/teto/paciencia16/`).
@@ -326,9 +341,9 @@ hand, numbers to be regenerated by `probe` and `loo`):
 
 **Encoder and protocol (2026-10-01, branch `escada-poc1`).** The step from POC I to
 POC II must be deliberate: every difference from the POC I CNN has its own measured
-rung or a written reason. The encoder (`ARCHITECTURES["poc2"]`, the `EncoderConfig`
-default) is the POC I CNN (`ARCHITECTURES["poc1"]`, tested layer by layer against
-`experiments/base.yaml`) plus three rungs, each measured with SupCon over 3 seeds at
+rung or a written reason. The encoder (`ARCHITECTURES["poc2"]`, the
+`EncoderTrainConfig` default) is the POC I CNN (`ARCHITECTURES["poc1"]`, which is
+`experiments/base.yaml`'s `ArchitectureConfig`) plus three rungs, each measured with SupCon over 3 seeds at
 4,000 steps (cross-arm drive exact; `results/disent/v2/escada/`):
 
 - POC I CNN + regression 49.9% → + SupCon 51.9% → **+ time mean 60.5% (+8.6, every
@@ -377,10 +392,19 @@ by the budget, so 20k stays. **The by-recording bootstrap CI does not include tr
 variance**: two identical 3-seed batches of SupCon at 10k differed by −1.45 pt
 [−2.54; −0.31], and same-seed reruns differ by up to ±2.5 pt (GPU nondeterminism).
 Never decide on one seed, and read a by-recording CI as a lower bound on the
-uncertainty; compare at the seed level (or more seeds) when the gap is ~1–2 pt. Steps and the inference pass are XLA-compiled (the
-inference is Keras `predict_on_batch`; both off under `--deterministic`, which lacks a
-deterministic XLA MaxPool gradient — the `--sem-xla` flag used for the check was removed)
-and the next batch is read in a thread: 59 → 13 min per SupCon run at 10k. XLA vs no XLA over
+uncertainty; compare at the seed level (or more seeds) when the gap is ~1–2 pt. The
+model is compiled with XLA (`jit_compile`, off under `--deterministic`, which lacks a
+deterministic XLA MaxPool gradient — the `--sem-xla` flag used for the check was
+removed) and the next batch is read in a thread: 59 → 13 min per SupCon run at 10k.
+**Since 2026-10-05 the trainer is Keras `model.fit`** (a `PyDataset` of P×K batches drawn
+in order beforehand, an epoch per `eval_every` steps, the validation search in a
+callback and `EarlyStopping(restore_best_weights=True)` with no patience; `bn_only` is
+the same fit at rate 0), replacing our own loop. Every POC II run before that came from
+the old loop, and HEAD can't load them (the manifest now stores `architecture` +
+`input_shape`), so the validation round, LOO, diversity and the ladder are to be rerun
+(`scripts/poc2_validacao.sh`, `gefx disent loo`, `gefx disent diversity`,
+`scripts/poc2_escada.sh`). The new evaluation path reproduced the old SupCon and B1
+validation metrics exactly (the regression's direct readout within 1e-7). XLA vs no XLA over
 3 seeds at 20k: −0.10 pt [−1.57; +1.24]; regression matched too. Mixed precision
 (36 vs 68 ms/step on the GPU) was not adopted: the memmap read (~54 ms/batch) would
 dominate. Dropping conv blocks only saves 15–25%.

@@ -22,15 +22,17 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from gefx.audio import export_audio, load_audio_file, normalize_loudness
-from gefx.disent.arms import DEFAULT_LEVELS, DEFAULT_ROSTER, Arm, LoadedArm, load_roster
-from gefx.disent.grid import level_key, render_name, split_contents
-from gefx.disent.sidecar import (
-    EFFECT_FOLDER,
-    DisentRecord,
+from gefx.data.grid import (
     SIDECAR_FILENAME,
+    GridRecord,
+    arm_folder,
+    level_key,
+    render_name,
+    split_contents,
     validate_pairing,
     write_sidecar,
 )
+from gefx.effects.drive_arms import DEFAULT_LEVELS, DEFAULT_ROSTER, Arm, LoadedArm, load_roster
 
 
 @dataclass(frozen=True)
@@ -98,7 +100,7 @@ def _render_chunk(
 ) -> List[Dict[str, object]]:
     """Renderiza um lote de conteudos num arm, carregando o plugin uma vez. Roda no trabalhador."""
     loaded = LoadedArm(spec)
-    folder = Path(output_root) / spec.key / EFFECT_FOLDER
+    folder = arm_folder(Path(output_root), spec.key)
     folder.mkdir(parents=True, exist_ok=True)
 
     rows: List[Dict[str, object]] = []
@@ -114,7 +116,7 @@ def _render_chunk(
             name = render_name(item.content_id, level)
             export_audio(wet, sr, folder / name)
             rows.append(
-                DisentRecord(
+                GridRecord(
                     file_name=name,
                     arm=spec.key,
                     stratum=spec.stratum,
@@ -170,7 +172,7 @@ def render(options: RenderOptions) -> Dict[str, int]:
             rows = [row for future in futures for row in future.result()]
 
         rows.sort(key=lambda row: (row["content_id"], row["config_index"]))
-        write_sidecar(root / spec.key / SIDECAR_FILENAME, [DisentRecord(**row) for row in rows])
+        write_sidecar(root / spec.key / SIDECAR_FILENAME, [GridRecord(**row) for row in rows])
         totals[spec.key] = len(rows)
         print(f"  {spec.key:16s} {len(rows)} renders")
 

@@ -104,7 +104,7 @@ def _cmd_cross_impl_eval(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_calibrate(args: argparse.Namespace) -> None:
-    from gefx.disent.calibrate import calibrate
+    from gefx.effects.levels import calibrate
 
     calibrate(
         roster_path=Path(args.roster),
@@ -120,7 +120,7 @@ def _cmd_disent_calibrate(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_render(args: argparse.Namespace) -> None:
-    from gefx.disent.render import RenderOptions, render
+    from gefx.data.render_grid import RenderOptions, render
 
     render(
         RenderOptions(
@@ -141,8 +141,8 @@ def _cmd_disent_render(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_between(args: argparse.Namespace) -> None:
-    from gefx.disent.between import between_study
-    from gefx.disent.calibrate import between_levels
+    from gefx.effects.levels import between_levels
+    from gefx.evaluation.between import between_study
 
     if args.write_levels:
         between_levels(Path(args.levels), Path(args.curves), Path(args.write_levels))
@@ -152,16 +152,11 @@ def _cmd_disent_between(args: argparse.Namespace) -> None:
                         runs=args.run or ("supcon",), k=args.k).to_string(index=False))
 
 
-def _cmd_disent_cache(args: argparse.Namespace) -> None:
-    from gefx.disent.features import build_all_caches
-
-    build_all_caches(Path(args.output_root), args.feature, arms=args.arm, rebuild=args.rebuild)
-
-
 def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
     import json
 
-    from gefx.disent.retrieval import baseline_b0, baseline_b1
+    from gefx.data.grid import split_file
+    from gefx.evaluation.retrieval import baseline_b0, baseline_b1
 
     root = Path(args.output_root)
     if args.baseline == "b0":
@@ -182,8 +177,6 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
               f"MAE {item['drive_level']['mae_levels']:.2f}  "
               f"{item['mae_db']:.2f} dB")
 
-    from gefx.disent.grid import split_file
-
     raiz = Path(args.results_dir)
     raiz.mkdir(parents=True, exist_ok=True)
     result.predictions.to_csv(raiz / split_file(args.baseline, args.split, "csv"), index=False)
@@ -193,7 +186,7 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_plots(args: argparse.Namespace) -> None:
-    from gefx.disent.plots import build_all
+    from gefx.evaluation.plots import build_all
 
     escritos = build_all(Path(args.results_dir), Path(args.out_dir) if args.out_dir else None,
                          split=args.split)
@@ -205,7 +198,7 @@ def _cmd_disent_plots(args: argparse.Namespace) -> None:
 def _add_split(parser: argparse.ArgumentParser, default: str = "validacao",
                help: str = "validacao: o que o desenvolvimento le. teste: so na passada "
                            "final.") -> None:
-    from gefx.disent.grid import EVAL_SPLITS
+    from gefx.data.grid import EVAL_SPLITS
 
     parser.add_argument("--split", default=default, choices=list(EVAL_SPLITS), help=help)
 
@@ -218,32 +211,36 @@ def _write_table(tabela, destino: Path) -> None:
     print(f"\ntabela em {destino}")
 
 
-#: Flags de `gefx disent train` que vao direto para o `TrainConfig`. Sem a flag,
-#: fica o padrao do `TrainConfig`: os numeros nao se repetem aqui.
+#: Flags de `gefx disent train` que vao direto para o `EncoderTrainConfig`. Sem a
+#: flag, fica o padrao dele: os numeros nao se repetem aqui.
 _TRAIN_FLAGS = ("feature", "steps", "configs_per_batch", "views_per_config",
-                "learning_rate", "temperature", "eval_every", "seed")
+                "temperature", "eval_every", "seed")
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
     from dataclasses import replace
 
-    from gefx.disent.grid import split_file
-    from gefx.disent.model import ARCHITECTURES
-    from gefx.disent.train import TrainConfig, compare, train
+    from gefx.data.grid import split_file
+    from gefx.evaluation.runner import compare
+    from gefx.training.architecture import ARCHITECTURES
+    from gefx.training.encoder import EncoderTrainConfig, train
 
     flags = {name: getattr(args, name) for name in _TRAIN_FLAGS
              if getattr(args, name) is not None}
-    base = TrainConfig(
+    architecture = ARCHITECTURES[args.arch]
+    if args.learning_rate is not None:
+        architecture = replace(architecture, learning_rate=args.learning_rate)
+    base = EncoderTrainConfig(
         dataset_root=Path(args.output_root),
         arms=tuple(args.arm) if args.arm else None,
         deterministic=args.deterministic,
-        encoder=ARCHITECTURES[args.arch],
+        architecture=architecture,
         **flags,
     )
     raiz = Path(args.results_dir)
     for nome in dict.fromkeys(args.technique or ["supcon"]):
         # A semente padrao fica em `<tecnica>/`; as outras, ao lado.
-        pasta = nome if base.seed == TrainConfig.seed else f"{nome}_s{base.seed}"
+        pasta = nome if base.seed == EncoderTrainConfig.seed else f"{nome}_s{base.seed}"
         print(f"[{pasta}]")
         train(replace(base, technique=nome, output_dir=raiz / pasta))
 
@@ -252,19 +249,19 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_probe(args: argparse.Namespace) -> None:
-    from gefx.disent.probes import probe_study
+    from gefx.data.grid import split_file
+    from gefx.evaluation.probes import probe_study
 
     tabela = probe_study(
         Path(args.results_dir), Path(args.output_root),
         runs=args.run, split=args.split, folds=args.folds, seed=args.seed,
     )
-    from gefx.disent.grid import split_file
 
     _write_table(tabela, Path(args.results_dir) / split_file("sondas", args.split, "csv"))
 
 
 def _cmd_disent_diversity(args: argparse.Namespace) -> None:
-    from gefx.disent.loo import arm_diversity_curve, summary_file
+    from gefx.evaluation.loo import arm_diversity_curve, summary_file
 
     tabela = arm_diversity_curve(
         args.held_out, Path(args.output_root), Path(args.results_dir),
@@ -277,8 +274,8 @@ def _cmd_disent_diversity(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_loo(args: argparse.Namespace) -> None:
-    from gefx.disent.loo import cost_file, leave_one_arm_out, transfer_cost
-    from gefx.disent.train import metrics_file
+    from gefx.evaluation.loo import cost_file, leave_one_arm_out, transfer_cost
+    from gefx.evaluation.retrieval import metrics_file
 
     tabela = leave_one_arm_out(
         Path(args.output_root), Path(args.results_dir), steps=args.steps,
@@ -297,8 +294,8 @@ def _cmd_disent_loo(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_evaluate(args: argparse.Namespace) -> None:
-    from gefx.disent.grid import split_file
-    from gefx.disent.train import evaluate_runs
+    from gefx.data.grid import split_file
+    from gefx.evaluation.runner import evaluate_runs
 
     raiz = Path(args.results_dir)
     _write_table(evaluate_runs(raiz, args.run, split=args.split),
@@ -306,21 +303,12 @@ def _cmd_disent_evaluate(args: argparse.Namespace) -> None:
 
 
 def _cmd_disent_compare(args: argparse.Namespace) -> None:
-    from gefx.disent.bootstrap import compare_runs
+    from gefx.evaluation.metrics import compare_runs
 
     tabela = compare_runs([Path(run) for run in args.a], [Path(run) for run in args.b],
                           split=args.split)
     print(f"acerto exato do nivel (%), A - B com IC95% por gravacao, {args.split}:")
     print(tabela.to_string(index=False))
-
-
-def _cmd_disent_validate(args: argparse.Namespace) -> None:
-    from gefx.disent.sidecar import validate_pairing
-
-    summary = validate_pairing(Path(args.output_root))
-    print("grade pareada e completa:")
-    for name, value in summary.items():
-        print(f"  {name:14s} {value}")
 
 
 def _cmd_inspect_plugin(args: argparse.Namespace) -> None:
@@ -440,7 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
     cross_eval.set_defaults(func=_cmd_cross_impl_eval)
 
     # gefx disent
-    from gefx.disent.model import ARCHITECTURES, TECHNIQUES
+    from gefx.training.architecture import ARCHITECTURES, TECHNIQUES
 
     disent = sub.add_parser("disent", help="POC II: recuperacao por um codigo de efeito desemaranhado.")
     disent_sub = disent.add_subparsers(dest="disent_command", required=True)
@@ -510,15 +498,6 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Padrao: <results-dir>/figuras_<split>.")
     _add_split(disent_plots)
     disent_plots.set_defaults(func=_cmd_disent_plots)
-
-    disent_cache = disent_sub.add_parser(
-        "cache", help="Extrai o cache de features de cada arm."
-    )
-    disent_cache.add_argument("--output-root", default="datasets/disent_v2")
-    disent_cache.add_argument("--feature", default="Spec", choices=FEATURE_CHOICES)
-    disent_cache.add_argument("--arm", action="append", default=None)
-    disent_cache.add_argument("--rebuild", action="store_true")
-    disent_cache.set_defaults(func=_cmd_disent_cache)
 
     disent_train = disent_sub.add_parser(
         "train",
@@ -649,12 +628,6 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Idem, na mesma ordem de sementes que --a.")
     _add_split(disent_compare)
     disent_compare.set_defaults(func=_cmd_disent_compare)
-
-    disent_validate = disent_sub.add_parser(
-        "validate", help="Confere que a grade esta cruzada e pareada entre os arms."
-    )
-    disent_validate.add_argument("--output-root", default="datasets/disent_v2")
-    disent_validate.set_defaults(func=_cmd_disent_validate)
 
     # gefx inspect-plugin
     inspect_parser = sub.add_parser(

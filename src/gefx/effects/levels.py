@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from gefx.audio import load_audio_file, normalize_loudness
-from gefx.disent.arms import Arm, LoadedArm, load_levels, load_roster, write_levels
+from gefx.effects.drive_arms import Arm, LoadedArm, load_levels, load_roster, write_levels
 
 DESCRIPTOR = "rnonlin"
 DEFAULT_REFERENCE_DB: Tuple[float, float] = (18.45, 39.0)

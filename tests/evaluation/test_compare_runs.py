@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from gefx.disent.bootstrap import compare_runs, recording_accuracy
+from gefx.evaluation.metrics import compare_runs, recording_accuracy
 
 
 def _run(path, hits):
