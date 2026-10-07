@@ -130,6 +130,22 @@ def leave_one_arm_out(
 
 
 # --- B2 e B3: quantas implementacoes o treino precisa ver? ---------------------
+def _loo_run(loo_dir: Path, held_out: str, seed: int) -> Optional[Path]:
+    """A execucao do leave-one-out com o mesmo arm retirado e a mesma semente.
+
+    A primeira semente do leave-one-out grava em `<arm>/`, as demais em
+    `<arm>_s<semente>/`; a semente vem do `run.json`, para que uma curva de outra
+    semente nao termine na execucao da primeira.
+    """
+    for run_dir in (loo_dir / held_out, loo_dir / f"{held_out}_s{seed}"):
+        manifesto = run_dir / "run.json"
+        if manifesto.exists():
+            config = json.loads(manifesto.read_text(encoding="utf-8")).get("config", {})
+            if config.get("seed") == seed:
+                return run_dir
+    return None
+
+
 def arm_diversity_curve(
     held_out: str,
     root: Path = DEFAULT_ROOT,
@@ -161,8 +177,8 @@ def arm_diversity_curve(
     for k in range(1, len(order) + 1):
         treinados = order[:k]
         run_dir = output_dir / f"k{k}"
-        reuso = Path(reuse) / held_out if reuse else None
-        if k == len(order) and reuso is not None and (reuso / "run.json").exists():
+        reuso = _loo_run(Path(reuse), held_out, seed) if reuse else None
+        if k == len(order) and reuso is not None:
             run_dir = reuso
         if verbose:
             print(f"[k={k}] {', '.join(treinados)}", flush=True)

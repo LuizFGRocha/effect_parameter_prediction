@@ -5,8 +5,8 @@
 # de validacao.
 # Grava em results/disent/v2/validacao/. O teste fica para scripts/poc2_teste.sh.
 #
-# Uso: bash scripts/poc2_validacao.sh    (~11 h de GPU: ~3 h a escada de tecnicas,
-# ~4 h o leave-one-arm-out, ~3 h a curva de diversidade)
+# Uso: bash scripts/poc2_validacao.sh    (~17 h de GPU: ~3 h a escada de tecnicas,
+# ~8 h o leave-one-arm-out, ~6 h a curva de diversidade (duas sementes cada))
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source .venv/bin/activate
@@ -22,10 +22,14 @@ for semente in 20260908 2 3; do
 done
 
 echo "== leave-one-arm-out $(date)"
-gefx disent loo
+# Duas sementes: o custo por arm tem so 800 consultas.
+gefx disent loo --extra-seed 2
 echo "== curva de diversidade $(date)"
-# O ultimo ponto (todos os arms menos o byod-mxr) e a execucao do leave-one-out.
+# O ultimo ponto (todos os arms menos o byod-mxr) e a execucao do leave-one-out
+# da mesma semente.
 gefx disent diversity --held-out byod-mxr
+gefx disent diversity --held-out byod-mxr --seed 2 \
+  --results-dir results/disent/v2/validacao/encoder/diversidade_s2
 
 echo "== sondas $(date)"
 gefx disent probe

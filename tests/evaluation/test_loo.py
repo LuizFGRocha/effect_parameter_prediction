@@ -105,7 +105,7 @@ def test_the_curve_reuses_the_leave_one_out_run_at_its_last_point(tmp_path, monk
 
     reuse = tmp_path / "loo" / "byod-mxr"
     reuse.mkdir(parents=True)
-    (reuse / "run.json").write_text("{}", encoding="utf-8")
+    (reuse / "run.json").write_text('{"config": {"seed": 7}}', encoding="utf-8")
 
     treinados = []
     monkeypatch.setattr(modulo, "_evaluate_held_out",
@@ -122,10 +122,37 @@ def test_the_curve_reuses_the_leave_one_out_run_at_its_last_point(tmp_path, monk
     monkeypatch.setattr(modulo, "strata", lambda root: dict.fromkeys("abc", "S1"))
     tabela = modulo.arm_diversity_curve(
         "byod-mxr", tmp_path, tmp_path / "curva", order=("a", "b", "c"),
-        reuse=tmp_path / "loo", verbose=False,
+        seed=7, reuse=tmp_path / "loo", verbose=False,
     )
     assert [len(arms) for arms in treinados] == [1, 2]  # o ponto k=3 nao retreinou
     assert tabela.iloc[-1]["run_dir"] == str(reuse)
+
+
+def test_the_curve_of_another_seed_reuses_only_its_own_leave_one_out_run(tmp_path, monkeypatch):
+    """A semente 2 da curva termina em `<arm>_s2/` do leave-one-out, nunca na
+    execucao da primeira semente, que fica em `<arm>/`."""
+    from gefx.evaluation import loo as modulo
+
+    for nome, semente in (("byod-mxr", 1), ("byod-mxr_s2", 2)):
+        (tmp_path / "loo" / nome).mkdir(parents=True)
+        (tmp_path / "loo" / nome / "run.json").write_text(
+            f'{{"config": {{"seed": {semente}}}}}', encoding="utf-8")
+    monkeypatch.setattr(modulo, "_evaluate_held_out",
+                        lambda run_dir, *a, **k: [{"run_dir": str(run_dir)}])
+    monkeypatch.setattr("gefx.training.encoder.train",
+                        lambda config, verbose=True: (
+                            Path(config.output_dir).mkdir(parents=True, exist_ok=True),
+                            (Path(config.output_dir) / "run.json").write_text("{}"),
+                        ))
+    monkeypatch.setattr(modulo, "strata", lambda root: dict.fromkeys("ab", "S1"))
+    tabela = modulo.arm_diversity_curve("byod-mxr", tmp_path, tmp_path / "curva",
+                                        order=("a", "b"), seed=2,
+                                        reuse=tmp_path / "loo", verbose=False)
+    assert tabela.iloc[-1]["run_dir"] == str(tmp_path / "loo" / "byod-mxr_s2")
+    tabela = modulo.arm_diversity_curve("byod-mxr", tmp_path, tmp_path / "curva3",
+                                        order=("a", "b"), seed=3,
+                                        reuse=tmp_path / "loo", verbose=False)
+    assert tabela.iloc[-1]["run_dir"] == str(tmp_path / "curva3" / "k2")
 
 
 def test_the_curve_keeps_the_catalog_fixed_while_the_training_set_grows(tmp_path, monkeypatch):
