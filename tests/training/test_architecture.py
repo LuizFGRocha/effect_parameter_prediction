@@ -101,19 +101,20 @@ def test_the_first_rung_is_the_poc1_cnn():
     assert ARCHITECTURES["poc1"] == load_config("experiments/base.yaml").architecture
 
 
-def test_the_report_encoder_is_the_poc1_cnn_with_the_time_mean_wider_and_deeper():
-    """(32, 64, 96, 128) filtros sao a regra do POC I, `n_filters * (i + 1)`."""
+def test_the_report_encoder_is_the_poc1_cnn_with_the_time_mean_and_wider():
+    """(32, 64) filtros sao a regra do POC I, `n_filters * (i + 1)`, com dois blocos
+    como no POC I: o quarto bloco nao entrou."""
     from keras import layers
 
     model = build_encoder((256, 173, 1), ARCHITECTURES["poc2"])
     widths = [layer.filters for layer in model.layers if isinstance(layer, layers.Conv2D)]
-    assert widths == [32, 64, 96, 128]
+    assert widths == [32, 64]
 
 
 def test_each_rung_of_the_ladder_changes_one_thing():
     """A escada so mede uma mudanca por degrau se cada um diferir do anterior num
-    campo so, e ela vai do POC I ao encoder."""
+    campo so, e ela vai do POC I ao encoder, e um degrau alem dele."""
     rungs = [asdict(config) for config in ARCHITECTURES.values()]
     for before, after in zip(rungs, rungs[1:]):
         assert sum(before[key] != after[key] for key in before) == 1
-    assert list(ARCHITECTURES)[0] == "poc1" and list(ARCHITECTURES)[-1] == "poc2"
+    assert list(ARCHITECTURES)[0] == "poc1" and list(ARCHITECTURES)[-2] == "poc2"

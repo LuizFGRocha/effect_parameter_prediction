@@ -11,7 +11,8 @@ do tempo (`time_pool`) e `n_full - 1` camadas densas com BatchNorm e Dropout.
   `effect_dim` dimensoes, L2-normalizada porque a busca e por cosseno.
 
 `ARCHITECTURES` e a escada do POC I ao POC II: cada degrau muda um campo da CNN
-do POC I, e cada mudanca foi medida (`scripts/poc2_escada.sh`).
+do POC I, e cada mudanca foi medida (`scripts/poc2_escada.sh`); o ultimo degrau
+foi medido e ficou de fora.
 """
 from __future__ import annotations
 
@@ -23,11 +24,13 @@ from gefx.config import ArchitectureConfig
 #: Os degraus, na ordem. `poc1` e `experiments/base.yaml`; `poc2`, o encoder do
 #: relatorio. As duas densas de 64 do POC I ficam: uma densa de 256 dava +1,5
 #: ponto e mais que dobrava o conteudo legivel em `z_e` (19% -> 44%; protocolo
-#: antigo, no teste).
+#: antigo, no teste). `poc2_fundo` (quatro blocos, filtros 32, 64, 96, 128) foi
+#: medido e nao entrou: +1,12 ponto [-0,87; +3,31] sobre o `poc2`, nao
+#: significativo (validacao, 3 sementes, 2026-10-06).
 ARCHITECTURES: Dict[str, ArchitectureConfig] = {"poc1": ArchitectureConfig()}
 ARCHITECTURES["poc1_media"] = replace(ARCHITECTURES["poc1"], time_pool="mean")
-ARCHITECTURES["poc1_media_largo"] = replace(ARCHITECTURES["poc1_media"], n_filters=32)
-ARCHITECTURES["poc2"] = replace(ARCHITECTURES["poc1_media_largo"], n_conv=4)
+ARCHITECTURES["poc2"] = replace(ARCHITECTURES["poc1_media"], n_filters=32)
+ARCHITECTURES["poc2_fundo"] = replace(ARCHITECTURES["poc2"], n_conv=4)
 
 
 def build_trunk(input_dim: Sequence[int], config: ArchitectureConfig):

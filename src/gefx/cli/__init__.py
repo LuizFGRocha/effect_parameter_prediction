@@ -536,9 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
                                    "identicas divergem.")
     disent_train.add_argument("--arch", default="poc2", choices=list(ARCHITECTURES),
                               help="Os degraus da escada, na ordem: poc1 (a CNN do POC "
-                                   "I), poc1_media (+ media no tempo), poc1_media_largo "
-                                   "(+ filtros 32, 64), poc2 (+ quatro blocos: o encoder "
-                                   "do relatorio).")
+                                   "I), poc1_media (+ media no tempo), poc2 (+ filtros "
+                                   "32, 64: o encoder do relatorio), poc2_fundo (+ quatro "
+                                   "blocos: medido, nao entrou).")
     disent_train.set_defaults(func=_cmd_disent_train)
 
     disent_between = disent_sub.add_parser(

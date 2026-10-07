@@ -18,7 +18,7 @@ gefx disent diversity --held-out byod-mxr --split teste
 gefx disent diversity --held-out byod-mxr --seed 2 --split teste \
   --results-dir results/disent/v2/validacao/encoder/diversidade_s2
 # Os degraus da escada (scripts/poc2_escada.sh); o `poc2` e o encoder, acima.
-for degrau in poc1 poc1_media poc1_media_largo; do
+for degrau in poc1 poc1_media poc2_fundo; do
   gefx disent evaluate --split teste --results-dir "results/disent/v2/validacao/escada/$degrau"
 done
 gefx disent plots --split teste
