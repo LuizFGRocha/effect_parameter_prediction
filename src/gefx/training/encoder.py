@@ -1,6 +1,13 @@
 """Treino do encoder do POC II e dos controles que separam aprendizado de arquitetura.
 
-- `supcon`: o encoder, treinado com o SupCon (`losses.py`) sobre `z_e`;
+- `supcon`: o encoder, treinado com o SupCon (`losses.py`) sobre `z_e`; com
+  `architecture.content_dim`, tambem sobre `z_c`, rotulado pelo trecho de
+  conteudo, e a perda e a soma das duas, com pesos iguais (nas CSN a perda de
+  cada nocao de similaridade entra na mesma media do batch, sem peso proprio). Os positivos de cada
+  cabeca dividem so o seu fator, e e isso que deixa cada uma invariante ao
+  outro: nao ha adversario nem ortogonalidade, que no estudo antigo nao tiraram
+  a implementacao e custaram 4,2 pontos. Precisa do batch por trecho
+  (`batch_by="content"`), o unico com positivos de conteudo;
 - `regressao`: a mesma CNN com uma saida so, o drive em dB normalizado, por MSE
   (o regressor do POC I). Controla se `z_e` precisa de mais de uma dimensao
   para o nivel;
@@ -61,7 +68,13 @@ from gefx.evaluation.retrieval import (
     predictions_file,
     search,
 )
-from gefx.training.architecture import ARCHITECTURES, REGRESSION, TECHNIQUES, build_network
+from gefx.training.architecture import (
+    ARCHITECTURES,
+    REGRESSION,
+    TECHNIQUES,
+    build_network,
+    head,
+)
 from gefx.training.losses import DEFAULT_TEMPERATURE, sup_con_loss
 from gefx.training.sampler import build_index, class_balanced_batch
 from gefx.training.scaling import PixelStandardizer
@@ -87,6 +100,10 @@ class EncoderTrainConfig:
     steps: int = 20000
     configs_per_batch: int = 8
     views_per_config: int = 8
+    #: A classe do P x K: `config` (o nivel de drive) ou `content` (o trecho, em
+    #: `views_per_config` niveis; o que a cabeca de conteudo exige). Com
+    #: `content`, `configs_per_batch` conta trechos.
+    batch_by: str = "config"
     #: O fim do cosseno, em fracao da taxa inicial: `0.1 ** 3`, como no original.
     lr_min_fraction: float = 1e-3
     temperature: float = DEFAULT_TEMPERATURE
@@ -130,13 +147,14 @@ def learning_rate(config: EncoderTrainConfig):
 
 
 def supcon_loss(temperature: float):
-    """O SupCon sobre `z_e` como perda do Keras, rotulado pelo nivel de drive."""
+    """O SupCon como perda do Keras: sobre `z_e` rotulado pelo nivel de drive, ou
+    sobre `z_c` rotulado pelo trecho de conteudo."""
 
-    def loss(config_label, z_e):
+    def loss(label, code):
         import tensorflow as tf
 
         # Uma vista por linha: [bsz, n_views=1, dim], como o SupConLoss pede.
-        return sup_con_loss(z_e[:, None, :], tf.reshape(config_label, [-1]), temperature)
+        return sup_con_loss(code[:, None, :], tf.reshape(label, [-1]), temperature)
 
     return loss
 
@@ -175,6 +193,11 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
 
     if config.technique not in TECHNIQUES:
         raise KeyError(f"tecnica desconhecida: {config.technique!r}. Ha {list(TECHNIQUES)}")
+    if config.architecture.content_dim and config.batch_by != "content":
+        # Sem positivo, a ancora entra no SupCon com perda zero: `z_c` nao
+        # aprenderia nada, sem erro nenhum.
+        raise ValueError("a cabeca de conteudo precisa do batch por trecho "
+                         "(batch_by='content'): por nivel quase nao ha positivo de conteudo")
     set_global_seeds(config.seed, deterministic=config.deterministic)
     jit_compile = not config.deterministic
     started = time.time()
@@ -189,6 +212,8 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
     standardizer = fitted_standardizer(stores["train"], root, config.feature)
     input_dim = (*stores["train"].feature_shape, 1)
     model = build_network(input_dim, config.architecture, config.technique)
+    # A busca de validacao e a avaliacao leem so `z_e`, com os mesmos pesos.
+    effect = head(model, "z_e")
 
     steps = 0 if config.technique == "random_encoder" else config.steps
     if config.technique == REGRESSION:
@@ -196,6 +221,9 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
         labels = ((index.frame["drive_db_equivalente"].to_numpy() - lo) / (hi - lo))
         labels = labels.astype(np.float32)[:, None]
         loss = "mean_squared_error"
+    elif config.architecture.content_dim:
+        labels = (index.config_label, index.content_label)
+        loss = [supcon_loss(config.temperature), supcon_loss(config.temperature)]
     else:
         labels, loss = index.config_label, supcon_loss(config.temperature)
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=learning_rate(config)),
@@ -211,11 +239,12 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
         # Os lotes saem todos do `rng` aqui, em ordem; so a leitura vai para a thread.
         rng = np.random.default_rng(config.seed)
         blocks = [class_balanced_batch(index, rng, config.configs_per_batch,
-                                       config.views_per_config).rows for _ in range(steps)]
+                                       config.views_per_config, config.batch_by).rows
+                  for _ in range(steps)]
         callbacks = []
         if config.eval_every:
             def on_epoch_end(epoch, logs):
-                validation = validation_error(model, frames, stores, standardizer,
+                validation = validation_error(effect, frames, stores, standardizer,
                                               config.embed_batch)
                 logs["val_mae_db"] = validation["mae_db"]
                 logs["val_drive_exact"] = validation["drive_exact"]
@@ -236,7 +265,7 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
                    for key, values in fitted.history.items()}
 
     if config.evaluate_at_end:
-        predictions, metrics = evaluate(model, frames, stores, standardizer,
+        predictions, metrics = evaluate(effect, frames, stores, standardizer,
                                         config.embed_batch, split="validacao")
     else:
         predictions, metrics = None, None

@@ -135,3 +135,45 @@ def test_the_batch_is_deterministic_in_the_generator():
     other = class_balanced_batch(index, np.random.default_rng(8), 2, 2).rows
     assert np.array_equal(first, again)
     assert not np.array_equal(first, other)
+
+
+# --- batch por trecho (cabeca de conteudo) ------------------------------------
+def test_by_content_puts_each_chosen_content_in_every_config():
+    """Com K igual ao numero de niveis, cada trecho aparece em todos: P trechos x
+    K niveis, e cada nivel P vezes no batch."""
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(0), 2, len(CONFIGS), by="content")
+    assert len(batch) == 2 * len(CONFIGS) and len(set(batch.content)) == 2
+    assert len(set(zip(batch.content, batch.config))) == len(batch)
+    assert list(np.bincount(batch.config)) == [2] * len(CONFIGS)
+
+
+def test_every_anchor_of_a_by_content_batch_has_positives_of_both_factors():
+    index = build_index(_frame())
+    batch = class_balanced_batch(index, np.random.default_rng(1), 3, len(CONFIGS), by="content")
+    for labels in (batch.config, batch.content):
+        counts = np.bincount(labels)
+        assert all(counts[label] >= 2 for label in labels)
+
+
+def test_the_by_config_batch_did_not_change_with_the_parameter():
+    """As execucoes ja treinadas sairam deste sorteio: o padrao tem de dar as
+    mesmas linhas de antes, na mesma ordem."""
+    index = build_index(_frame())
+    rng = np.random.default_rng(11)
+    chosen = rng.choice(len(CONFIGS), size=2, replace=False)
+    expected = []
+    for config in chosen:
+        contents = rng.choice(len(CONTENTS), size=3, replace=False)
+        arms = rng.integers(0, len(ARMS), size=3)
+        expected += [index.row(int(c), int(config), int(a)) for c, a in zip(contents, arms)]
+    batch = class_balanced_batch(index, np.random.default_rng(11), 2, 3)
+    assert list(batch.rows) == expected
+
+
+def test_an_unknown_batch_class_and_too_many_contents_are_refused():
+    index = build_index(_frame())
+    with pytest.raises(ValueError, match="desconhecida"):
+        class_balanced_batch(index, np.random.default_rng(0), 2, 2, by="arm")
+    with pytest.raises(ValueError, match="trechos"):
+        class_balanced_batch(index, np.random.default_rng(0), len(CONTENTS) + 1, 2, by="content")

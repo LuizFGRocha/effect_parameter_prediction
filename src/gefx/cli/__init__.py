@@ -214,7 +214,7 @@ def _write_table(tabela, destino: Path) -> None:
 #: Flags de `gefx disent train` que vao direto para o `EncoderTrainConfig`. Sem a
 #: flag, fica o padrao dele: os numeros nao se repetem aqui.
 _TRAIN_FLAGS = ("feature", "steps", "configs_per_batch", "views_per_config",
-                "temperature", "eval_every", "seed")
+                "temperature", "eval_every", "seed", "batch_by")
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
@@ -230,6 +230,8 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
     architecture = ARCHITECTURES[args.arch]
     if args.learning_rate is not None:
         architecture = replace(architecture, learning_rate=args.learning_rate)
+    if args.content_dim is not None:
+        architecture = replace(architecture, content_dim=args.content_dim)
     base = EncoderTrainConfig(
         dataset_root=Path(args.output_root),
         arms=tuple(args.arm) if args.arm else None,
@@ -539,6 +541,13 @@ def build_parser() -> argparse.ArgumentParser:
                                    "I), poc1_media (+ media no tempo), poc2 (+ filtros "
                                    "32, 64: o encoder do relatorio), poc2_fundo (+ quatro "
                                    "blocos: medido, nao entrou).")
+    disent_train.add_argument("--batch-by", default=None, choices=["config", "content"],
+                              help="A classe do batch P x K: config (padrao, P niveis x "
+                                   "K trechos) ou content (P trechos x K niveis; o unico "
+                                   "com positivos de conteudo).")
+    disent_train.add_argument("--content-dim", type=int, default=None,
+                              help="Largura de z_c, a cabeca de conteudo (padrao 0: sem "
+                                   "ela). Exige --batch-by content.")
     disent_train.set_defaults(func=_cmd_disent_train)
 
     disent_between = disent_sub.add_parser(

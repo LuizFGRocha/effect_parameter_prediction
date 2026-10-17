@@ -70,12 +70,13 @@ def list_runs(results_dir: str | Path) -> List[str]:
     return sorted(path.parent.name for path in Path(results_dir).glob("*/run.json"))
 
 
-def load_run(run_dir: str | Path):
-    """`(modelo, manifesto)` de uma execucao do POC II."""
+def load_run(run_dir: str | Path, code: str = "z_e"):
+    """`(modelo, manifesto)` de uma execucao do POC II; o modelo da so a cabeca
+    `code` (`z_e`, o que a busca le, ou `z_c`)."""
     import json
 
     from gefx.config import ArchitectureConfig
-    from gefx.training.architecture import build_network
+    from gefx.training.architecture import build_network, head
     from gefx.training.encoder import WEIGHTS_FILE
 
     run_dir = Path(run_dir)
@@ -84,20 +85,22 @@ def load_run(run_dir: str | Path):
     model = build_network(manifest["input_shape"], ArchitectureConfig(**config["architecture"]),
                           config["technique"])
     model.load_weights(run_dir / WEIGHTS_FILE)
-    return model, manifest
+    return head(model, code), manifest
 
 
-def open_run(run_dir: str | Path, dataset_root: Optional[Path] = None, all_arms: bool = False):
+def open_run(run_dir: str | Path, dataset_root: Optional[Path] = None, all_arms: bool = False,
+             code: str = "z_e"):
     """`(modelo, manifesto, padronizador, particoes)` de uma execucao do POC II.
 
     As particoes sao as que ela viu: os arms (todos, com `all_arms`) e a validacao
-    do manifesto, sobre `dataset_root` (por padrao, o do treino).
+    do manifesto, sobre `dataset_root` (por padrao, o do treino). O modelo da so a
+    cabeca `code`.
     """
     from gefx.data.grid import split_frames
     from gefx.training.encoder import STANDARDIZER_FILE
     from gefx.training.scaling import PixelStandardizer
 
-    model, manifest = load_run(run_dir)
+    model, manifest = load_run(run_dir, code)
     config = manifest["config"]
     frames = split_frames(Path(dataset_root or config["dataset_root"]),
                           None if all_arms else config["arms"],

@@ -8,7 +8,16 @@ do tempo (`time_pool`) e `n_full - 1` camadas densas com BatchNorm e Dropout.
   parametro, MSE sobre os valores normalizados em [0, 1]. No POC II e o controle
   escalar (`regressao`), com uma unidade so, o drive.
 - `build_encoder`, o encoder do POC II: uma projecao linear para `z_e` com
-  `effect_dim` dimensoes, L2-normalizada porque a busca e por cosseno.
+  `effect_dim` dimensoes, L2-normalizada porque a busca e por cosseno. Com
+  `content_dim`, uma segunda cabeca, `z_c`, sobre as mesmas convolucoes: o
+  desemaranhamento em dois blocos, um subespaco por nocao de similaridade. E a
+  variante "fixed disjoint masks" das Conditional Similarity Networks (Veit,
+  Belongie e Karaletsos, CVPR 2017; andreasveit/conditional-similarity-networks,
+  BSD-3), que o artigo descreve como "fully disentangled", levada ao audio por
+  Lee et al. (ICASSP 2020). Aqui cada bloco tem as suas densas, e nao so as suas
+  dimensoes, porque as duas cabecas reduzem o tempo de jeitos diferentes. `z_c` nao tira a media
+  no tempo, que e o que tirava o conteudo de `z_e`: com o flatten, `z_e`
+  perdia 3,1 pontos e guardava mais conteudo (ablacao de 2026-09-30).
 
 `ARCHITECTURES` e a escada do POC I ao POC II: cada degrau muda um campo da CNN
 do POC I, e cada mudanca foi medida (`scripts/poc2_escada.sh`); o ultimo degrau
@@ -33,11 +42,10 @@ ARCHITECTURES["poc2"] = replace(ARCHITECTURES["poc1_media"], n_filters=32)
 ARCHITECTURES["poc2_fundo"] = replace(ARCHITECTURES["poc2"], n_conv=4)
 
 
-def build_trunk(input_dim: Sequence[int], config: ArchitectureConfig):
-    """`(entrada, saida do tronco)`, para as duas cabecas."""
+def _conv_blocks(inputs, config: ArchitectureConfig):
+    """Os blocos convolucionais, comuns as cabecas."""
     from keras import layers
 
-    inputs = layers.Input(shape=tuple(input_dim))
     x = inputs
     for index in range(config.n_conv):
         x = layers.Conv2D(config.n_filters * (index + 1), kernel_size=config.kernel_size,
@@ -46,8 +54,14 @@ def build_trunk(input_dim: Sequence[int], config: ArchitectureConfig):
         x = layers.MaxPooling2D(pool_size=(2, 2))(x)
         if index:
             x = layers.Dropout(config.dropout)(x)
+    return x
 
-    if config.time_pool == "mean":
+
+def _dense_stack(x, config: ArchitectureConfig, time_pool: str):
+    """A reducao do eixo do tempo e as `n_full - 1` densas de uma cabeca."""
+    from keras import layers
+
+    if time_pool == "mean":
         # A media no eixo do tempo, (frequencia, tempo, canal) -> (frequencia, 1, canal).
         x = layers.AveragePooling2D(pool_size=(1, x.shape[2]))(x)
     x = layers.Flatten()(x)
@@ -55,7 +69,15 @@ def build_trunk(input_dim: Sequence[int], config: ArchitectureConfig):
         x = layers.Dense(config.n_nodes, activation="relu")(x)
         x = layers.BatchNormalization()(x)
         x = layers.Dropout(config.dropout)(x)
-    return inputs, x
+    return x
+
+
+def build_trunk(input_dim: Sequence[int], config: ArchitectureConfig):
+    """`(entrada, saida do tronco)`, para as duas cabecas."""
+    from keras import layers
+
+    inputs = layers.Input(shape=tuple(input_dim))
+    return inputs, _dense_stack(_conv_blocks(inputs, config), config, config.time_pool)
 
 
 def build_model(input_dim: Sequence[int], output_dim: int, config: ArchitectureConfig):
@@ -72,13 +94,38 @@ def build_model(input_dim: Sequence[int], output_dim: int, config: ArchitectureC
     return model
 
 
+#: As saidas do encoder, na ordem.
+HEADS = ("z_e", "z_c")
+
+
 def build_encoder(input_dim: Sequence[int], config: ArchitectureConfig):
-    """O encoder: tronco + projecao para `z_e`, na esfera unitaria."""
+    """O encoder: tronco + projecao para `z_e`, na esfera unitaria; com
+    `content_dim`, tambem `z_c`, numa segunda saida."""
     from keras import layers, models
 
-    inputs, x = build_trunk(input_dim, config)
-    z_e = layers.Dense(config.effect_dim)(x)
-    return models.Model(inputs, layers.UnitNormalization()(z_e))
+    inputs = layers.Input(shape=tuple(input_dim))
+    features = _conv_blocks(inputs, config)
+    z_e = layers.Dense(config.effect_dim)(_dense_stack(features, config, config.time_pool))
+    z_e = layers.UnitNormalization()(z_e)
+    if not config.content_dim:
+        return models.Model(inputs, z_e)
+    z_c = layers.Dense(config.content_dim)(_dense_stack(features, config, "flatten"))
+    return models.Model(inputs, [z_e, layers.UnitNormalization()(z_c)])
+
+
+def head(model, name: str = "z_e"):
+    """Uma saida so do encoder, com os mesmos pesos: a busca e as sondas leem um
+    codigo de cada vez."""
+    from keras import models
+
+    if name not in HEADS:
+        raise KeyError(f"cabeca desconhecida: {name!r}. Ha {list(HEADS)}")
+    index = HEADS.index(name)
+    if index >= len(model.outputs):
+        raise ValueError(f"o modelo nao tem a cabeca {name!r}")
+    if len(model.outputs) == 1:
+        return model
+    return models.Model(model.inputs, model.outputs[index])
 
 
 #: As tecnicas do POC II (`training/encoder.py`); so `REGRESSION` usa o regressor.
@@ -89,5 +136,7 @@ TECHNIQUES = ("random_encoder", "bn_only", "supcon", REGRESSION)
 def build_network(input_dim: Sequence[int], config: ArchitectureConfig, technique: str):
     """O regressor (uma saida, o drive) para `REGRESSION`, o encoder para as outras."""
     if technique == REGRESSION:
+        if config.content_dim:
+            raise ValueError("o regressor nao tem cabeca de conteudo (content_dim=0)")
         return build_model(input_dim, 1, config)
     return build_encoder(input_dim, config)

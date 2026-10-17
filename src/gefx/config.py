@@ -46,7 +46,8 @@ class ArchitectureConfig:
     """Hiperparametros da CNN. Os defaults sao os usados no POC I.
 
     O encoder do POC II e esta mesma CNN (`training/architecture.py`); so ele usa
-    `effect_dim`, a largura do codigo de efeito no lugar da saida sigmoide.
+    `effect_dim`, a largura do codigo de efeito no lugar da saida sigmoide, e
+    `content_dim`, a do codigo de conteudo (0: sem essa cabeca).
     """
 
     kernel_size: Tuple[int, int] = (3, 3)
@@ -58,6 +59,7 @@ class ArchitectureConfig:
     learning_rate: float = 0.001
     time_pool: str = "flatten"
     effect_dim: int = 32
+    content_dim: int = 0
 
     def __post_init__(self) -> None:
         # YAML entrega listas; a Keras espera tupla.

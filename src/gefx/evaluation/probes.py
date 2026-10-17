@@ -1,8 +1,9 @@
-"""Sondas lineares sobre o `z_e` de execucoes ja treinadas.
+"""Sondas lineares sobre o `z_e` (e o `z_c`, se houver) de execucoes ja treinadas.
 
 A evidencia de desemaranhamento do POC II: o que o codigo de efeito ainda deixa
 ler de cada fator, contra o encoder nao treinado. Configuracao deve ficar mais
-legivel; conteudo e implementacao, menos.
+legivel; conteudo e implementacao, menos. No codigo de conteudo, o contrario
+para conteudo e configuracao.
 """
 from __future__ import annotations
 
@@ -16,6 +17,13 @@ PROBE_FACTORS: Dict[str, str] = {
     "arm": "implementacao (deve sair)",
     "content_id": "conteudo (deve sair)",
     "drive_level": "configuracao (deve ficar)",
+}
+
+#: O mesmo, para o codigo de conteudo.
+CONTENT_PROBE_FACTORS: Dict[str, str] = {
+    "arm": "implementacao (deve sair)",
+    "content_id": "conteudo (deve ficar)",
+    "drive_level": "configuracao (deve sair)",
 }
 
 DEFAULT_FOLDS = 3
@@ -93,15 +101,16 @@ def embed_run(
     dataset_root: Path = Path("datasets/disent_v2"),
     split: str = "validacao",
     feature: str = "Spec",
+    code: str = "z_e",
 ):
-    """`(manifesto, frame, z_e)` do catalogo de `split`, com os arms e o padronizador
-    da execucao."""
+    """`(manifesto, frame, codigo)` do catalogo de `split`, com os arms e o
+    padronizador da execucao; o codigo e a cabeca `code`."""
     from gefx.data.dataset import FeatureStore
     from gefx.data.grid import EVAL_SPLITS
     from gefx.evaluation.retrieval import embed
     from gefx.training.inference import open_run
 
-    model, manifest, standardizer, frames = open_run(run_dir, dataset_root)
+    model, manifest, standardizer, frames = open_run(run_dir, dataset_root, code=code)
     frame = frames[EVAL_SPLITS[split][1]]
     codes = embed(model, FeatureStore(dataset_root, frame, feature), standardizer)
     return manifest, frame, codes
@@ -115,7 +124,8 @@ def probe_study(
     folds: int = DEFAULT_FOLDS,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Uma linha por (execucao, fator), sobre o catalogo de `split`. Sem `runs`,
+    """Uma linha por (execucao, codigo, fator), sobre o catalogo de `split`: o
+    `z_e` de toda execucao, e o `z_c` das que tem cabeca de conteudo. Sem `runs`,
     toda subpasta com `run.json`."""
     results_dir = Path(results_dir)
     if runs is None:
@@ -128,8 +138,14 @@ def probe_study(
     rows: List[Dict[str, object]] = []
     for name in runs:
         manifest, frame, codes = embed_run(results_dir / name, dataset_root, split)
-        for factor, numbers in linear_probes(codes, frame, folds=folds, seed=seed).items():
-            rows.append({"run": name, "technique": manifest["config"]["technique"],
-                         "factor": factor, "meaning": PROBE_FACTORS[factor],
-                         "split": split, "n": int(len(frame)), **numbers})
+        heads = [("z_e", codes, PROBE_FACTORS)]
+        if manifest["config"].get("architecture", {}).get("content_dim"):
+            _, _, content = embed_run(results_dir / name, dataset_root, split, code="z_c")
+            heads.append(("z_c", content, CONTENT_PROBE_FACTORS))
+        for code, values, meanings in heads:
+            for factor, numbers in linear_probes(values, frame, folds=folds,
+                                                 seed=seed).items():
+                rows.append({"run": name, "technique": manifest["config"]["technique"],
+                             "code": code, "factor": factor, "meaning": meanings[factor],
+                             "split": split, "n": int(len(frame)), **numbers})
     return pd.DataFrame(rows)

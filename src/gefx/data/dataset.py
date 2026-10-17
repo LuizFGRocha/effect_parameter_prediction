@@ -131,7 +131,7 @@ class FeatureStore:
         """Os lotes `blocks` (listas de linhas), padronizados, como um `PyDataset`
         do Keras: o `fit` e o `predict` leem o proximo numa thread enquanto a GPU
         roda o atual, na ordem de `blocks`. Com `labels`, cada lote leva os
-        rotulos das suas linhas."""
+        rotulos das suas linhas; com uma tupla deles, uma tupla, uma por saida."""
         import keras
 
         store = self
@@ -143,7 +143,11 @@ class FeatureStore:
             def __getitem__(self, index: int):
                 rows = blocks[index]
                 features = standardizer.transform(store.take(rows))
-                return features if labels is None else (features, labels[rows])
+                if labels is None:
+                    return features
+                if isinstance(labels, tuple):
+                    return features, tuple(label[rows] for label in labels)
+                return features, labels[rows]
 
         # Duas threads: com uma so, o Keras le na thread principal.
         return Batches(workers=2, use_multiprocessing=False)

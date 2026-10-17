@@ -229,6 +229,44 @@ def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_pat
     assert np.allclose(codes[:3], direto, atol=1e-6)
 
 
+# --- a cabeca de conteudo -----------------------------------------------------
+TWO_HEADS = ArchitectureConfig(n_filters=8, n_nodes=16, effect_dim=4, time_pool="mean",
+                               content_dim=3)
+
+
+def test_the_content_head_refuses_a_sampler_without_content_positives(tmp_path):
+    """Sem positivo, a ancora entra no SupCon com perda zero: `z_c` nao
+    aprenderia nada e o treino rodaria sem erro."""
+    with pytest.raises(ValueError, match="batch por trecho"):
+        train_module.train(_config(tmp_path, architecture=TWO_HEADS), verbose=False)
+
+
+def test_a_two_head_run_trains_both_codes_and_reloads_each(tmp_path):
+    from gefx.evaluation.probes import embed_run
+
+    manifest = train_module.train(
+        _config(tmp_path, architecture=TWO_HEADS, batch_by="content", steps=4, eval_every=2),
+        verbose=False)
+    out = tmp_path / "out"
+    history = json.loads((out / "history.json").read_text())
+    assert len(history["loss"]) == 2 and all(np.isfinite(v) for v in history["loss"])
+    assert manifest["config"]["batch_by"] == "content"
+    assert manifest["config"]["architecture"]["content_dim"] == 3
+    # A busca e a avaliacao sao do `z_e`, como numa execucao de uma cabeca.
+    predictions = pd.read_csv(out / "predictions_validacao.csv")
+    assert not (predictions["query_arm"] == predictions["retrieved_arm"]).any()
+    _, frame, z_e = embed_run(out, manifest["config"]["dataset_root"])
+    _, _, z_c = embed_run(out, manifest["config"]["dataset_root"], code="z_c")
+    assert z_e.shape == (len(frame), 4) and z_c.shape == (len(frame), 3)
+
+
+def test_the_by_content_batch_alone_trains_the_single_head_encoder(tmp_path):
+    """O degrau que isola o amostrador: so `z_e`, com o batch por trecho."""
+    manifest = train_module.train(_config(tmp_path, batch_by="content"), verbose=False)
+    assert manifest["config"]["batch_by"] == "content"
+    assert manifest["summary"]["drive_exact"] >= 0.0
+
+
 # --- o controle escalar -------------------------------------------------------
 def test_the_scalar_control_trains_reloads_and_is_read_without_a_catalog(tmp_path):
     from gefx.evaluation.probes import embed_run

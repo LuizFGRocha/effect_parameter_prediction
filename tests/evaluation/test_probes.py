@@ -8,7 +8,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gefx.evaluation.probes import PROBE_FACTORS, linear_probes, probe_study
+from gefx.evaluation.probes import (
+    CONTENT_PROBE_FACTORS,
+    PROBE_FACTORS,
+    linear_probes,
+    probe_study,
+)
 
 
 def _frame(n_arms=2, n_contents=4, n_drive=2, repeats=6):
@@ -99,6 +104,32 @@ def test_probe_study_gives_one_row_per_run_and_factor(tmp_path, monkeypatch):
     assert list(table["run"].unique()) == ["random_encoder", "supcon"]
     assert len(table) == 2 * len(PROBE_FACTORS)
     assert set(table["factor"]) == set(PROBE_FACTORS)
+    assert set(table["code"]) == {"z_e"}
+
+
+def test_probe_study_also_probes_the_content_code_of_a_two_head_run(tmp_path, monkeypatch):
+    """O `z_c` e sondado pelos mesmos fatores, com o sentido trocado: conteudo
+    deve ficar, configuracao deve sair."""
+    from gefx.evaluation import probes
+
+    (tmp_path / "duas").mkdir()
+    (tmp_path / "duas" / "run.json").write_text("{}", encoding="utf-8")
+    frame = _frame()
+    pedidos = []
+
+    def fake(run_dir, *args, code="z_e", **kwargs):
+        pedidos.append(code)
+        manifest = {"config": {"technique": "supcon", "architecture": {"content_dim": 4}}}
+        column = "drive_level" if code == "z_e" else "content_id"
+        values = frame[column].astype("category").cat.codes.to_numpy(dtype=float)
+        return manifest, frame, np.stack([values * 10.0, np.zeros(len(frame))], axis=1)
+
+    monkeypatch.setattr(probes, "embed_run", fake)
+    table = probe_study(tmp_path, tmp_path).set_index(["code", "factor"])
+    assert pedidos == ["z_e", "z_c"]
+    assert table.loc[("z_c", "content_id"), "meaning"] == CONTENT_PROBE_FACTORS["content_id"]
+    assert table.loc[("z_c", "content_id"), "accuracy"] == pytest.approx(1.0)
+    assert table.loc[("z_e", "drive_level"), "accuracy"] == pytest.approx(1.0)
 
 
 def test_the_probe_is_invariant_to_the_scale_of_the_code():

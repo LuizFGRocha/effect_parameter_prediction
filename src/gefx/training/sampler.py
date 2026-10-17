@@ -1,8 +1,16 @@
 """Amostrador de batches balanceados por configuracao sobre a grade cruzada.
 
 O batch e o "P x K" de Hermans, Beyer e Leibe (2017, In Defense of the Triplet
-Loss for Person Re-Identification): P classes, K exemplos de cada. Aqui a classe
-e o nivel de drive, e cada exemplo sorteia conteudo e implementacao.
+Loss for Person Re-Identification): P classes, K exemplos de cada, como o
+`sample_k_fids_for_pid` do codigo deles (VisualComputingInstitute/triplet-reid,
+MIT). A classe e o nivel de drive, e cada exemplo sorteia conteudo e
+implementacao.
+
+Para treinar tambem `z_c`, o batch tem de ter positivos de conteudo, que o P x K
+por nivel quase nunca sorteia (~1200 trechos de treino). Com `by="content"` a
+classe passa a ser o trecho: P trechos, cada um em K niveis sem reposicao. Com
+K igual ao numero de niveis, cada trecho aparece em todos, entao cada nivel
+aparece P vezes no batch e o `z_e` continua com positivos.
 
 `GridIndex` recusa uma grade com buracos: cada vista sorteada (conteudo,
 implementacao) de uma configuracao tem de existir em disco.
@@ -117,29 +125,33 @@ def class_balanced_batch(
     rng: np.random.Generator,
     configs_per_batch: int = 8,
     views_per_config: int = 8,
+    by: str = "config",
 ) -> Batch:
-    """`P` configuracoes x `K` vistas (o batch P x K de Hermans et al. 2017), cada
-    vista com conteudo e arm sorteados de forma independente.
+    """`P` classes x `K` vistas (o batch P x K de Hermans et al. 2017). A classe e
+    a configuracao (`by="config"`) ou o trecho de conteudo (`by="content"`); cada
+    vista sorteia o outro fator sem reposicao e o arm com reposicao.
 
     Montado por classe porque o contrastivo so produz termo para ancoras com algum
-    positivo no batch. Os conteudos de uma configuracao saem sem reposicao; os
-    arms, com reposicao.
+    positivo no batch.
     """
+    if by not in ("config", "content"):
+        raise ValueError(f"classe do batch desconhecida: {by!r}")
     n_contents, n_configs, n_arms = index.shape
-    if configs_per_batch > n_configs:
-        raise ValueError(
-            f"pedidas {configs_per_batch} configuracoes por batch, ha {n_configs}"
-        )
+    n_classes, n_others = (n_configs, n_contents) if by == "config" else (n_contents, n_configs)
+    if configs_per_batch > n_classes:
+        name = "configuracoes" if by == "config" else "trechos"
+        raise ValueError(f"pedidas {configs_per_batch} {name} por batch, ha {n_classes}")
     if views_per_config < 2:
-        raise ValueError("sao precisas ao menos 2 vistas por configuracao para haver positivo")
+        raise ValueError("sao precisas ao menos 2 vistas por classe para haver positivo")
 
-    chosen = rng.choice(n_configs, size=configs_per_batch, replace=False)
+    chosen = rng.choice(n_classes, size=configs_per_batch, replace=False)
     rows: List[int] = []
-    for config in chosen:
-        replace = n_contents < views_per_config
-        contents = rng.choice(n_contents, size=views_per_config, replace=replace)
+    for label in chosen:
+        replace = n_others < views_per_config
+        others = rng.choice(n_others, size=views_per_config, replace=replace)
         arms = rng.integers(0, n_arms, size=views_per_config)
-        for content, arm in zip(contents, arms):
+        for other, arm in zip(others, arms):
+            content, config = (other, label) if by == "config" else (label, other)
             rows.append(index.row(int(content), int(config), int(arm)))
 
     rows_array = np.array(rows, dtype=np.int64)
