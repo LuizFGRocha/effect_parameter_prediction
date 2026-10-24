@@ -21,4 +21,9 @@ gefx disent diversity --held-out byod-mxr --seed 2 --split teste \
 for degrau in poc1 poc1_media poc2_fundo; do
   gefx disent evaluate --split teste --results-dir "results/disent/v2/validacao/escada/$degrau"
 done
+# Os degraus das duas cabecas (scripts/poc2_duas_cabecas.sh), com as sondas de z_e e z_c.
+for degrau in trecho conteudo; do
+  gefx disent evaluate --split teste --results-dir "results/disent/v2/validacao/duas_cabecas/$degrau"
+  gefx disent probe --split teste --results-dir "results/disent/v2/validacao/duas_cabecas/$degrau"
+done
 gefx disent plots --split teste
