@@ -489,9 +489,49 @@ old encoder and protocol):
   (a decoder = more code); and its sequence-level latent would take drive, arm and guitar
   timbre together, since all are constant in time. DSVAE has the same objection.
 
+**Review fixes (2026-10-31, branch `revisao-2026-10`).** What changed and what is stale:
+
+- **Same-arm control** (`same_arm_control`, `same_arm_drive_exact`) is now the real
+  diagonal: the catalog holds only the query's arm (`retrieve_by_arm(...,
+  catalog_arms="mesmo")`). Before, it searched every arm, the query's included. Every
+  validation run was re-evaluated with it (cross-arm numbers unchanged to 0.03 pt):
+  SupCon `validacao/encoder` 68.6 / 65.8 / 70.6% (was 69.0 / 64.9 / 69.6%), so crossing
+  implementations costs ~1.8 pt on validation, not ~1.3. Test-split numbers in the
+  report predate the fix and must come from the final `scripts/poc2_teste.sh` pass.
+- **B1 and the direct readout** answer the ladder step in dB too, like the search (the
+  continuous output is `raw_drive_db`): B1 validation 2.07 dB, was 2.49.
+- **LOO standardizer**: the cache key was `file_name` only, identical across arms, so
+  every 7-arm slice in one `gefx disent loo` process reused the first one's
+  standardizer, held-out arm included (all 16 `loo/*/standardizer.npz` were equal; the
+  k=7 point of the diversity curve reuses `loo/byod-mxr`). The key is now (arm, file).
+  **`validacao/encoder/loo/` and the diversity k=7 point are stale and must be
+  retrained** (move `loo/` aside; `scripts/poc2_validacao.sh` reruns it).
+- **Transfer cost** pairs each LOO seed with the same seed of the all-arms encoder
+  (`supcon`, `supcon_s2`); it compared the 2-seed LOO mean with seed 1 alone. On the
+  old LOO runs: mean cost −15.2 pt (was −17.0), lsp-tanh +0.2 (was −2.5). The diversity
+  figure's "seen" line pairs seeds the same way.
+- **Calibration segments** now come from training recordings only (not validation),
+  with the render's 0.5 s margins; before, `paths[-8:]` included 2 test (`query`) and 2
+  validation recordings and no margin. `experiments/disent_levels.yaml` and
+  `datasets/disent_v2` were **kept**: recalibrating with the new segments moved the
+  knobs by ≤ 0.35 dB (byod-bigmuff ≤ 0.94, byod-mxr level 1 −2.4 dB), less than merely
+  changing the segment seed with the new code (up to 2.7 dB, byod-mxr level 1; dm-Rat
+  1.5) — the stored levels are within the calibration's own sampling noise. So
+  `calibrate` no longer reproduces the stored levels file byte for byte, and
+  recalibrating means re-rendering `disent_v2` and retraining everything.
+- **cross-impl registry**: the LSP distortion arm now fixes the same clipper parameters
+  as `lsp-tanh` (sigmoid threshold −12 dB; the plugin default −3 dB saturated far later
+  than pedalboard: THD 0.009 vs 0.055 at 25 dB, now 0.046), and the flanger's
+  `centre_delay_ms → min_depth_ms` is non-exact (not the same quantity). The flanger's
+  `feedback_gain_db` caps at −1 dB (feedback > 0.891, ~4% of draws, saturates).
+  `datasets/cross_impl` was rendered before this; re-render it before quoting
+  distortion/flanger cross-impl numbers again.
+
 **Adding a pedal**: find its drive parameter with `gefx inspect-plugin <vst3>`, add it to
-the roster with a `sweep`, run `calibrate`. It fits if its Rnonlin reaches
-≥ 0.989 at the low end and ≤ 0.846 at the high end (the printed range); otherwise it gets
+the roster with a `sweep`, run `calibrate` (into a scratch `--levels`/`--curves` first:
+it rewrites every arm's knobs, see the review fixes above). It fits if its Rnonlin
+reaches ≥ 0.989 at the low end and ≤ 0.846 at the high end (the stored levels; with the
+current train-only segments the printed range is 0.989–0.841); otherwise it gets
 `unmatched` levels. Then either accept them, drop the pedal, or lower `--ref-db` MAX —
 which changes every arm's levels, so do it deliberately.
 

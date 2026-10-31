@@ -264,7 +264,7 @@ def _cmd_disent_loo(args: argparse.Namespace) -> None:
     raiz = _results_dir(args, "loo")
     tabela = leave_one_arm_out(
         _dataset_root(args), raiz, steps=args.steps,
-        seeds=list(dict.fromkeys([args.seed or EncoderTrainConfig.seed,
+        seeds=list(dict.fromkeys([EncoderTrainConfig.seed if args.seed is None else args.seed,
                                   *(args.extra_seed or [])])),
         split=args.split,
     )
