@@ -23,6 +23,7 @@ import numpy as np
 
 from gefx.audio import export_audio, load_audio_file, normalize_loudness
 from gefx.data.grid import (
+    DATASET_ROOT,
     SIDECAR_FILENAME,
     GridRecord,
     arm_folder,
@@ -48,7 +49,7 @@ class ContentItem:
 @dataclass
 class RenderOptions:
     input_dir: Path = Path("datasets/unprocessed_samples")
-    output_root: Path = Path("datasets/disent_v2")
+    output_root: Path = DATASET_ROOT
     roster: Path = DEFAULT_ROSTER
     levels: Path = DEFAULT_LEVELS
     n_contents: int = 400  # gravacoes; cada uma da `segments_per_file` conteudos
@@ -171,7 +172,7 @@ def render(options: RenderOptions) -> Dict[str, int]:
             ]
             rows = [row for future in futures for row in future.result()]
 
-        rows.sort(key=lambda row: (row["content_id"], row["config_index"]))
+        rows.sort(key=lambda row: (row["content_id"], row["drive_level"]))
         write_sidecar(root / spec.key / SIDECAR_FILENAME, [GridRecord(**row) for row in rows])
         totals[spec.key] = len(rows)
         print(f"  {spec.key:16s} {len(rows)} renders")

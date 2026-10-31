@@ -18,8 +18,8 @@ def test_between_levels_fall_between_the_grid_knobs(tmp_path):
     write_levels(tmp_path / "niveis.yaml", {
         "descriptor": "rnonlin", "targets": [0.96, 0.92, 0.88],
         "arms": {"a": {"levels": [10.0, 20.0, 30.0], "unmatched": []}}})
-    levels = between_levels(tmp_path / "niveis.yaml", tmp_path / "curvas.csv",
-                            tmp_path / "entre.yaml")
+    levels = between_levels(tmp_path / "entre.yaml", tmp_path / "niveis.yaml",
+                            tmp_path / "curvas.csv")
     assert levels["a"] == pytest.approx([15.0, 25.0])
     assert load_levels(tmp_path / "entre.yaml")["targets"] == pytest.approx([0.94, 0.90])
 

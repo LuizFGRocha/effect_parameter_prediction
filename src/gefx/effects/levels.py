@@ -10,9 +10,8 @@ pelo nivel. 1 = sem distorcao.
 
 Por que ele e nao a queda do fator de crista: em niveis da referencia separados
 de ouvido por diferenca audivel, os degraus em 1 - Rnonlin foram os mais
-regulares (CV 0,15-0,18, contra 0,21 do dB e 0,73 da crista), e a correlacao por
-banda nao e enganada por um filtro depois do clipador -- a crista era, e dava ao
-BYOD metade da escala. A faixa padrao tambem veio do ouvido: 18,45 dB e o
+regulares, e a correlacao por banda nao e enganada por um filtro depois do
+clipador -- a crista era, e dava ao BYOD metade da escala (numeros no CLAUDE.md). A faixa padrao tambem veio do ouvido: 18,45 dB e o
 primeiro nivel audivel, e 39 dB fica abaixo do teto do Big Muff, o arm de menor
 alcance (acima disso os niveis dele caem na parte plana da curva e soam iguais).
 
@@ -36,11 +35,20 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from gefx.audio import load_audio_file, normalize_loudness
-from gefx.effects.drive_arms import Arm, LoadedArm, load_levels, load_roster, write_levels
+from gefx.effects.drive_arms import (
+    DEFAULT_LEVELS,
+    DEFAULT_ROSTER,
+    Arm,
+    LoadedArm,
+    load_levels,
+    load_roster,
+    write_levels,
+)
 
 DESCRIPTOR = "rnonlin"
 DEFAULT_REFERENCE_DB: Tuple[float, float] = (18.45, 39.0)
 DEFAULT_SWEEP_POINTS = 33
+DEFAULT_CURVES = Path("results/disent/calibracao/curvas.csv")
 FRAME_S = 0.030
 MAX_LAG_S = 0.001
 BAND_HZ: Tuple[float, float] = (50.0, 16000.0)
@@ -110,17 +118,33 @@ def rnonlin(dry: np.ndarray, wet: np.ndarray, sr: int,
 
 # --- varredura -------------------------------------------------------------------
 def load_segments(input_dir: Path, n: int = 8, seconds: float = 2.0,
-                  seed: int = 20260906) -> Tuple[List[np.ndarray], int]:
-    """Segmentos a -26 LUFS das ultimas gravacoes da lista, como no render."""
+                  seed: int = 20260906,
+                  split_seed: int = 20260906) -> Tuple[List[np.ndarray], int]:
+    """Segmentos a -26 LUFS das ultimas `n` gravacoes de treino da lista.
+
+    Os niveis viram os rotulos, entao saem so do treino (sem a validacao), pela
+    mesma particao do render (`split_contents` com a `split_seed` dele, sobre
+    todas as gravacoes de `input_dir`), e com o mesmo descarte de 0,5 s nas bordas.
+    """
+    from gefx.data.grid import split_contents, validation_recordings
+
     paths = sorted(Path(input_dir).glob("*.wav"))
+    train = split_contents([path.stem for path in paths], seed=split_seed)["train"]
+    train = set(validation_recordings(train)["train"])
+    paths = [path for path in paths if path.stem in train]
     if len(paths) < n:
-        raise ValueError(f"{input_dir} tem {len(paths)} wavs, menos que os {n} pedidos")
+        raise ValueError(f"{input_dir} tem {len(paths)} gravacoes de treino, menos que "
+                         f"as {n} pedidas")
     rng = np.random.default_rng(seed)
     segments, sr = [], 0
     for path in paths[-n:]:
         audio, sr = load_audio_file(path)
         frames = int(round(seconds * sr))
-        start = int(rng.integers(0, max(audio.shape[1] - frames, 1)))
+        margin = int(round(0.5 * sr))  # o descarte de bordas do render
+        slack = audio.shape[1] - 2 * margin - frames
+        if slack < 0:
+            raise ValueError(f"{path} e curta demais para um trecho de {seconds}s")
+        start = margin + int(rng.integers(0, slack + 1))
         segments.append(normalize_loudness(audio[:, start : start + frames], sr))
     return segments, sr
 
@@ -191,10 +215,10 @@ def arm_knobs(knobs: Sequence[float], curve: Sequence[float], targets: Sequence[
 
 
 def calibrate(
-    roster_path: Path,
-    levels_path: Path,
-    input_dir: Path,
-    curves_csv: Path,
+    roster_path: Path = DEFAULT_ROSTER,
+    levels_path: Path = DEFAULT_LEVELS,
+    input_dir: Path = Path("datasets/unprocessed_samples"),
+    curves_csv: Path = DEFAULT_CURVES,
     points: int = DEFAULT_SWEEP_POINTS,
     n_segments: int = 8,
     workers: int = 8,
@@ -248,7 +272,8 @@ def _write_curves(path: Path, curves: Dict[str, Tuple[np.ndarray, np.ndarray]]) 
     ]).to_csv(path, index=False)
 
 
-def between_levels(levels_path: Path, curves_csv: Path, out_path: Path) -> Dict[str, List[float]]:
+def between_levels(out_path: Path, levels_path: Path = DEFAULT_LEVELS,
+                   curves_csv: Path = DEFAULT_CURVES) -> Dict[str, List[float]]:
     """Os pontos medios entre niveis vizinhos, pelas curvas que `calibrate` gravou.
 
     Para testar configuracoes fora da grade: os niveis sao equidistantes em

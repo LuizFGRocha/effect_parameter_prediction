@@ -76,7 +76,7 @@ def test_registry_effects_exist_in_catalog(effect):
 
 @pytest.mark.parametrize("effect", sorted(REGISTRY))
 def test_mapped_reference_params_exist_in_catalog(effect):
-    known = {param["name"] for param in EFFECT_PARAMETER_RANGES[effect]} | {"_mix_dry"}
+    known = {param["name"] for param in EFFECT_PARAMETER_RANGES[effect]}
     for spec in REGISTRY[effect].values():
         assert set(spec["map"]) <= known
 
@@ -89,7 +89,7 @@ def test_non_exact_mappings_reference_predictable_params(effect):
     predictable = {param["name"] for param in effect_predictable_params(effect)}
     for spec in REGISTRY[effect].values():
         for ref_name, (_, _, exact) in spec["map"].items():
-            if not exact and ref_name != "_mix_dry":
+            if not exact:
                 assert ref_name in predictable
 
 

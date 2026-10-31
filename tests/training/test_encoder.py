@@ -88,8 +88,8 @@ def _config(tmp_path, technique="supcon", **kwargs):
         dataset_root=_dataset(tmp_path / "data"),
         technique=technique,
         steps=2,
-        configs_per_batch=2,
-        views_per_config=2,
+        classes_per_batch=2,
+        views_per_class=2,
         eval_every=0,
         embed_batch=8,
         seed=3,
@@ -213,6 +213,21 @@ def test_a_misaligned_index_and_cache_is_refused_instead_of_trained_wrong(tmp_pa
     monkeypatch.setattr(train_module, "build_index", shuffled)
     with pytest.raises(ValueError, match="ordens diferentes"):
         train_module.train(config, verbose=False)
+
+
+def test_the_standardizer_cache_tells_apart_slices_with_the_same_files(tmp_path):
+    """No leave-one-out todo recorte de N-1 arms tem os mesmos `file_name`: so o
+    nome na chave daria a todos o padronizador do primeiro, com o arm retirado
+    dentro."""
+    root = _config(tmp_path).dataset_root
+    frame = split_frames(root)["train"]
+
+    def fitted(held_out):
+        store = FeatureStore(root, frame[frame["arm"] != held_out])
+        return train_module.fitted_standardizer(store, root)
+
+    assert fitted("a0") is not fitted("a1")
+    assert fitted("a0") is fitted("a0")
 
 
 def test_the_code_comes_out_of_the_encoder_in_the_row_order_of_the_frame(tmp_path):

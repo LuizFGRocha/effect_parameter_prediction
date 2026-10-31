@@ -113,14 +113,6 @@ def test_score_reports_chance_next_to_every_accuracy():
     assert metrics["drive_level"]["chance"] == pytest.approx(0.25)
     assert metrics["drive_level"]["mae_levels"] == 0.0
     assert metrics["mae_db"] == 0.0
-    assert metrics["cross_implementation"] is True
-
-
-def test_score_flags_a_catalog_that_leaked_the_query_arm():
-    q = _frame("a", ["c1"], "query")
-    c = _frame("a", ["c2"], "catalog")
-    out = retrieve(q, c, _onehot(q), _onehot(c))
-    assert score(out, alphabet(q))["cross_implementation"] is False
 
 
 def test_score_counts_a_one_level_miss_as_within_one_but_not_exact():
@@ -159,11 +151,37 @@ def test_retrieve_by_arm_never_lets_a_query_reach_its_own_arm():
         queries, catalog,
         rng.random((len(queries), 3)).astype(np.float32),
         rng.random((len(catalog), 3)).astype(np.float32),
-        same_arm=False,
     )
     assert not (result.predictions["query_arm"] == result.predictions["retrieved_arm"]).any()
-    # O catalogo alcancavel exclui o proprio arm: nao e `len(catalog)`.
-    assert result.metrics["catalog_size"] == len(catalog) - len(catalog) // len(arms)
+
+
+def test_the_same_arm_control_only_searches_the_query_arm():
+    """A diagonal: o catalogo so com o arm da consulta. Com o catalogo inteiro a
+    busca misturaria acertos dentro do arm e entre arms."""
+    arms = ["m0", "m1", "m2"]
+    queries = _multi_arm(arms, ["q0", "q1"], "query")
+    catalog = _multi_arm(arms, ["k0", "k1"], "catalog")
+    rng = np.random.default_rng(0)
+    vectors = (rng.random((len(queries), 3)).astype(np.float32),
+               rng.random((len(catalog), 3)).astype(np.float32))
+    same = retrieve_by_arm(queries, catalog, *vectors, catalog_arms="mesmo")
+    assert (same.predictions["query_arm"] == same.predictions["retrieved_arm"]).all()
+    every = retrieve_by_arm(queries, catalog, *vectors, catalog_arms="todos")
+    assert set(every.predictions["retrieved_arm"]) <= set(arms)
+    with pytest.raises(ValueError, match="catalog_arms"):
+        retrieve_by_arm(queries, catalog, *vectors, catalog_arms="diagonal")
+
+
+def test_the_readout_answers_with_the_ladder_step_like_the_search():
+    """O B1 responde o degrau mais proximo, nivel e dB, como um item do catalogo:
+    o erro em dB fica na mesma escala da busca."""
+    from gefx.evaluation.retrieval import readout
+
+    queries = _frame("a", ["q0"], "query")  # escada 5, 10, 15, 20 dB
+    result = readout(queries, np.array([6.0, 9.0, 16.0, 30.0]), "(teste)")
+    assert list(result.predictions["pred_drive_db"]) == [5.0, 10.0, 15.0, 20.0]
+    assert list(result.predictions["raw_drive_db"]) == [6.0, 9.0, 16.0, 30.0]
+    assert result.metrics["overall"]["mae_db"] == 0.0
 
 
 def test_the_metrics_carry_what_the_figures_need_from_the_dataset():

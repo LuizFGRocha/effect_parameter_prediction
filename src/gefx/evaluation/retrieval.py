@@ -2,8 +2,8 @@
 
 Consulta e catalogo vem de splits de conteudo disjuntos, e por padrao o catalogo
 exclui o arm da consulta: a resposta tem de atravessar implementacoes. A
-diagonal (mesmo arm) fica como controle. A busca e por cosseno, a mesma para o
-B0 e para o codigo aprendido (`evaluate`).
+diagonal (catalogo so com o arm da consulta) fica como controle. A busca e por
+cosseno, a mesma para o B0 e para o codigo aprendido (`evaluate`).
 
 O treino so le a validacao (`metrics_validacao.json`); o teste e lido uma vez,
 no fim, com os modelos finais (`evaluation/runner.py`).
@@ -114,9 +114,6 @@ def score(predictions: pd.DataFrame, alphabet: Mapping[str, int]) -> Dict[str, o
         "mae_db": float(
             np.mean(np.abs(predictions["true_drive_db"] - predictions["pred_drive_db"]))
         ),
-        "cross_implementation": bool(
-            not (predictions["query_arm"] == predictions["retrieved_arm"]).any()
-        ),
     }
 
 
@@ -140,18 +137,26 @@ def _context(frame: pd.DataFrame) -> Dict[str, object]:
     }
 
 
+#: Que arms do catalogo cada consulta enxerga: os outros (a tarefa), so o dela
+#: (a diagonal, o controle) ou todos (quando o catalogo ja vem recortado, como na
+#: transferencia do leave-one-out).
+CATALOG_ARMS = ("outros", "mesmo", "todos")
+
+
 def retrieve_by_arm(
     queries: pd.DataFrame,
     catalog: pd.DataFrame,
     query_vectors: np.ndarray,
     catalog_vectors: np.ndarray,
-    same_arm: bool = False,
+    catalog_arms: str = "outros",
 ) -> RetrievalResult:
     """A tarefa do POC II sobre uma representacao qualquer das duas particoes.
 
-    E o protocolo unico que avalia o B0 e o codigo aprendido. `same_arm=False` (o
-    padrao) exclui o arm da consulta do catalogo.
+    E o protocolo unico que avalia o B0 e o codigo aprendido. `catalog_arms`
+    (`CATALOG_ARMS`) diz que arms do catalogo entram na busca de cada consulta.
     """
+    if catalog_arms not in CATALOG_ARMS:
+        raise ValueError(f"catalog_arms desconhecido: {catalog_arms!r}. Ha {CATALOG_ARMS}")
     if len(queries) != len(query_vectors) or len(catalog) != len(catalog_vectors):
         raise ValueError(
             f"tabelas e vetores desalinhados: {len(queries)}/{len(query_vectors)} "
@@ -160,12 +165,9 @@ def retrieve_by_arm(
     parts: List[pd.DataFrame] = []
     for arm in sorted(queries["arm"].unique()):
         q_where = np.flatnonzero((queries["arm"] == arm).to_numpy())
-        keep = (
-            np.ones(len(catalog), dtype=bool)
-            if same_arm
-            else (catalog["arm"] != arm).to_numpy()
-        )
-        c_where = np.flatnonzero(keep)
+        keep = {"outros": catalog["arm"] != arm, "mesmo": catalog["arm"] == arm,
+                "todos": catalog["arm"].notna()}[catalog_arms]
+        c_where = np.flatnonzero(keep.to_numpy())
         parts.append(
             retrieve(
                 queries.iloc[q_where].reset_index(drop=True),
@@ -177,17 +179,14 @@ def retrieve_by_arm(
     predictions = pd.concat(parts, ignore_index=True)
 
     sizes = alphabet(queries)
-    por_arm = int(len(catalog) / catalog["arm"].nunique())
     metrics: Dict[str, object] = {
         "overall": score(predictions, sizes),
         "per_query_arm": {
             str(arm): score(part, sizes)
             for arm, part in predictions.groupby("query_arm", sort=True)
         },
-        "same_arm": bool(same_arm),
+        "catalog_arms": catalog_arms,
         "alphabet": sizes,
-        # Quantos itens cada consulta de fato alcanca.
-        "catalog_size": len(catalog) if same_arm else len(catalog) - por_arm,
         **_context(queries),
     }
     return RetrievalResult(predictions=predictions, metrics=metrics)
@@ -205,7 +204,6 @@ def standardized_rows(store, standardizer, batch: int = 256) -> np.ndarray:
 def baseline_b0(
     root: Path,
     arms: Optional[Sequence[str]] = None,
-    feature: str = "Spec",
     split: str = "validacao",
 ) -> RetrievalResult:
     """B0: vizinho mais proximo na propria entrada do encoder, sem aprender nada.
@@ -218,7 +216,7 @@ def baseline_b0(
 
     query_key, catalog_key = EVAL_SPLITS[split]
     frames = split_frames(Path(root), arms)
-    stores = {name: FeatureStore(Path(root), frames[name], feature)
+    stores = {name: FeatureStore(Path(root), frames[name])
               for name in ("train", query_key, catalog_key)}
     standardizer = PixelStandardizer.fit(stores["train"])
     return retrieve_by_arm(
@@ -241,8 +239,12 @@ def readout(queries: pd.DataFrame, drive_db: np.ndarray, source: str,
             **extra: object) -> RetrievalResult:
     """Uma saida continua em dB lida sem catalogo: o degrau da escada mais proximo.
 
-    E como o B1 e o controle escalar entram na mesma tabela da busca.
+    E como o B1 e o controle escalar entram na mesma tabela da busca: o nivel e o
+    dB respondidos sao os do degrau, como os de um item do catalogo, e a saida
+    continua fica em `raw_drive_db`.
     """
+    ladder = drive_ladder(queries)
+    level = nearest_level(drive_db, ladder)
     out = pd.DataFrame(
         {
             "file_name": queries["file_name"].to_numpy(),
@@ -252,9 +254,10 @@ def readout(queries: pd.DataFrame, drive_db: np.ndarray, source: str,
             "retrieved_file": "",
             "distance": np.nan,
             "true_drive_level": queries["drive_level"].to_numpy(),
-            "pred_drive_level": nearest_level(drive_db, drive_ladder(queries)),
+            "pred_drive_level": level,
             "true_drive_db": queries["drive_db_equivalente"].to_numpy(),
-            "pred_drive_db": drive_db,
+            "pred_drive_db": ladder[level],
+            "raw_drive_db": drive_db,
         }
     )
     sizes = alphabet(queries)
@@ -323,14 +326,14 @@ def embed(model, store, standardizer, batch: int = 128) -> np.ndarray:
 
 def search(model, frames: Mapping[str, pd.DataFrame], stores: Mapping[str, object],
            standardizer, split: str, batch: int = 128,
-           same_arms: Sequence[bool] = (False,)):
-    """A busca de `split` com o codigo de `model`: um resultado por `same_arm`, e os
-    codigos das consultas."""
+           catalog_arms: Sequence[str] = ("outros",)):
+    """A busca de `split` com o codigo de `model`: um resultado por modo de
+    `catalog_arms`, e os codigos das consultas."""
     query_key, catalog_key = EVAL_SPLITS[split]
     z_query = embed(model, stores[query_key], standardizer, batch)
     z_catalog = embed(model, stores[catalog_key], standardizer, batch)
     results = [retrieve_by_arm(frames[query_key], frames[catalog_key], z_query, z_catalog,
-                               same_arm=same_arm) for same_arm in same_arms]
+                               catalog_arms=mode) for mode in catalog_arms]
     return results, z_query
 
 
@@ -360,7 +363,7 @@ def evaluate(model, frames: Mapping[str, pd.DataFrame], stores: Mapping[str, obj
             f"por fora."
         )
     (cross, same), z_query = search(model, frames, stores, standardizer, split, batch,
-                                    same_arms=(False, True))
+                                    catalog_arms=("outros", "mesmo"))
     metrics: Dict[str, object] = dict(cross.metrics)
     metrics["split"] = split
     metrics["same_arm_control"] = same.metrics["overall"]

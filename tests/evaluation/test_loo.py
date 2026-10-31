@@ -14,6 +14,9 @@ import pandas as pd
 import pytest
 
 from gefx.evaluation.loo import transfer_cost
+from gefx.training.encoder import EncoderTrainConfig
+
+SEED = EncoderTrainConfig.seed
 
 
 def _resumo():
@@ -26,16 +29,18 @@ def _resumo():
          "drive_exact": 0.139, "mae_db": 11.18, "n": 800},
         {"arm_retirado": "byod-bigmuff", "estrato": "S3", "condicao": "vistos",
          "drive_exact": 0.533, "mae_db": 2.44, "n": 4800},
-    ]).assign(centrado=False)
+    ]).assign(centrado=False, seed=SEED)
 
 
-def _metrics(tmp_path):
-    caminho = tmp_path / "metrics.json"
+def _metrics(tmp_path, run="supcon", tanh=0.509):
+    """As metricas de validacao de uma execucao do encoder com todos os arms."""
+    caminho = tmp_path / run / "metrics_validacao.json"
+    caminho.parent.mkdir(parents=True, exist_ok=True)
     caminho.write_text(json.dumps({"per_query_arm": {
-        "lsp-tanh": {"drive_level": {"exact": 0.509}, "mae_db": 2.863},
+        "lsp-tanh": {"drive_level": {"exact": tanh}, "mae_db": 2.863},
         "byod-bigmuff": {"drive_level": {"exact": 0.228}, "mae_db": 7.189},
     }}), encoding="utf-8")
-    return caminho
+    return tmp_path
 
 
 def test_transfer_cost_compares_each_arm_with_itself(tmp_path):
@@ -64,7 +69,7 @@ def test_an_arm_missing_from_the_reference_is_skipped(tmp_path):
     resumo = _resumo()
     resumo.loc[len(resumo)] = {"arm_retirado": "arm-novo", "condicao": "transferencia",
                                "drive_exact": 0.4, "mae_db": 3.0, "n": 800,
-                               "estrato": "S2", "centrado": False}
+                               "estrato": "S2", "centrado": False, "seed": SEED}
     assert "arm-novo" not in set(transfer_cost(resumo, _metrics(tmp_path))["arm"])
 
 
@@ -181,14 +186,24 @@ def test_the_curve_keeps_the_catalog_fixed_while_the_training_set_grows(tmp_path
 
 def test_the_transfer_cost_averages_the_seeds_and_shows_the_spread(tmp_path):
     resumo = _resumo()
-    resumo["seed"] = 1
-    outra = _resumo()
-    outra["seed"] = 2
+    outra = _resumo().assign(seed=2)
     outra.loc[outra["condicao"] == "transferencia", "drive_exact"] = [0.551, 0.159]
+    _metrics(tmp_path, "supcon_s2")
     custo = transfer_cost(pd.concat([resumo, outra]), _metrics(tmp_path)).set_index("arm")
     assert custo.loc["lsp-tanh", "sementes"] == 2
     assert custo.loc["lsp-tanh", "inedito"] == pytest.approx(0.541)
     assert custo.loc["lsp-tanh", "amplitude_pontos"] == pytest.approx(2.0, abs=0.05)
+
+
+def test_the_seen_reference_comes_from_the_same_seeds_as_the_held_out_runs(tmp_path):
+    """Cada semente do leave-one-out contra a mesma semente do encoder: com o
+    visto de uma semente so, a diferenca entre sementes entraria no custo."""
+    outra = _resumo().assign(seed=2)
+    _metrics(tmp_path, "supcon_s2", tanh=0.459)
+    custo = transfer_cost(pd.concat([_resumo(), outra]), _metrics(tmp_path)).set_index("arm")
+    assert custo.loc["lsp-tanh", "visto"] == pytest.approx(0.484)
+    assert custo.loc["lsp-tanh", "custo_pontos"] == pytest.approx(4.7, abs=0.05)
+    assert custo.loc["lsp-tanh", "amplitude_pontos"] == pytest.approx(5.0, abs=0.05)
 
 
 def test_leave_one_out_trains_on_the_dataset_it_evaluates(tmp_path, monkeypatch):

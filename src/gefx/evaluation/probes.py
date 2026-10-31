@@ -13,6 +13,8 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from gefx.data.grid import DATASET_ROOT
+
 PROBE_FACTORS: Dict[str, str] = {
     "arm": "implementacao (deve sair)",
     "content_id": "conteudo (deve sair)",
@@ -98,9 +100,8 @@ def linear_probes(
 
 def embed_run(
     run_dir: Path,
-    dataset_root: Path = Path("datasets/disent_v2"),
+    dataset_root: Path = DATASET_ROOT,
     split: str = "validacao",
-    feature: str = "Spec",
     code: str = "z_e",
 ):
     """`(manifesto, frame, codigo)` do catalogo de `split`, com os arms e o
@@ -112,13 +113,13 @@ def embed_run(
 
     model, manifest, standardizer, frames = open_run(run_dir, dataset_root, code=code)
     frame = frames[EVAL_SPLITS[split][1]]
-    codes = embed(model, FeatureStore(dataset_root, frame, feature), standardizer)
+    codes = embed(model, FeatureStore(dataset_root, frame), standardizer)
     return manifest, frame, codes
 
 
 def probe_study(
     results_dir: Path,
-    dataset_root: Path = Path("datasets/disent_v2"),
+    dataset_root: Path = DATASET_ROOT,
     runs: Optional[Sequence[str]] = None,
     split: str = "validacao",
     folds: int = DEFAULT_FOLDS,

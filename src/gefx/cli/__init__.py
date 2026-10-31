@@ -15,6 +15,25 @@ CONFIG_HELP = "Arquivo YAML de experimento. Flags explicitas sobrescrevem o que 
 
 
 # --- handlers ----------------------------------------------------------------
+def _given(args: argparse.Namespace, *names: str) -> dict:
+    """So as flags passadas: as outras ficam no padrao de quem as recebe, que e o
+    unico lugar onde o padrao esta escrito."""
+    return {name: getattr(args, name) for name in names if getattr(args, name) is not None}
+
+
+def _dataset_root(args: argparse.Namespace) -> Path:
+    from gefx.data.grid import DATASET_ROOT
+
+    return Path(args.output_root or DATASET_ROOT)
+
+
+def _results_dir(args: argparse.Namespace, *below: str) -> Path:
+    """`--results-dir`, ou `<RESULTS_ROOT>/<below...>` (o encoder da validacao)."""
+    from gefx.training.encoder import RESULTS_ROOT
+
+    return Path(args.results_dir) if args.results_dir else RESULTS_ROOT.joinpath(*below)
+
+
 def _cmd_render_dataset(args: argparse.Namespace) -> None:
     from gefx.config import load_config
     from gefx.data.render import generate_dataset
@@ -77,18 +96,9 @@ def _cmd_compare_features(args: argparse.Namespace) -> None:
 def _cmd_cross_impl_render(args: argparse.Namespace) -> None:
     from gefx.crossimpl.render import RenderOptions, render
 
-    render(
-        RenderOptions(
-            input_dir=args.input_dir,
-            output_root=args.output_root,
-            n=args.n,
-            segment_seconds=args.segment_seconds,
-            seed=args.seed,
-            arms=args.arm,
-            effects=args.effect,
-            legacy=args.legacy,
-        )
-    )
+    render(RenderOptions(arms=args.arm, effects=args.effect, legacy=args.legacy,
+                         **_given(args, "input_dir", "output_root", "n", "segment_seconds",
+                                  "seed")))
 
 
 def _cmd_cross_impl_eval(args: argparse.Namespace) -> None:
@@ -106,38 +116,16 @@ def _cmd_cross_impl_eval(args: argparse.Namespace) -> None:
 def _cmd_disent_calibrate(args: argparse.Namespace) -> None:
     from gefx.effects.levels import calibrate
 
-    calibrate(
-        roster_path=Path(args.roster),
-        levels_path=Path(args.levels),
-        input_dir=Path(args.input_dir),
-        curves_csv=Path(args.curves),
-        points=args.points,
-        n_segments=args.segments,
-        workers=args.workers,
-        reference_db=tuple(args.ref_db),
-        n_levels=args.n_levels,
-    )
+    calibrate(**_given(args, "roster_path", "levels_path", "input_dir", "curves_csv", "points",
+                       "n_segments", "workers", "reference_db", "n_levels"))
 
 
 def _cmd_disent_render(args: argparse.Namespace) -> None:
     from gefx.data.render_grid import RenderOptions, render
 
-    render(
-        RenderOptions(
-            input_dir=Path(args.input_dir),
-            output_root=Path(args.output_root),
-            roster=Path(args.roster),
-            levels=Path(args.levels),
-            n_contents=args.contents,
-            segments_per_file=args.segments_per_file,
-            segment_seconds=args.segment_seconds,
-            seed=args.seed,
-            split_seed=args.split_seed,
-            arms=args.arm,
-            splits=args.split,
-            workers=args.workers,
-        )
-    )
+    render(RenderOptions(**_given(args, "input_dir", "output_root", "roster", "levels",
+                                  "n_contents", "segments_per_file", "segment_seconds", "seed",
+                                  "split_seed", "arms", "splits", "workers")))
 
 
 def _cmd_disent_between(args: argparse.Namespace) -> None:
@@ -145,11 +133,11 @@ def _cmd_disent_between(args: argparse.Namespace) -> None:
     from gefx.evaluation.between import between_study
 
     if args.write_levels:
-        between_levels(Path(args.levels), Path(args.curves), Path(args.write_levels))
+        between_levels(out_path=args.write_levels, **_given(args, "levels_path", "curves_csv"))
         print(f"niveis intermediarios em {args.write_levels}")
         return
-    print(between_study(Path(args.results_dir), Path(args.output_root), Path(args.between_root),
-                        runs=args.run or ("supcon",), k=args.k).to_string(index=False))
+    print(between_study(_results_dir(args), _dataset_root(args), args.between_root,
+                        **_given(args, "runs", "k")).to_string(index=False))
 
 
 def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
@@ -158,7 +146,7 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
     from gefx.data.grid import split_file
     from gefx.evaluation.retrieval import baseline_b0, baseline_b1
 
-    root = Path(args.output_root)
+    root = _dataset_root(args)
     if args.baseline == "b0":
         result = baseline_b0(root, arms=args.arm, split=args.split)
         rotulo = "B0 -- vizinho mais proximo no Spec padronizado"
@@ -177,7 +165,8 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
               f"MAE {item['drive_level']['mae_levels']:.2f}  "
               f"{item['mae_db']:.2f} dB")
 
-    raiz = Path(args.results_dir)
+    # Os baselines ficam na pasta acima das execucoes do encoder.
+    raiz = Path(args.results_dir) if args.results_dir else _results_dir(args).parent
     raiz.mkdir(parents=True, exist_ok=True)
     result.predictions.to_csv(raiz / split_file(args.baseline, args.split, "csv"), index=False)
     destino = raiz / split_file(args.baseline, args.split, "json")
@@ -188,8 +177,7 @@ def _cmd_disent_retrieve(args: argparse.Namespace) -> None:
 def _cmd_disent_plots(args: argparse.Namespace) -> None:
     from gefx.evaluation.plots import build_all
 
-    escritos = build_all(Path(args.results_dir), Path(args.out_dir) if args.out_dir else None,
-                         split=args.split)
+    escritos = build_all(**_given(args, "results_dir", "out_dir"), split=args.split)
     print(f"{len(escritos)} figuras:")
     for caminho in escritos:
         print(f"  {caminho}")
@@ -213,8 +201,7 @@ def _write_table(tabela, destino: Path) -> None:
 
 #: Flags de `gefx disent train` que vao direto para o `EncoderTrainConfig`. Sem a
 #: flag, fica o padrao dele: os numeros nao se repetem aqui.
-_TRAIN_FLAGS = ("feature", "steps", "configs_per_batch", "views_per_config",
-                "temperature", "eval_every", "seed", "batch_by")
+_TRAIN_FLAGS = ("steps", "seed", "batch_by")
 
 
 def _cmd_disent_train(args: argparse.Namespace) -> None:
@@ -223,26 +210,23 @@ def _cmd_disent_train(args: argparse.Namespace) -> None:
     from gefx.data.grid import split_file
     from gefx.evaluation.runner import compare
     from gefx.training.architecture import ARCHITECTURES
-    from gefx.training.encoder import EncoderTrainConfig, train
+    from gefx.training.encoder import EncoderTrainConfig, run_name, train
 
-    flags = {name: getattr(args, name) for name in _TRAIN_FLAGS
-             if getattr(args, name) is not None}
+    flags = _given(args, *_TRAIN_FLAGS)
     architecture = ARCHITECTURES[args.arch]
     if args.learning_rate is not None:
         architecture = replace(architecture, learning_rate=args.learning_rate)
     if args.content_dim is not None:
         architecture = replace(architecture, content_dim=args.content_dim)
     base = EncoderTrainConfig(
-        dataset_root=Path(args.output_root),
-        arms=tuple(args.arm) if args.arm else None,
+        dataset_root=_dataset_root(args),
         deterministic=args.deterministic,
         architecture=architecture,
         **flags,
     )
-    raiz = Path(args.results_dir)
+    raiz = _results_dir(args)
     for nome in dict.fromkeys(args.technique or ["supcon"]):
-        # A semente padrao fica em `<tecnica>/`; as outras, ao lado.
-        pasta = nome if base.seed == EncoderTrainConfig.seed else f"{nome}_s{base.seed}"
+        pasta = run_name(nome, base.seed)
         print(f"[{pasta}]")
         train(replace(base, technique=nome, output_dir=raiz / pasta))
 
@@ -254,52 +238,52 @@ def _cmd_disent_probe(args: argparse.Namespace) -> None:
     from gefx.data.grid import split_file
     from gefx.evaluation.probes import probe_study
 
-    tabela = probe_study(
-        Path(args.results_dir), Path(args.output_root),
-        runs=args.run, split=args.split, folds=args.folds, seed=args.seed,
-    )
-
-    _write_table(tabela, Path(args.results_dir) / split_file("sondas", args.split, "csv"))
+    raiz = _results_dir(args)
+    tabela = probe_study(raiz, _dataset_root(args), split=args.split,
+                         **_given(args, "runs", "folds", "seed"))
+    _write_table(tabela, raiz / split_file("sondas", args.split, "csv"))
 
 
 def _cmd_disent_diversity(args: argparse.Namespace) -> None:
     from gefx.evaluation.loo import arm_diversity_curve, summary_file
 
+    raiz = _results_dir(args, "diversidade")
     tabela = arm_diversity_curve(
-        args.held_out, Path(args.output_root), Path(args.results_dir),
-        steps=args.steps, seed=args.seed,
-        reuse=Path(args.reuse) if args.reuse else None, split=args.split,
+        args.held_out, _dataset_root(args), raiz, split=args.split,
+        **_given(args, "steps", "seed", "reuse"),
     )
     print()
     print(tabela.to_string(index=False))
-    print(f"\ntabela em {Path(args.results_dir) / summary_file(args.split)}")
+    print(f"\ntabela em {raiz / summary_file(args.split)}")
 
 
 def _cmd_disent_loo(args: argparse.Namespace) -> None:
     from gefx.evaluation.loo import cost_file, leave_one_arm_out, transfer_cost
-    from gefx.evaluation.retrieval import metrics_file
+    from gefx.training.encoder import EncoderTrainConfig
 
+    raiz = _results_dir(args, "loo")
     tabela = leave_one_arm_out(
-        Path(args.output_root), Path(args.results_dir), steps=args.steps,
-        seeds=list(dict.fromkeys([args.seed, *(args.extra_seed or [])])),
+        _dataset_root(args), raiz, steps=args.steps,
+        seeds=list(dict.fromkeys([args.seed or EncoderTrainConfig.seed,
+                                  *(args.extra_seed or [])])),
         split=args.split,
     )
-    # O encoder treinado com todos os arms, na pasta acima da do leave-one-out.
-    custo = transfer_cost(tabela, Path(args.results_dir).parent / "supcon"
-                          / metrics_file(args.split))
+    # O encoder treinado com todos os arms, na pasta acima da do leave-one-out, nas
+    # mesmas sementes.
+    custo = transfer_cost(tabela, raiz.parent, split=args.split)
     print()
     print(custo.to_string(index=False))
     print(f"\ncusto medio de nunca ter visto a implementacao: "
           f"{custo.custo_pontos.mean():+.1f} pontos")
     print(custo.groupby("estrato").custo_pontos.mean().round(1).to_string())
-    custo.to_csv(Path(args.results_dir) / cost_file(args.split), index=False)
+    custo.to_csv(raiz / cost_file(args.split), index=False)
 
 
 def _cmd_disent_evaluate(args: argparse.Namespace) -> None:
     from gefx.data.grid import split_file
     from gefx.evaluation.runner import evaluate_runs
 
-    raiz = Path(args.results_dir)
+    raiz = _results_dir(args)
     _write_table(evaluate_runs(raiz, args.run, split=args.split),
                  raiz / split_file("escada", args.split, "csv"))
 
@@ -414,11 +398,11 @@ def build_parser() -> argparse.ArgumentParser:
     cross_render = cross_sub.add_parser("render", help="Renderiza o conjunto pareado.")
     cross_render.add_argument("--arm", action="append", default=None, help="Repetivel. Padrao: todos.")
     cross_render.add_argument("--effect", action="append", default=None, help="Repetivel. Padrao: todos.")
-    cross_render.add_argument("--n", type=int, default=300, help="Renders por (efeito, braco).")
-    cross_render.add_argument("--input-dir", default="datasets/unprocessed_samples")
-    cross_render.add_argument("--output-root", default="datasets/cross_impl")
-    cross_render.add_argument("--segment-seconds", type=float, default=2.0)
-    cross_render.add_argument("--seed", type=int, default=7)
+    cross_render.add_argument("--n", type=int, default=None, help="Renders por (efeito, braco).")
+    cross_render.add_argument("--input-dir", default=None)
+    cross_render.add_argument("--output-root", default=None)
+    cross_render.add_argument("--segment-seconds", type=float, default=None)
+    cross_render.add_argument("--seed", type=int, default=None)
     cross_render.add_argument("--legacy", action="store_true",
                               help="Ordena as colunas JSON do sidecar alfabeticamente.")
     cross_render.set_defaults(func=_cmd_cross_impl_render)
@@ -435,46 +419,50 @@ def build_parser() -> argparse.ArgumentParser:
     disent = sub.add_parser("disent", help="POC II: recuperacao por um codigo de efeito desemaranhado.")
     disent_sub = disent.add_subparsers(dest="disent_command", required=True)
 
+    # Sem padrao nas flags do POC II: sem a flag, vale o de quem a recebe (as
+    # dataclasses de opcoes, `DATASET_ROOT`, `RESULTS_ROOT`), e o numero nao se
+    # repete aqui.
     disent_calibrate = disent_sub.add_parser(
         "calibrate", help="Niveis de drive de todos os arms, pareados pelo Rnonlin.")
-    disent_calibrate.add_argument("--roster", default="experiments/disent_roster.yaml")
-    disent_calibrate.add_argument("--levels", default="experiments/disent_levels.yaml",
+    disent_calibrate.add_argument("--roster", dest="roster_path", type=Path, default=None)
+    disent_calibrate.add_argument("--levels", dest="levels_path", type=Path, default=None,
                                   help="Reescrito inteiro.")
-    disent_calibrate.add_argument("--input-dir", default="datasets/unprocessed_samples")
-    disent_calibrate.add_argument("--curves", default="results/disent/calibracao/curvas.csv")
-    disent_calibrate.add_argument("--points", type=int, default=33,
+    disent_calibrate.add_argument("--input-dir", type=Path, default=None)
+    disent_calibrate.add_argument("--curves", dest="curves_csv", type=Path, default=None)
+    disent_calibrate.add_argument("--points", type=int, default=None,
                                   help="Posicoes do knob varridas por arm.")
-    disent_calibrate.add_argument("--segments", type=int, default=8)
-    disent_calibrate.add_argument("--workers", type=int, default=8)
-    disent_calibrate.add_argument("--ref-db", type=float, nargs=2, metavar=("MIN", "MAX"),
-                                  default=[18.45, 39.0],
+    disent_calibrate.add_argument("--segments", dest="n_segments", type=int, default=None,
+                                  help="Trechos de treino em que cada knob e medido.")
+    disent_calibrate.add_argument("--workers", type=int, default=None)
+    disent_calibrate.add_argument("--ref-db", dest="reference_db", type=float, nargs=2,
+                                  metavar=("MIN", "MAX"), default=None,
                                   help="Faixa da referencia em dB; niveis igualmente espacados "
                                        "em Rnonlin.")
-    disent_calibrate.add_argument("--n-levels", type=int, default=8)
+    disent_calibrate.add_argument("--n-levels", type=int, default=None)
     disent_calibrate.set_defaults(func=_cmd_disent_calibrate)
 
     disent_render = disent_sub.add_parser(
-        "render", help="Renderiza a grade combinatoria conteudo x configuracao x arm."
+        "render", help="Renderiza a grade combinatoria conteudo x nivel x arm."
     )
-    disent_render.add_argument("--arm", action="append", default=None,
+    disent_render.add_argument("--arm", dest="arms", action="append", default=None,
                                help="Repetivel. Padrao: todos os arms do roster.")
-    disent_render.add_argument("--input-dir", default="datasets/unprocessed_samples")
-    disent_render.add_argument("--output-root", default="datasets/disent_v2")
-    disent_render.add_argument("--roster", default="experiments/disent_roster.yaml",
+    disent_render.add_argument("--input-dir", type=Path, default=None)
+    disent_render.add_argument("--output-root", type=Path, default=None)
+    disent_render.add_argument("--roster", type=Path, default=None,
                                help="Os plugins de cada arm.")
-    disent_render.add_argument("--levels", default="experiments/disent_levels.yaml",
+    disent_render.add_argument("--levels", type=Path, default=None,
                                help="Os knobs de drive de cada nivel (so `levels` e usado).")
-    disent_render.add_argument("--contents", type=int, default=400,
+    disent_render.add_argument("--contents", dest="n_contents", type=int, default=None,
                                help="Gravacoes usadas; a particao e por gravacao.")
-    disent_render.add_argument("--segments-per-file", type=int, default=5,
+    disent_render.add_argument("--segments-per-file", type=int, default=None,
                                help="Trechos consecutivos por gravacao; cada um e um conteudo.")
-    disent_render.add_argument("--segment-seconds", type=float, default=2.0)
-    disent_render.add_argument("--split", action="append", default=None,
+    disent_render.add_argument("--segment-seconds", type=float, default=None)
+    disent_render.add_argument("--split", dest="splits", action="append", default=None,
                                choices=["train", "catalog", "query"],
                                help="Repetivel. So estas particoes. Padrao: todas.")
-    disent_render.add_argument("--seed", type=int, default=20260906)
-    disent_render.add_argument("--split-seed", type=int, default=20260906)
-    disent_render.add_argument("--workers", type=int, default=4)
+    disent_render.add_argument("--seed", type=int, default=None)
+    disent_render.add_argument("--split-seed", type=int, default=None)
+    disent_render.add_argument("--workers", type=int, default=None)
     disent_render.set_defaults(func=_cmd_disent_render)
 
     disent_retrieve = disent_sub.add_parser(
@@ -483,10 +471,11 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="b0: vizinho mais proximo no Spec padronizado, a "
                                       "entrada do encoder. b1: regressor do POC I, sem "
                                       "retreino.")
-    disent_retrieve.add_argument("--output-root", default="datasets/disent_v2")
-    disent_retrieve.add_argument("--results-dir", default="results/disent/v2/validacao",
+    disent_retrieve.add_argument("--output-root", default=None)
+    disent_retrieve.add_argument("--results-dir", default=None,
                                  help="Grava <results-dir>/<baseline>_<split>.{csv,json}, "
-                                      "onde a escada e as figuras os procuram.")
+                                      "onde a escada e as figuras os procuram. Padrao: a "
+                                      "pasta acima das execucoes do encoder.")
     _add_split(disent_retrieve)
     disent_retrieve.add_argument("--arm", action="append", default=None,
                                  help="Restringe o roster. Padrao: todos.")
@@ -494,9 +483,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     disent_plots = disent_sub.add_parser(
         "plots", help="Figuras dos baselines e do encoder, do que ja esta gravado.")
-    disent_plots.add_argument("--results-dir", default="results/disent/v2/validacao",
+    disent_plots.add_argument("--results-dir", type=Path, default=None,
                               help="Baselines na raiz, o encoder em <results-dir>/encoder.")
-    disent_plots.add_argument("--out-dir", default=None,
+    disent_plots.add_argument("--out-dir", type=Path, default=None,
                               help="Padrao: <results-dir>/figuras_<split>.")
     _add_split(disent_plots)
     disent_plots.set_defaults(func=_cmd_disent_plots)
@@ -505,31 +494,20 @@ def build_parser() -> argparse.ArgumentParser:
         "train",
         help="Treina o encoder (supcon) ou roda um dos controles sem treino.",
     )
-    disent_train.add_argument("--output-root", default="datasets/disent_v2",
+    disent_train.add_argument("--output-root", default=None,
                               help="Raiz do dataset do POC II.")
-    disent_train.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
-    disent_train.add_argument("--feature", default=None, choices=FEATURE_CHOICES,
-                              help="Padrao: Spec.")
+    disent_train.add_argument("--results-dir", default=None)
     disent_train.add_argument("--technique", action="append", default=None,
                               choices=list(TECHNIQUES),
                               help="Repetivel. Padrao: supcon. random_encoder: "
                                    "zero passos. bn_only: so calibra a BatchNorm, sem "
                                    "gradiente. regressao: o mesmo tronco com uma saida "
                                    "so, o drive em dB, por MSE.")
-    disent_train.add_argument("--arm", action="append", default=None,
-                              help="Restringe as implementacoes.")
-    # Sem padrao aqui: sem a flag, vale o do `TrainConfig`.
     disent_train.add_argument("--steps", type=int, default=None,
-                              help="Os passos, e o comprimento do cosseno (padrao 20.000). "
-                                   "Ficam os pesos do minimo do erro de validacao.")
-    disent_train.add_argument("--configs-per-batch", type=int, default=None)
-    disent_train.add_argument("--views-per-config", type=int, default=None)
+                              help="Os passos, e o comprimento do cosseno. Ficam os pesos "
+                                   "do minimo do erro de validacao.")
     disent_train.add_argument("--learning-rate", type=float, default=None,
-                              help="A taxa do inicio do cosseno (padrao 1e-3).")
-    disent_train.add_argument("--temperature", type=float, default=None)
-    disent_train.add_argument("--eval-every", type=int, default=None,
-                              help="Passos entre avaliacoes na validacao (padrao 500); "
-                                   "0 desliga, e ficam os pesos do fim.")
+                              help="A taxa do inicio do cosseno.")
     disent_train.add_argument("--seed", type=int, default=None,
                               help="Fora do padrao, grava em <tecnica>_s<semente>.")
     disent_train.add_argument("--deterministic", action="store_true",
@@ -541,8 +519,8 @@ def build_parser() -> argparse.ArgumentParser:
                                    "I), poc1_media (+ media no tempo), poc2 (+ filtros "
                                    "32, 64: o encoder do relatorio), poc2_fundo (+ quatro "
                                    "blocos: medido, nao entrou).")
-    disent_train.add_argument("--batch-by", default=None, choices=["config", "content"],
-                              help="A classe do batch P x K: config (padrao, P niveis x "
+    disent_train.add_argument("--batch-by", default=None, choices=["level", "content"],
+                              help="A classe do batch P x K: level (padrao, P niveis x "
                                    "K trechos) ou content (P trechos x K niveis; o unico "
                                    "com positivos de conteudo).")
     disent_train.add_argument("--content-dim", type=int, default=None,
@@ -554,44 +532,47 @@ def build_parser() -> argparse.ArgumentParser:
         "between",
         help="Consultas nos pontos medios entre niveis contra o catalogo da grade.",
     )
-    disent_between.add_argument("--write-levels", default=None,
+    disent_between.add_argument("--write-levels", type=Path, default=None,
                                 help="So grava o arquivo de niveis intermediarios, para "
                                      "`render --levels` (com --split query).")
-    disent_between.add_argument("--levels", default="experiments/disent_levels.yaml")
-    disent_between.add_argument("--curves", default="results/disent/calibracao/curvas.csv")
-    disent_between.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
-    disent_between.add_argument("--output-root", default="datasets/disent_v2",
+    disent_between.add_argument("--levels", dest="levels_path", type=Path, default=None)
+    disent_between.add_argument("--curves", dest="curves_csv", type=Path, default=None)
+    disent_between.add_argument("--results-dir", default=None)
+    disent_between.add_argument("--output-root", default=None,
                                 help="Dataset da grade, de onde sai o catalogo (o do "
                                      "teste: os pontos medios so existem para as "
                                      "gravacoes de consulta, entao isto e da passada final).")
-    disent_between.add_argument("--between-root", default="datasets/disent_v2_entre",
+    disent_between.add_argument("--between-root", type=Path,
+                                default=Path("datasets/disent_v2_entre"),
                                 help="Dataset das consultas nos pontos medios.")
-    disent_between.add_argument("--run", action="append", default=None,
+    disent_between.add_argument("--run", dest="runs", action="append", default=None,
                                 help="Repetivel. Padrao: supcon.")
-    disent_between.add_argument("--k", type=int, default=10)
+    disent_between.add_argument("--k", type=int, default=None)
     disent_between.set_defaults(func=_cmd_disent_between)
 
     disent_probe = disent_sub.add_parser(
         "probe",
         help="Sondas lineares sobre o z_e: que fatores o codigo ainda deixa ler.",
     )
-    disent_probe.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
-    disent_probe.add_argument("--output-root", default="datasets/disent_v2")
-    disent_probe.add_argument("--run", action="append", default=None,
+    disent_probe.add_argument("--results-dir", default=None)
+    disent_probe.add_argument("--output-root", default=None)
+    disent_probe.add_argument("--run", dest="runs", action="append", default=None,
                               help="Repetivel. Padrao: toda execucao em --results-dir.")
     _add_split(disent_probe, help="Sonda o catalogo dessa busca, o que ela de fato "
                                   "consulta.")
-    disent_probe.add_argument("--folds", type=int, default=3)
-    disent_probe.add_argument("--seed", type=int, default=0)
+    disent_probe.add_argument("--folds", type=int, default=None)
+    disent_probe.add_argument("--seed", type=int, default=None)
     disent_probe.set_defaults(func=_cmd_disent_probe)
 
     disent_loo = disent_sub.add_parser(
         "loo", help="Leave-one-arm-out: a transferencia para implementacao inedita.")
-    disent_loo.add_argument("--output-root", default="datasets/disent_v2")
-    disent_loo.add_argument("--results-dir", default="results/disent/v2/validacao/encoder/loo")
+    disent_loo.add_argument("--output-root", default=None)
+    disent_loo.add_argument("--results-dir", default=None,
+                            help="Padrao: <encoder>/loo; o custo de transferencia le o "
+                                 "encoder com todos os arms na pasta acima.")
     disent_loo.add_argument("--steps", type=int, default=None,
                             help="O teto de passos; padrao, o do train.")
-    disent_loo.add_argument("--seed", type=int, default=20260908)
+    disent_loo.add_argument("--seed", type=int, default=None, help="Padrao, a do train.")
     disent_loo.add_argument("--extra-seed", type=int, action="append", default=None,
                             help="Repetivel. Repete o leave-one-out inteiro com outra "
                                  "semente; e o unico jeito de por barra no custo por "
@@ -603,17 +584,18 @@ def build_parser() -> argparse.ArgumentParser:
         "diversity",
         help="B2 e B3: treina com 1, 2, ... N-1 implementacoes e mede a transferencia.",
     )
-    disent_diversity.add_argument("--output-root", default="datasets/disent_v2")
-    disent_diversity.add_argument("--results-dir",
-                                  default="results/disent/v2/validacao/encoder/diversidade")
+    disent_diversity.add_argument("--output-root", default=None)
+    disent_diversity.add_argument("--results-dir", default=None,
+                                  help="Padrao: <encoder>/diversidade.")
     disent_diversity.add_argument("--held-out", required=True,
                                   help="O arm que nunca entra no treino.")
     disent_diversity.add_argument("--steps", type=int, default=None,
                                   help="O teto de passos; padrao, o do train.")
-    disent_diversity.add_argument("--seed", type=int, default=20260908)
-    disent_diversity.add_argument("--reuse", default="results/disent/v2/validacao/encoder/loo",
-                                  help="Diretorio do leave-one-out: o ultimo ponto da "
-                                       "curva e a mesma execucao e nao e retreinado.")
+    disent_diversity.add_argument("--seed", type=int, default=None, help="Padrao, a do train.")
+    disent_diversity.add_argument("--reuse", type=Path, default=None,
+                                  help="Diretorio do leave-one-out (padrao <encoder>/loo): "
+                                       "o ultimo ponto da curva e a mesma execucao e nao e "
+                                       "retreinado.")
     _add_split(disent_diversity)
     disent_diversity.set_defaults(func=_cmd_disent_diversity)
 
@@ -622,7 +604,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Avalia execucoes ja treinadas numa particao. E a passada final do teste, "
              "com os modelos finais; o treino so le a validacao.",
     )
-    disent_evaluate.add_argument("--results-dir", default="results/disent/v2/validacao/encoder")
+    disent_evaluate.add_argument("--results-dir", default=None)
     disent_evaluate.add_argument("--run", action="append", default=None,
                                  help="Repetivel. Padrao: toda execucao em --results-dir.")
     _add_split(disent_evaluate, "teste")

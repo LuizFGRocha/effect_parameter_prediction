@@ -43,11 +43,6 @@ class RenderOptions:
 def _apply_mapping(plugin, spec: dict, raw: dict, norm_row: np.ndarray, names: List[str]) -> None:
     """Escreve no plugin os parametros mapeados a partir dos valores de referencia."""
     for ref_name, (plugin_param, convert, exact) in spec["map"].items():
-        if ref_name == "_mix_dry":  # metade seca do crossfade
-            from gefx.effects.registry import to_db
-
-            set_parameter(plugin, plugin_param, to_db(1.0 - raw["mix"]))
-            continue
         # Invariante: mapeamento exato consome o valor cru de referencia (mesma
         # unidade fisica); mapeamento nao-exato consome o normalizado.
         source = raw[ref_name] if exact else float(norm_row[names.index(ref_name)])

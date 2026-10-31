@@ -14,14 +14,14 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
+import numpy as np
 import pandas as pd
 
 from gefx.data.dataset import FeatureStore
-from gefx.data.grid import EVAL_SPLITS, arm_dirs, read_dataset, split_file
+from gefx.data.grid import DATASET_ROOT, EVAL_SPLITS, arm_dirs, read_dataset, split_file
 from gefx.evaluation.retrieval import center_by_arm, embed, metrics_file, retrieve_by_arm
-from gefx.training.encoder import RESULTS_ROOT
+from gefx.training.encoder import RESULTS_ROOT, EncoderTrainConfig, run_name
 
-DEFAULT_ROOT = Path("datasets/disent_v2")
 DEFAULT_OUTPUT = RESULTS_ROOT / "loo"
 
 
@@ -53,12 +53,12 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
     pool = list(catalog_arms) if catalog_arms is not None else list(seen)
     catalog = frames[catalog_key][frames[catalog_key]["arm"].isin(pool)]
     catalog = catalog.reset_index(drop=True)
-    z_catalog = embed(model, FeatureStore(root, catalog, "Spec"), standardizer, batch)
+    z_catalog = embed(model, FeatureStore(root, catalog), standardizer, batch)
 
     rows: List[Dict[str, object]] = []
     for label, arms in (("transferencia", [held_out]), ("vistos", list(seen))):
         queries = frames[query_key][frames[query_key]["arm"].isin(arms)].reset_index(drop=True)
-        z_query = embed(model, FeatureStore(root, queries, "Spec"), standardizer, batch)
+        z_query = embed(model, FeatureStore(root, queries), standardizer, batch)
         # `centrado`: cada arm menos a propria media (`center_by_arm`), inclusive o
         # retirado, cuja media sai das consultas dele, sem rotulo.
         for centered in (False, True):
@@ -66,7 +66,8 @@ def _evaluate_held_out(run_dir: Path, root: Path, held_out: str, seen: Sequence[
                       if centered else (z_query, z_catalog))
             # Na transferencia o arm retirado ja esta fora do catalogo.
             result = retrieve_by_arm(queries, catalog, zq, zc,
-                                     same_arm=(label == "transferencia"))
+                                     catalog_arms=("todos" if label == "transferencia"
+                                                   else "outros"))
             overall = result.metrics["overall"]
             rows.append({
                 "arm_retirado": held_out,
@@ -88,11 +89,11 @@ def _print_rows(rows: Sequence[Dict[str, object]]) -> None:
 
 
 def leave_one_arm_out(
-    root: Path = DEFAULT_ROOT,
+    root: Path = DATASET_ROOT,
     output_dir: Path = DEFAULT_OUTPUT,
     arms: Optional[Sequence[str]] = None,
     steps: Optional[int] = None,
-    seeds: Sequence[int] = (20260908,),
+    seeds: Sequence[int] = (EncoderTrainConfig.seed,),
     verbose: bool = True,
     split: str = "validacao",
 ) -> pd.DataFrame:
@@ -100,7 +101,7 @@ def leave_one_arm_out(
 
     A primeira semente grava em `<arm>/`, as demais em `<arm>_s<semente>/`.
     """
-    from gefx.training.encoder import EncoderTrainConfig, train
+    from gefx.training.encoder import train
 
     root, output_dir = Path(root), Path(output_dir)
     todos = list(arms) if arms else [path.name for path in arm_dirs(root)]
@@ -148,11 +149,11 @@ def _loo_run(loo_dir: Path, held_out: str, seed: int) -> Optional[Path]:
 
 def arm_diversity_curve(
     held_out: str,
-    root: Path = DEFAULT_ROOT,
+    root: Path = DATASET_ROOT,
     output_dir: Path = RESULTS_ROOT / "diversidade",
     order: Optional[Sequence[str]] = None,
     steps: Optional[int] = None,
-    seed: int = 20260908,
+    seed: int = EncoderTrainConfig.seed,
     reuse: Optional[Path] = DEFAULT_OUTPUT,
     verbose: bool = True,
     split: str = "validacao",
@@ -163,7 +164,7 @@ def arm_diversity_curve(
     ponto e a execucao do leave-one-out, reaproveitada de `reuse`. Sem `order`, o
     treino acumula por estrato (S1 antes de S2...), e dentro dele por nome.
     """
-    from gefx.training.encoder import EncoderTrainConfig, train
+    from gefx.training.encoder import train
 
     root, output_dir = Path(root), Path(output_dir)
     estratos = strata(root)
@@ -203,27 +204,38 @@ def arm_diversity_curve(
 
 def transfer_cost(
     loo: pd.DataFrame,
-    seen_metrics: Path = RESULTS_ROOT / "supcon" / metrics_file("validacao"),
+    encoder_dir: Path = RESULTS_ROOT,
+    split: str = "validacao",
 ) -> pd.DataFrame:
     """Custo de nunca ter visto a implementacao: cada arm retirado contra ele mesmo
-    no encoder treinado com todos."""
-    reference = json.loads(Path(seen_metrics).read_text(encoding="utf-8"))["per_query_arm"]
+    no encoder treinado com todos, semente a semente (`<encoder_dir>/supcon`,
+    `supcon_s<semente>`). As sementes do encoder diferem alguns pontos por arm, e
+    a media do leave-one-out contra uma semente so poria essa diferenca no custo."""
+    reference: Dict[int, Dict[str, object]] = {}
+
+    def seen(seed: int) -> Dict[str, object]:
+        if seed not in reference:
+            path = Path(encoder_dir) / run_name("supcon", seed) / metrics_file(split)
+            reference[seed] = json.loads(path.read_text(encoding="utf-8"))["per_query_arm"]
+        return reference[seed]
+
     transferencia = loo[(loo["condicao"] == "transferencia") & ~loo["centrado"].astype(bool)]
     rows: List[Dict[str, object]] = []
     for arm, grupo in transferencia.groupby("arm_retirado", sort=False):
         arm = str(arm)
-        if arm not in reference:
+        seeds = [int(seed) for seed in grupo["seed"]]
+        if any(arm not in seen(seed) for seed in seeds):
             continue
-        visto = float(reference[arm]["drive_level"]["exact"])
-        inedito = grupo["drive_exact"].astype(float)
+        visto = np.array([seen(seed)[arm]["drive_level"]["exact"] for seed in seeds], float)
+        inedito = grupo["drive_exact"].to_numpy(float)
         rows.append({
             "arm": arm, "estrato": str(grupo.iloc[0]["estrato"]),
-            "visto": visto, "inedito": float(inedito.mean()),
-            "custo_pontos": (float(inedito.mean()) - visto) * 100,
+            "visto": float(visto.mean()), "inedito": float(inedito.mean()),
+            "custo_pontos": float((inedito - visto).mean()) * 100,
             # Com uma semente so, amplitude zero e falta de medida.
             "sementes": int(len(grupo)),
-            "amplitude_pontos": float(inedito.max() - inedito.min()) * 100,
-            "visto_mae_db": float(reference[arm]["mae_db"]),
+            "amplitude_pontos": float(np.ptp(inedito - visto)) * 100,
+            "visto_mae_db": float(np.mean([seen(seed)[arm]["mae_db"] for seed in seeds])),
             "inedito_mae_db": float(grupo["mae_db"].astype(float).mean()),
         })
     table = pd.DataFrame(rows)

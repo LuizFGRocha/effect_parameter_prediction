@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from gefx.training.encoder import RESULTS_ROOT, EncoderTrainConfig, run_name
+
 SCATTER_COLOR = "#1f77b4"
 ERROR_BAR_STYLE = {"elinewidth": 1, "ecolor": "#444444"}
 
@@ -304,7 +306,7 @@ def plot_ladder(tabela: pd.DataFrame, passo_db: float, out_path: Path) -> None:
     _save(fig, out_path)
 
 
-def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
+def build_all(results_dir: Path = RESULTS_ROOT.parent,
               out_dir: Optional[Path] = None, split: str = "validacao") -> List[Path]:
     """As tres figuras do relatorio, as que tiverem dado em disco: a escada, o
     custo de transferencia (leave-one-arm-out) e a curva de diversidade.
@@ -350,8 +352,16 @@ def build_all(results_dir: Path = Path("results/disent/v2/validacao"),
     if curvas:
         dados = pd.concat([pd.read_csv(caminho) for caminho in curvas], ignore_index=True)
         arm = str(dados["arm_retirado"].iloc[0])
-        por_arm = metricas["per_query_arm"]
-        visto = float(por_arm[arm]["drive_level"]["exact"]) if arm in por_arm else None
+        # O mesmo arm visto no treino, nas mesmas sementes da curva.
+        sementes = [EncoderTrainConfig.seed if "_s" not in caminho.parent.name
+                    else int(caminho.parent.name.rsplit("_s", 1)[1]) for caminho in curvas]
+        vistos = [encoder_dir / run_name("supcon", semente) / metrics_file(split)
+                  for semente in sementes]
+        visto = None
+        if all(caminho.exists() for caminho in vistos):
+            por_arm = [carrega(caminho)["per_query_arm"] for caminho in vistos]
+            if all(arm in item for item in por_arm):
+                visto = float(np.mean([item[arm]["drive_level"]["exact"] for item in por_arm]))
         alvo = out_dir / "curva_de_diversidade.png"
         plot_diversity_curve(dados, chance, alvo, visto=visto)
         escritos.append(alvo)
@@ -386,8 +396,8 @@ def plot_diversity_curve(curva: pd.DataFrame, chance: float, out_path: Path,
                          visto: Optional[float] = None) -> None:
     """Transferencia para o arm retirado contra o numero de arms no treino.
 
-    O catalogo e o mesmo em todos os pontos; a anotacao marca onde entra um estrato
-    novo.
+    O catalogo e o mesmo em todos os pontos; o rotulo de cada ponto diz o arm que
+    entra nele.
     """
     curva = curva[~curva["centrado"].astype(bool)]  # a curva e a da busca como esta
     pontos = curva[curva["condicao"] == "transferencia"]

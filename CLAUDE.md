@@ -69,7 +69,14 @@ batch order). `--seed` on `train` sets the last one, `--seed` on `render-dataset
 first. `train.seed` alone is *not* enough for two runs to match bit for bit on GPU —
 residual nondeterminism is around 1e-4 — so `--deterministic` additionally enables
 TensorFlow's deterministic kernels (verified to give identical predictions, at a cost in
-speed).
+speed). `train.seed` is set *once*, before the chain loop (`training/trainer.py`), so
+chain k's initialization depends on what the chains before it consumed: `--chain-key X`
+alone does not reproduce chain X of a full sweep. Kept as is (2026-10-31, the user wants
+POC I untouched).
+
+The sidecar's `random_seed` column is drawn after the render and reproduces nothing (the
+segment and the parameters come from the per-file `SeedSequence`); it is informational
+only. Kept as is: moving the draw would change the RNG contract below.
 
 `render_seed` reproduces a dataset only *together with the exact contents of the input
 directory*: the spawned `SeedSequence` children are zipped against the sorted wav list, so
@@ -170,7 +177,7 @@ excluded — no third-party delay passed the sanity check.
 Plugin quirks live in `effects/vst_adapter.py` and are worth preserving: the first
 process call after `load_plugin` still uses stale parameters, so it is burned on silence
 in `load_arm`; some plugins require stereo input (detected by the `ValueError` on a mono
-probe); some parameters are only addressable via their displayed string (`BY_DISPLAY`).
+probe).
 
 ## Conventions and gotchas
 
@@ -319,8 +326,10 @@ ablation), trained with the same SupCon on `content_id`; loss = sum, equal weigh
 Reference: Conditional Similarity Networks, "fixed disjoint masks" (Veit et al. 2017,
 BSD-3 code), Lee et al. ICASSP 2020 for music. It needs `batch_by="content"`: the same
 P×K of Hermans et al. with the trecho as class (P trechos × K = 8 levels), so every
-level still appears P times; the default `config` draws exactly the same batches as
-before. `poc2` (one head) stays the report's encoder; the rungs are `poc2` →
+level still appears P times; the default `level` draws exactly the same batches as
+before (`batch_by` was called `config`, and `classes_per_batch`/`views_per_class`
+were `configs_per_batch`/`views_per_config`, until 2026-10-31; old manifests keep the
+old names, nothing reads them). `poc2` (one head) stays the report's encoder; the rungs are `poc2` →
 `--batch-by content` → `+ --content-dim 32`. `gefx disent probe` also probes `z_c`
 (column `code`).
 
@@ -450,7 +459,8 @@ step kept — which sometimes collapsed, e.g. 52–55% → 42% at the final step
 ladder choices were made on the test split.
 
 Not yet written anywhere else: the B1 regressor was trained on segments of all 400
-recordings (POC I split by row), including the POC II query recordings — it favours B1;
+recordings (POC I split by row), including the POC II query recordings — it favours B1
+(kept as is on 2026-10-31: no POC I retraining; the report must say it next to B1);
 and the chorus was dropped from the POC II scope without a written reason.
 
 **Results on `disent_v2`** (2026-09-27, commits 08b264f–8ff0d06; `results/disent/v2/`,
@@ -504,33 +514,9 @@ Pedals evaluated on 2026-09-27:
   in `_BROKEN` (freeing it first doesn't help). `LoadedArm.render` also raises on
   non-finite output instead of writing it.
 
-State as of 2026-09-27: 8 arms calibrated (the 7 original + `dm-rat`). `dm-rat` is
-dm-Rat v0.1.2 (github.com/davemollen/dm-Rat); it was calibrated with its Windows build
-and its Linux build (`plugins/real/dm-Rat.vst3/Contents/x86_64-linux/`) has not been run
-yet. Next steps on Linux:
-
-1. `gefx inspect-plugin plugins/real/dm-Rat.vst3` must list `distortion`, `filter` and
-   `volume` (names can differ between builds; `LoadedArm` fails loudly if they do).
-2. Check it hits the targets at its stored levels — the two lines must agree to ~0.001
-   (BYOD, calibrated on Linux, matched its targets on Windows within 0.001). If they don't,
-   re-run `gefx disent calibrate` (all arms; it rewrites the levels file):
-   ```bash
-   python -c "
-   from pathlib import Path
-   from gefx.disent.arms import load_roster, load_levels
-   from gefx.disent.calibrate import arm_curve, load_segments
-   r = load_roster(); segs, sr = load_segments(Path('datasets/unprocessed_samples'), 8)
-   print('alvo  ', [round(t, 3) for t in load_levels()['targets']])
-   print('dm-rat', [round(v, 3) for v in arm_curve(r.arm('dm-rat'), segs, sr, r.arm('dm-rat').levels)[1]])
-   "
-   ```
-3. Run `pytest` — this session's changes (read-only `tune`, `load_arm` NaN retry, no
-   manual levels) were only tested on Windows, where the Keras tests can't run.
-4. Render everything into a new root (the old `datasets/disent` has the 7-arm roster
-   and the tone grid): `gefx disent render --output-root datasets/disent_v2`, then train.
-
-Steps 1–3 were done on Linux on 2026-09-27: the Linux dm-Rat build exposes the same
-parameters and hits the targets within 0.001, and the suite passes.
+State as of 2026-09-27: 8 arms calibrated (the 7 original + `dm-rat`, dm-Rat v0.1.2,
+github.com/davemollen/dm-Rat). It was calibrated with its Windows build; on Linux the
+build exposes the same parameters and hits the targets within 0.001.
 
 The repo's `.git/config` has `core.autocrlf=false` and `core.filemode=false`, set for the
 Windows side of the dual boot (no longer used); unset them if they get in the way.

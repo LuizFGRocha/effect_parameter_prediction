@@ -16,6 +16,7 @@ from gefx.config import git_revision
 from gefx.data.grid import EVAL_SPLITS, split_file
 from gefx.data.dataset import FeatureStore
 from gefx.evaluation.retrieval import evaluate, metrics_file, predictions_file
+from gefx.training.encoder import RESULTS_ROOT as ENCODER_RESULTS
 
 from gefx.evaluation.metrics import build_prediction_frame, evaluate_chain, find_chain_dirs
 from gefx.evaluation.plots import plot_best_worst, plot_chain_baseline, plot_estimated_vs_real
@@ -60,8 +61,6 @@ def evaluate_run(results_root: str | Path, legacy: bool = False) -> Dict[str, Pa
 
 
 # --- POC II -------------------------------------------------------------------
-ENCODER_RESULTS = Path("results/disent/v2/validacao/encoder")
-
 #: Arquivos de `gefx disent retrieve`, na pasta acima das execucoes: `<nome>_<particao>.json`.
 BASELINES: Dict[str, str] = {"B0": "b0", "B1": "b1"}
 
@@ -143,8 +142,7 @@ def evaluate_runs(
         model, manifest, standardizer, frames = open_run(run_dir, dataset_root)
         run_config = manifest["config"]
         root = Path(dataset_root or run_config["dataset_root"])
-        stores = {key: FeatureStore(root, frames[key], run_config["feature"])
-                  for key in EVAL_SPLITS[split]}
+        stores = {key: FeatureStore(root, frames[key]) for key in EVAL_SPLITS[split]}
         predictions, metrics = evaluate(model, frames, stores, standardizer,
                                         run_config["embed_batch"], split=split)
         predictions.to_csv(run_dir / predictions_file(split), index=False)

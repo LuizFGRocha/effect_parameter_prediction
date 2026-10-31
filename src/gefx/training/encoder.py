@@ -6,7 +6,7 @@
   cada nocao de similaridade entra na mesma media do batch, sem peso proprio). Os positivos de cada
   cabeca dividem so o seu fator, e e isso que deixa cada uma invariante ao
   outro: nao ha adversario nem ortogonalidade, que no estudo antigo nao tiraram
-  a implementacao e custaram 4,2 pontos. Precisa do batch por trecho
+  a implementacao. Precisa do batch por trecho
   (`batch_by="content"`), o unico com positivos de conteudo;
 - `regressao`: a mesma CNN com uma saida so, o drive em dB normalizado, por MSE
   (o regressor do POC I). Controla se `z_e` precisa de mais de uma dimensao
@@ -32,14 +32,11 @@ A taxa de aprendizado decai em cosseno ao longo de `steps`, de
 `architecture.learning_rate` a `learning_rate * lr_min_fraction`, como no SupCon
 oficial (`--cosine` em HobbitLong/SupContrast: ate `lr * 0.1 ** 3`). E o
 `keras.optimizers.schedules.CosineDecay`. O POC I tinha taxa fixa; com ela a
-validacao oscilava o bastante (0,08 dB no SupCon, 0,32 dB na regressao) para o
-minimo ser um vale isolado.
+validacao oscilava o bastante para o minimo ser um vale isolado.
 
 Velocidade: o modelo e compilado pelo XLA (`jit_compile`), com a mesma conta em
-float32 -- so a fusao das operacoes e o algoritmo de convolucao mudam. As saidas
-diferem ~1e-4 da execucao sem XLA, a ordem do TF32 que a GPU ja usa nas
-convolucoes; com e sem XLA deram o mesmo resultado (3 sementes a 20k). Fica
-desligado com `deterministic`: o gradiente do MaxPool no XLA nao tem versao
+float32 -- so a fusao das operacoes e o algoritmo de convolucao mudam, e com e
+sem XLA deram o mesmo resultado (CLAUDE.md). Fica desligado com `deterministic`: o gradiente do MaxPool no XLA nao tem versao
 deterministica. Os lotes sao sorteados todos antes, na ordem, e lidos do disco
 numa thread enquanto a GPU roda o anterior (`FeatureStore.batches`).
 
@@ -60,7 +57,7 @@ import numpy as np
 
 from gefx.config import ArchitectureConfig, git_revision, set_global_seeds
 from gefx.data.dataset import FeatureStore
-from gefx.data.grid import VALIDATION_RECORDINGS, split_frames, validate_pairing
+from gefx.data.grid import DATASET_ROOT, VALIDATION_RECORDINGS, split_frames, validate_pairing
 from gefx.evaluation.retrieval import (
     drive_range,
     evaluate,
@@ -90,20 +87,17 @@ STANDARDIZER_FILE = "standardizer.npz"
 class EncoderTrainConfig:
     """Tudo o que define uma execucao. Vai inteiro para o `run.json`."""
 
-    dataset_root: Path = Path("datasets/disent_v2")
-    feature: str = "Spec"
+    dataset_root: Path = DATASET_ROOT
     technique: str = "supcon"
     arms: Optional[Tuple[str, ...]] = None
-    #: O teto, que e tambem o comprimento do cosseno. 40.000 nao melhoraram o
-    #: SupCon (1 semente); 10.000 custaram 2,8 pt a regressao (3 sementes, todas
-    #: abaixo) e ~1 pt ao SupCon (6 execucoes de cada).
+    #: O teto, que e tambem o comprimento do cosseno (a escolha esta no CLAUDE.md).
     steps: int = 20000
-    configs_per_batch: int = 8
-    views_per_config: int = 8
-    #: A classe do P x K: `config` (o nivel de drive) ou `content` (o trecho, em
-    #: `views_per_config` niveis; o que a cabeca de conteudo exige). Com
-    #: `content`, `configs_per_batch` conta trechos.
-    batch_by: str = "config"
+    #: O P x K: P classes, K vistas de cada.
+    classes_per_batch: int = 8
+    views_per_class: int = 8
+    #: A classe do P x K: `level` (o nivel de drive) ou `content` (o trecho, em
+    #: `views_per_class` niveis; o que a cabeca de conteudo exige).
+    batch_by: str = "level"
     #: O fim do cosseno, em fracao da taxa inicial: `0.1 ** 3`, como no original.
     lr_min_fraction: float = 1e-3
     temperature: float = DEFAULT_TEMPERATURE
@@ -132,6 +126,12 @@ class EncoderTrainConfig:
         out["arms"] = list(self.arms) if self.arms else None
         out["architecture"]["kernel_size"] = list(self.architecture.kernel_size)
         return out
+
+
+def run_name(technique: str, seed: int) -> str:
+    """A pasta de uma execucao: `<tecnica>` na semente padrao, `<tecnica>_s<semente>`
+    nas outras."""
+    return technique if seed == EncoderTrainConfig.seed else f"{technique}_s{seed}"
 
 
 def learning_rate(config: EncoderTrainConfig):
@@ -167,7 +167,7 @@ def validation_error(model, frames, stores, standardizer, batch: int = 128) -> D
     """
     same_arm = frames["val_catalog"]["arm"].nunique() < 2
     (result,), _ = search(model, frames, stores, standardizer, "validacao", batch,
-                          same_arms=(same_arm,))
+                          catalog_arms=("mesmo" if same_arm else "outros",))
     overall = result.metrics["overall"]
     return {"mae_db": float(overall["mae_db"]),
             "drive_exact": float(overall["drive_level"]["exact"]),
@@ -175,13 +175,16 @@ def validation_error(model, frames, stores, standardizer, batch: int = 128) -> D
 
 
 #: Padronizadores ja ajustados neste processo. O ajuste depende so das linhas de
-#: treino e da feature, nao da tecnica nem da semente, e custa uma passada pelo
-#: memmap do treino (~70 s): as execucoes de um mesmo comando o reaproveitam.
-_STANDARDIZERS: Dict[Tuple[str, str, int], PixelStandardizer] = {}
+#: treino, nao da tecnica nem da semente, e custa uma passada pelo memmap do
+#: treino (~70 s): as execucoes de um mesmo comando o reaproveitam. A linha e o
+#: par (arm, arquivo): o `file_name` se repete em todos os arms, entao so ele
+#: daria a mesma chave a todo recorte de 7 arms do leave-one-out.
+_STANDARDIZERS: Dict[Tuple[str, int], PixelStandardizer] = {}
 
 
-def fitted_standardizer(store: FeatureStore, root: Path, feature: str) -> PixelStandardizer:
-    key = (str(Path(root).resolve()), feature, hash(tuple(store.frame["file_name"])))
+def fitted_standardizer(store: FeatureStore, root: Path) -> PixelStandardizer:
+    rows = zip(store.frame["arm"], store.frame["file_name"])
+    key = (str(Path(root).resolve()), hash(tuple(rows)))
     if key not in _STANDARDIZERS:
         _STANDARDIZERS[key] = PixelStandardizer.fit(store)
     return _STANDARDIZERS[key]
@@ -205,11 +208,11 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
     root = Path(config.dataset_root)
     validate_pairing(root)
     frames = split_frames(root, config.arms, config.validation_recordings)
-    stores = {name: FeatureStore(root, frame, config.feature) for name, frame in frames.items()}
+    stores = {name: FeatureStore(root, frame) for name, frame in frames.items()}
     index = build_index(frames["train"], arms=config.arms)
     if not index.frame["file_name"].equals(stores["train"].frame["file_name"]):
         raise ValueError("o indice da grade e o cache de features estao em ordens diferentes")
-    standardizer = fitted_standardizer(stores["train"], root, config.feature)
+    standardizer = fitted_standardizer(stores["train"], root)
     input_dim = (*stores["train"].feature_shape, 1)
     model = build_network(input_dim, config.architecture, config.technique)
     # A busca de validacao e a avaliacao leem so `z_e`, com os mesmos pesos.
@@ -222,10 +225,10 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
         labels = labels.astype(np.float32)[:, None]
         loss = "mean_squared_error"
     elif config.architecture.content_dim:
-        labels = (index.config_label, index.content_label)
+        labels = (index.level_label, index.content_label)
         loss = [supcon_loss(config.temperature), supcon_loss(config.temperature)]
     else:
-        labels, loss = index.config_label, supcon_loss(config.temperature)
+        labels, loss = index.level_label, supcon_loss(config.temperature)
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=learning_rate(config)),
                   loss=loss, jit_compile=jit_compile)
 
@@ -238,8 +241,8 @@ def train(config: EncoderTrainConfig, verbose: bool = True) -> Dict[str, object]
             raise ValueError(f"steps={steps} nao e multiplo de eval_every={epoch_steps}")
         # Os lotes saem todos do `rng` aqui, em ordem; so a leitura vai para a thread.
         rng = np.random.default_rng(config.seed)
-        blocks = [class_balanced_batch(index, rng, config.configs_per_batch,
-                                       config.views_per_config, config.batch_by).rows
+        blocks = [class_balanced_batch(index, rng, config.classes_per_batch,
+                                       config.views_per_class, config.batch_by)
                   for _ in range(steps)]
         callbacks = []
         if config.eval_every:

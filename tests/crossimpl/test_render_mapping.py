@@ -12,7 +12,7 @@ from gefx.crossimpl import render as render_module
 from gefx.crossimpl.render import _apply_mapping
 from gefx.effects.catalog import effect_predictable_params
 from gefx.effects.parameters import raw_params_for_effect
-from gefx.effects.registry import REGISTRY, ident, onto, to_db
+from gefx.effects.registry import REGISTRY, ident, onto
 
 
 @pytest.fixture
@@ -51,16 +51,6 @@ def test_non_exact_mapping_indexes_by_position_in_the_predictable_names(written)
     _apply_mapping(object(), spec, {}, np.array([0.0, 0.0, 0.25, 0.0]), names)
 
     assert written == {"fb": pytest.approx(2.5)}
-
-
-def test_mix_dry_writes_the_complementary_gain(written):
-    # Chave especial da metade seca de um crossfade. Nenhuma entrada do REGISTRY
-    # atual a usa, mas o codigo esta vivo.
-    spec = {"map": {"_mix_dry": ("dry_amount_db", ident, True)}}
-
-    _apply_mapping(object(), spec, {"mix": 0.75}, np.array([]), [])
-
-    assert written == {"dry_amount_db": pytest.approx(to_db(0.25))}
 
 
 def test_every_value_written_is_a_float(written):

@@ -39,7 +39,6 @@ def _metrics():
             for arm in ARMS
         },
         "overall": {"n": 5600, "drive_level": {"exact": 0.2}, "mae_db": 8.0},
-        "catalog_size": 4800,
         "alphabet": {"drive_level": 8},
         "drive_db_ladder": [5.0 + 4.0 * nivel for nivel in range(8)],
         "strata": STRATA,

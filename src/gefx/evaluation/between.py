@@ -1,7 +1,7 @@
 """Configuracoes entre os niveis: consultas nos pontos medios, catalogo na grade.
 
 O treino e a busca so viram os 8 niveis. Aqui as consultas sao os 7 pontos medios
-(`calibrate.between_levels`), renderizadas so na particao de consulta, e o
+(`effects.levels.between_levels`), renderizadas so na particao de consulta, e o
 catalogo e o de sempre. A busca sempre devolve um nivel da grade, entao nao ha
 acerto exato; mede-se:
 

@@ -96,7 +96,7 @@ def test_validate_accepts_a_crossed_grid(tmp_path):
         "arms": 2,
         "rows_per_arm": len(CONTENTS) * len(DRIVES),
         "contents": len(CONTENTS),
-        "configs": len(DRIVES),
+        "levels": len(DRIVES),
     }
 
 

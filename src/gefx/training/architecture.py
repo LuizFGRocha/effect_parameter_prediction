@@ -16,8 +16,8 @@ do tempo (`time_pool`) e `n_full - 1` camadas densas com BatchNorm e Dropout.
   BSD-3), que o artigo descreve como "fully disentangled", levada ao audio por
   Lee et al. (ICASSP 2020). Aqui cada bloco tem as suas densas, e nao so as suas
   dimensoes, porque as duas cabecas reduzem o tempo de jeitos diferentes. `z_c` nao tira a media
-  no tempo, que e o que tirava o conteudo de `z_e`: com o flatten, `z_e`
-  perdia 3,1 pontos e guardava mais conteudo (ablacao de 2026-09-30).
+  no tempo, que e o que tirava o conteudo de `z_e` (a ablacao de 2026-09-30,
+  no CLAUDE.md).
 
 `ARCHITECTURES` e a escada do POC I ao POC II: cada degrau muda um campo da CNN
 do POC I, e cada mudanca foi medida (`scripts/poc2_escada.sh`); o ultimo degrau
@@ -31,11 +31,9 @@ from typing import Dict, Sequence
 from gefx.config import ArchitectureConfig
 
 #: Os degraus, na ordem. `poc1` e `experiments/base.yaml`; `poc2`, o encoder do
-#: relatorio. As duas densas de 64 do POC I ficam: uma densa de 256 dava +1,5
-#: ponto e mais que dobrava o conteudo legivel em `z_e` (19% -> 44%; protocolo
-#: antigo, no teste). `poc2_fundo` (quatro blocos, filtros 32, 64, 96, 128) foi
-#: medido e nao entrou: +1,12 ponto [-0,87; +3,31] sobre o `poc2`, nao
-#: significativo (validacao, 3 sementes, 2026-10-06).
+#: relatorio. As duas densas de 64 do POC I ficam (uma de 256 mais que dobrava o
+#: conteudo legivel em `z_e`), e `poc2_fundo` (quatro blocos, filtros 32, 64, 96,
+#: 128) foi medido e nao entrou; os numeros estao no CLAUDE.md.
 ARCHITECTURES: Dict[str, ArchitectureConfig] = {"poc1": ArchitectureConfig()}
 ARCHITECTURES["poc1_media"] = replace(ARCHITECTURES["poc1"], time_pool="mean")
 ARCHITECTURES["poc2"] = replace(ARCHITECTURES["poc1_media"], n_filters=32)

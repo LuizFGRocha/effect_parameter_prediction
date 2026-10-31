@@ -1,9 +1,10 @@
 """O dataset do POC II: a grade de niveis, a particao e o sidecar de cada arm.
 
-- A grade: os niveis de drive. O nivel e um indice (no sidecar, `config_index ==
-  drive_level`); o valor de knob depende do arm e sai do arquivo de niveis. Nao
-  ha tone: a EQ propria de cada pedal, que em alguns muda com o ganho, impedia
-  um fator de tone igual em todos.
+- A grade: os niveis de drive. O nivel e um indice (`drive_level`); o valor de
+  knob depende do arm e sai do arquivo de niveis. Nao ha tone: a EQ propria de
+  cada pedal, que em alguns muda com o ganho, impedia um fator de tone igual em
+  todos. `config_index` e `config_key` sao restos dele: repetem o nivel, ficam
+  no sidecar para os datasets ja renderizados, e o codigo so le `drive_level`.
 - A particao: treino / catalogo / consulta, disjuntas por conteudo, para a busca
   nao acertar reconhecendo o que foi tocado. A validacao sai do treino, na
   leitura (`validation_recordings`), com a mesma forma do teste: uma consulta e
@@ -25,6 +26,8 @@ import pandas as pd
 
 from gefx.data.metadata import METADATA_FILENAME
 
+#: O dataset do POC II, o padrao de todos os comandos `gefx disent`.
+DATASET_ROOT = Path("datasets/disent_v2")
 SPLITS: Tuple[str, ...] = ("train", "catalog", "query")
 #: As particoes de validacao, tiradas do treino. Os nomes espelham as do teste.
 VALIDATION_SPLITS: Tuple[str, ...] = ("val_query", "val_catalog")
@@ -236,7 +239,7 @@ def validate_pairing(root: Path) -> Dict[str, int]:
 
     reference_dir = dirs[0]
     reference = read_sidecar(reference_dir).set_index("file_name").sort_index()
-    factors = ["content_id", "config_index", "drive_level", "split"]
+    factors = ["content_id", "drive_level", "split"]
 
     for arm_dir in dirs[1:]:
         current = read_sidecar(arm_dir).set_index("file_name").sort_index()
@@ -266,5 +269,5 @@ def validate_pairing(root: Path) -> Dict[str, int]:
         "arms": len(dirs),
         "rows_per_arm": len(reference),
         "contents": int(reference["content_id"].nunique()),
-        "configs": int(reference["config_index"].nunique()),
+        "levels": int(reference["drive_level"].nunique()),
     }

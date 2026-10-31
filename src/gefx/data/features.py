@@ -1,6 +1,6 @@
 """Extracao das features de audio.
 
-A semantica aqui e contrato com os artefatos ja em disco: os caches `.npz` e os
+A semantica aqui e contrato com os artefatos ja em disco: os caches `.npy` e os
 `feature_scalers.pkl` do `second_main_run` foram construidos com exatamente estas
 transformacoes. Mudar qualquer uma invalida os caches (use `--rebuild-cache`) e
 torna os modelos treinados incomparaveis.

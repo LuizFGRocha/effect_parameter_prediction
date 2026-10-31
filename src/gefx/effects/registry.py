@@ -49,7 +49,12 @@ REGISTRY: Dict[str, Dict[str, dict]] = {
     "distortion": {
         "lsp": dict(
             path=LSP, plugin_name="Clipper Mono",
+            # Os mesmos fixos do `lsp-tanh` do POC II (experiments/disent_roster.yaml):
+            # no limiar padrao do plugin (-3 dB) a curva satura bem depois da do
+            # pedalboard, e o MAE "exato" mediria a calibracao, nao o modelo.
             fixed={"clipper_enable": True, "clipper_sigmoid_function": "Hyperbolic tangent",
+                   "clipper_sigmoid_threshold_db": -12.0, "clipper_dc_offset": 0.0,
+                   "clipper_sigmoid_pumping_db": 0.0,
                    "enable_input_lufs_limitation": False, "overdrive_protection": False,
                    "boosting_mode": False, "output_gain_db": 0.0, "dithering_mode": "None"},
             map={"drive_db": ("input_gain_db", ident, True)},
@@ -91,10 +96,14 @@ REGISTRY: Dict[str, Dict[str, dict]] = {
                    "lfo_type": "Sine", "feedback_on": True,
                    "input_gain_db": 0.0, "output_gain_db": 0.0,
                    "dry_amount_db": 0.0, "wet_amount_db": 0.0, "dry_wet_balance": 50.0},
+            # O `feedback_gain_db` do plugin vai ate -1 dB: acima de 0,891 (~4% dos
+            # sorteios em [0,7; 0,9]) o render satura nesse teto. O atraso central
+            # do pedalboard e o atraso minimo da varredura no LSP nao sao a mesma
+            # grandeza: so a ordem e comparavel.
             map={"rate_hz": ("rate_hz", ident, True),
                  "depth": ("depth_ms", onto(0.5, 12.0), False),
                  "feedback": ("feedback_gain_db", to_db, True),
-                 "centre_delay_ms": ("min_depth_ms", ident, True)},
+                 "centre_delay_ms": ("min_depth_ms", onto(0.1, 3.0), False)},
         ),
     },
     "phaser": {

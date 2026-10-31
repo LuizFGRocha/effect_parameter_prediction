@@ -2,7 +2,7 @@
 
 Serve a dois propositos na validacao cross-implementation:
 
-1. Descobrir os parametros e seus nomes (`--list`).
+1. Descobrir os parametros e seus nomes (`gefx inspect-plugin <vst3>`, sem opcoes).
 2. Recuperar o mapeamento knob normalizado -> unidade fisica, varrendo
    `raw_value` de 0 a 1 e lendo o valor exibido (`--sweep`). E isso que permite
    renderizar um plugin de terceiro em 2.0 Hz de verdade, em vez de assumir que o
