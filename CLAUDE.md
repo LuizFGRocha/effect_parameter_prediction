@@ -504,8 +504,17 @@ old encoder and protocol):
   every 7-arm slice in one `gefx disent loo` process reused the first one's
   standardizer, held-out arm included (all 16 `loo/*/standardizer.npz` were equal; the
   k=7 point of the diversity curve reuses `loo/byod-mxr`). The key is now (arm, file).
-  **`validacao/encoder/loo/` and the diversity k=7 point are stale and must be
-  retrained** (move `loo/` aside; `scripts/poc2_validacao.sh` reruns it).
+  Retrained on 2026-10-31/11-01 (2 seeds; the old runs are in
+  `removidos/loo_padronizador_errado/`; now 8 distinct standardizers, one per held-out
+  arm). Seed-paired cost, new (old): lsp-tanh +1.9 (+0.2), pedalboard-tanh −4.6 (−5.1),
+  lsp-arctan −2.0 (−5.1), lsp-sine +2.6 (−1.4), lsp-hardclip −34.3 (−35.0),
+  byod-bigmuff −31.1 (−29.3), byod-mxr −28.4 (−32.8), dm-rat −15.3 (−13.4); mean
+  −13.9 (−15.2); by stratum S1 −1.3, S2 −11.2, S3 −24.9. Same picture: smooth
+  waveshapers transfer, hardclip and the pedals don't. Per-pedal centering now barely
+  helps (mxr 36.2 → 38.4, bigmuff 34.5 → 34.9). Diversity curve (byod-mxr held out),
+  k = 1…7: seed 1 25.1 24.0 25.4 28.4 30.9 36.5 40.9, seed 2 24.5 22.8 27.5 26.2 29.4
+  38.1 31.6 (k=7 was 31.4 / 32.5). The jump enters at k=6 (byod-bigmuff); k=7 (+ Rat)
+  differs by 9 pt between seeds, so it carries no conclusion.
 - **Transfer cost** pairs each LOO seed with the same seed of the all-arms encoder
   (`supcon`, `supcon_s2`); it compared the 2-seed LOO mean with seed 1 alone. On the
   old LOO runs: mean cost −15.2 pt (was −17.0), lsp-tanh +0.2 (was −2.5). The diversity
